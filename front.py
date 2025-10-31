@@ -2,13 +2,12 @@ from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import QThread, pyqtSignal
 import time
 from functools import partial
-from components.ui_mainwindow import Ui_MainWindow
-from components.test_bar import TestBar
-from components.modal_info import ModalDialog
-from components.modal_result import TestResultDialog
+from UI.components.ui_mainwindow import Ui_MainWindow
+from UI.components.test_bar import TestBar
+from UI.components.modal_info import ModalDialog
+from UI.components.modal_result import TestResultDialog
 from sensor_library import *
 import os
-
 
 # Поток для функции `wait_tests`
 class WaitTestsThread(QThread):

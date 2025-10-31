@@ -1,6 +1,6 @@
 # components/test_bar.py
 from PyQt5 import QtWidgets, QtCore
-from components.progress_bar_component import MyProgressBar
+from UI.components.progress_bar_component import MyProgressBar
 
 class TestBar(QtWidgets.QFrame):
     def change_status(self, status):
