@@ -1,56 +1,80 @@
-# test_runner.py
-# Возможно необходимо будет добавить команду catkin_make для обновления кэше при запуске на новых устройствах
-# Команда catkin_make так же нужна при добавлении нового датчика
-import subprocess
-from sensor_library import get_sensor
 import os
-import subprocess
 import time
+import subprocess
+import xml.etree.ElementTree as ET
 
-def run_test(sensor_type: str, sensor_name: str):
-    sensor = get_sensor(sensor_type, sensor_name)
-    if not sensor:
-        return f"Датчик {sensor_name} не найден для типа {sensor_type}"
+def run_test(sensor_type: str, sensor: list):
 
-    # Пути
-    catkin_ws = os.environ.get("CATKIN_WS", os.path.join(os.path.abspath(os.path.dirname(__file__)), "catkin_ws"))
-    catkin_setup = os.path.join(catkin_ws, "devel", "setup.bash")
-    sensor_pkg = sensor["ros_pkg"]
-    launch_file = sensor.get("launch_file", "scene_17.launch")
-    test_scene = sensor.get("test_scene", "scene_17")
+    sensor_name = sensor['name']
+    scene = sensor['test_world']
 
-    # Команда запуска ROS-сцены
-    roslaunch_cmd = f"source {catkin_setup} && roslaunch {sensor_pkg} {launch_file}"
+    world_path = f'resources/worlds/{scene}.world'
+    camera_model_path = f'resources/sensors/{sensor_type}/{sensor_name}.sdf'
+    base_world_path = 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world'
 
+    generate_world(world_path, camera_model_path, base_world_path)
+
+    catkin_setup_dir = 'catkin_ws/devel/setup.bash'
+    sensor_pkg = 'scenario_test_pkg'
+    launch_file = 'scenario.launch'
+
+    print(f"Запуск сцены {scene} для датчика {sensor_name}")
+    run_gazebo(catkin_setup_dir, sensor_pkg, launch_file)
+
+    if sensor_type == 'camera':
+        test_result = run_camera_test()
+    if sensor_type == 'tactile':
+        test_result = run_tactile_test()
+    if sensor_type == 'rfid':
+        test_result = run_camera_test()
+
+
+    time.sleep(10)
+    kill_gazebo()
+
+    return test_result
+
+def run_camera_test():
+    pass
+
+def run_tactile_test():
+    pass
+
+def run_camera_test():
+    pass
+
+def generate_world(world_path, camera_model_path, base_world_path):
+    tree = ET.parse(world_path)
+    root = tree.getroot()
+    world = root.find('world')
+    camera_tree = ET.parse(camera_model_path)
+    camera_root = camera_tree.getroot()
+    camera_model = camera_root.find('model')
+    if camera_model is None:
+        print("Error: No model found in camera SDF file")
+        return
+    world.append(camera_model)
+    tree.write(base_world_path, encoding='utf-8', xml_declaration=True)
+
+def run_gazebo(catkin_setup_dir, sensor_pkg, launch_file):
+    roslaunch_cmd = f"source {catkin_setup_dir} && roslaunch {sensor_pkg} {launch_file}"
+    print('--->', roslaunch_cmd)
     try:
-        # Запуск Gazebo сцены с ROS-датчиком
-        print(f"Запуск сцены {test_scene} для датчика {sensor_name}...")
         subprocess.Popen(["bash", "-c", roslaunch_cmd])
-
-        # Подождем, чтобы сцена загрузилась
-        time.sleep(5)
-
-        # Определение пути к тест-скрипту
-        test_script_name = f"test_{sensor_type.lower()}_{sensor_name.lower()}.py"
-        test_script_path = os.path.join(catkin_ws, "src", sensor_pkg, "scripts", test_script_name)
-
-        if os.path.exists(test_script_path):
-            print(f"Запуск теста: {test_script_name}")
-            subprocess.Popen(["python3", test_script_path])
-        else:
-            print(f"[!] Тест-скрипт не найден: {test_script_path}")
-
-        return f"Тест '{test_script_name}' запущен (если существует). Сцена: {test_scene}."
-
+        time.sleep(10)
     except Exception as e:
-        return f"Ошибка при запуске теста: {e}"
-
-
+        return f"Ошибка при запуске gazebo: {e}"
 
 def kill_gazebo():
-    try:
+    try: # TODO: что-то он не ловит ошибки
         subprocess.run(["pkill", "-f", "gzserver"], check=False)
         subprocess.run(["pkill", "-f", "gzclient"], check=False)
         print("🔁 Gazebo был завершён принудительно.")
+        time.sleep(5)
     except Exception as e:
         print("⚠️ Ошибка при завершении Gazebo:", e)
+
+def get_sensor_data():
+    pass 
+
+

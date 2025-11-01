@@ -1,7 +1,6 @@
 import sys
 
 from os import system
-from datetime import datetime
 
 from sensor_library import get_sensor_types, get_sensors_by_type, add_sensor, get_sensor
 from test_runner import run_test
@@ -19,17 +18,20 @@ def console_menu():
         for s in get_sensors_by_type(t): print("-", s["name"])
     elif choice == "3":
         system("clear")
-        print("Типы датчиков: ")
-        for t in get_sensor_types(): print("-", t)
-        t = input("Типы: ")
-        for s in get_sensors_by_type(t): print("-", s["name"])
-        n = input("Имя: ")
+        # print("Типы датчиков: ") # Временная мера для удобства
+        # for t in get_sensor_types(): print("-", t)
+        # t = input("Типы: ")
+        # for s in get_sensors_by_type(t): print("-", s["name"])
+        # n = input("Имя: ")
+        t = 'camera'
+        n = 'model'
         sensor = get_sensor(t, n)
         if not sensor:
             system("clear")
             print(f"Ошибка: датчик '{n}' не найден в типе '{t}'.")
-            pass
-        result = run_test(sensor) #Todo: Придумать, как реализовать вывод
+            return
+        system("clear")
+        result = run_test(t, sensor) #Todo: Придумать, как реализовать вывод
     elif choice == "4":
         system("clear")
         sys.exit()
