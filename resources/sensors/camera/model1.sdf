@@ -1,17 +1,32 @@
 <?xml version="1.0" ?>
 <sdf version="1.6">
-  <model name="depth_camera_1">
+  <model name="mono_camera">
     <pose>0 0 0.5 0 0 0</pose>
     <static>true</static>
+    
     <link name="camera_link">
       <collision name="collision">
-        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+        <geometry>
+          <box>
+            <size>0.1 0.05 0.05</size>
+          </box>
+        </geometry>
       </collision>
+      
       <visual name="visual">
-        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+        <geometry>
+          <box>
+            <size>0.05 0.05 0.05</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.8 0.2 0.2 1</ambient>
+          <diffuse>0.8 0.2 0.2 1</diffuse>
+        </material>
       </visual>
-      <sensor name="depth_cam_sensor" type="depth">
-        <camera name="depth_camera">
+      
+      <sensor name="mono_cam_sensor" type="camera">
+        <camera name="mono_camera">
           <horizontal_fov>1.3962634</horizontal_fov>
           <image>
             <width>1280</width>
@@ -28,16 +43,13 @@
             <stddev>0.005</stddev>
           </noise>
         </camera>
-        <plugin name="depth_camera_plugin" filename="libgazebo_ros_depth_camera.so">
-          <cameraName>sensor</cameraName>  <!-- Changed camera name -->
+        <plugin name="camera_plugin" filename="libgazebo_ros_camera.so">
+          <cameraName>mono_camera</cameraName>
+          <frameName>camera_optical_frame</frameName>
           <ros>
-            <namespace>/sensor</namespace>  <!-- Changed namespace -->
-            <argument>image_raw:=image_raw</argument>
-            <argument>depth/image_raw:=depth/image_raw</argument>
-            <argument>points:=points</argument>
+            <namespace>/mono_camera</namespace>
+            <remapping>image_raw:=image_raw</remapping>
           </ros>
-          <frame_name>camera_depth_optical_frame</frame_name>
-          <optical_frame_id>camera_depth_optical_frame</optical_frame_id>
           <update_rate>30</update_rate>
         </plugin>
       </sensor>
