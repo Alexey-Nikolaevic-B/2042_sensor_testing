@@ -104,6 +104,9 @@ class Node:
         self.save_data = save_data
         self.save_path = save_path
 
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
     def launch(self):
         print(f"\n✅ Node \'sendor_data_receiver\' is working")
         self.ros_node = rospy.init_node('sendor_data_receiver', anonymous=True)
