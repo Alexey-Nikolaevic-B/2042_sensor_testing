@@ -3,7 +3,7 @@
 /workspace.xml
 __pycache__/
 
-captured_data/
+captured_data/*.png
 
 catkin_ws/.catkin_workspace
 catkin_ws/devel/
