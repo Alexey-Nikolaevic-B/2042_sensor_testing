@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from cv_bridge import CvBridge, CvBridgeError
 
 from ros_manager import Gazebo
@@ -53,6 +54,7 @@ class Test_manager:
         # self.gazebo.clear_world() # сделать загрузку новых датчиков без закрытия мира.
 
         self.gazebo.kill()
+        time.sleep(2)
         print('\n==========================================================')
         return result
 

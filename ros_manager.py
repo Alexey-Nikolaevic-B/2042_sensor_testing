@@ -20,10 +20,10 @@ class Ros:
                 stderr=subprocess.DEVNULL,
                 text=True
             )
-            print(f"✅ Ros master started with PID: {self.ros_process.pid}")
+            print(f"✅ Ros master started with PID: {self.ros_process.pid}") # TODO: это немного не тот PID
             print("Process is running in background...")
             time.sleep(2)
-            return f"Ros started successfully with PID: {self.ros_process.pid}"
+            return f"Ros started successfully with PID: {self.ros_process.pid}"  
             
         except Exception as e:
             return f"Ошибка при запуске gazebo: {e}"
@@ -46,19 +46,19 @@ class Gazebo:
         world.append(camera_model)
         tree.write(base_world_path, encoding='utf-8', xml_declaration=True)
 
-    def launch(self, catkin_setup_dir, sensor_pkg, launch_file):
+    def launch(self, catkin_setup_dir, sensor_pkg, launch_file): #TODO: сделать получение ошибок из процесса
         roslaunch_cmd = f"source {catkin_setup_dir} && roslaunch {sensor_pkg} {launch_file}"
         try:
             self.gazebo_process = subprocess.Popen(
-                ["bash", "-c", roslaunch_cmd], 
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True
+                ["bash", "-c", roslaunch_cmd]
+                # stdout=subprocess.DEVNULL,
+                # stderr=subprocess.DEVNULL,
+                # text=True
             )
             print(f"\n✅ Gazebo started with PID: {self.gazebo_process.pid}")
-            print("Process is running in background...")
+            # print("Process is running in background...")
             time.sleep(5)
-            return f"Gazebo started successfully with PID: {self.gazebo_process.pid}"
+            return f"Gazebo started successfully with PID: {self.gazebo_process.pid}" # TODO: это немного не тот PID
             
         except Exception as e:
             return f"Ошибка при запуске gazebo: {e}"
@@ -105,6 +105,7 @@ class Node:
         self.save_path = save_path
 
     def launch(self):
+        print(f"\n✅ Node \'sendor_data_receiver\' is working")
         self.ros_node = rospy.init_node('sendor_data_receiver', anonymous=True)
 
     def save_sensor_data(self, msg): # Эту функцию нужно переделать

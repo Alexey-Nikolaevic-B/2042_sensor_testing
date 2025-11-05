@@ -1,2 +1,0 @@
-RFID_Sensor_Plugin_gazebo-main/gazebo_to_ros_tf:RFID_Sensor_Plugin_gazebo-main/rfid_antenna_plugin:RFID_Sensor_Plugin_gazebo-main/rfid_tag_plugin:scenario_test_pkg
--DCATKIN_DEVEL_PREFIX=/home/artur/PycharmProjects/2042_sensor_testing/catkin_ws/devel -DCMAKE_INSTALL_PREFIX=/home/artur/PycharmProjects/2042_sensor_testing/catkin_ws/install -G Unix Makefiles
