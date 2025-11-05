@@ -18,7 +18,7 @@ sensor_library = {
             }
         }
     ],
-    "tactile": [
+    "tactile": [ #Сюда пока не смотрите
         {
             "name": "Wacoh-Tech DynPick",
             "ros_launch": "test_scripts/launch_wacoh_dynpick.sh",
@@ -31,7 +31,7 @@ sensor_library = {
             }
         },
     ],
-    "rfid": [
+    "rfid": [ #Сюда пока не смотрите
         {
             "name": "UHF RFID Reader",
             "ros_pkg": "scenario_test_pkg",
