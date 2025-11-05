@@ -16,6 +16,13 @@ class Test_manager:
         self.MESSAGE_TIMEOUT = 10
         self.SAVE_SENSOR_DATA = True
         self.SAVE_DIR = 'captured_data'
+        self.ros = Ros()
+        self.node = Node(self.MESSAGE_TIMEOUT, self.SAVE_SENSOR_DATA, self.SAVE_DIR)
+        self.gazebo = Gazebo()
+        
+    def launch(self):
+        self.ros.launch()
+        self.node.launch()
 
     def kill(self):
         self.ros.kill()
@@ -23,47 +30,43 @@ class Test_manager:
         self.node.kill()
 
     def new_sensor(self, sensor_type: str, sensor: list):
-        self.ros = Ros()
-        self.gazebo = Gazebo()
-        self.node = Node(self.MESSAGE_TIMEOUT, self.SAVE_SENSOR_DATA, self.SAVE_DIR)
-
         result = []
 
         self.sensor_name = sensor['name']
-        print(self.sensor_name)
         self.scene = sensor['test_world']
         self.world_path = f'{self.WORLDS_PATH}{self.scene}.world'
         self.camera_model_path = f'{self.SENSORS_PATH}{sensor_type}/{self.sensor_name}.sdf'
 
         self.gazebo.generate_world(self.world_path, self.camera_model_path, self.BASE_WORLD_PATH)
-        self.gazebo.run(self.CATKIN_SETUP_DIR, self.SENSOR_PKG, self.LAUNCH_FILE)
+        self.gazebo.launch(self.CATKIN_SETUP_DIR, self.SENSOR_PKG, self.LAUNCH_FILE)
 
         tests_to_run = list(sensor['tests'].keys())
 
+        print('\n========================  Tests  =========================')
         for test_name in tests_to_run:
             if test_name in test_functions:
                 test_result = test_functions[test_name](self.node)
                 result.append(test_result)
             else:
-                print(f"Warning: Test '{test_name}' not found\n")
+                print(f"\n⚠️  Warning: Test '{test_name}' not found")
 
         # self.gazebo.clear_world() # сделать загрузку новых датчиков без закрытия мира.
 
-        self.kill()
-
+        self.gazebo.kill()
+        print('\n==========================================================')
         return result
 
 def depth_perception_test(node):  #TODO: это только примеры, нужны тесты
-    topic = '/sensor/depth/image_raw'
-    
-    distances = [1.0, 3.0, 5.0]
-    msg = node.get_sensor_data(topic)
-    encoding = msg.encoding
-
     print(f"\nТест на глубину")
     print("----------------------------------------------------------")
     print(f"{'Z_true(m)':>10} {'Z_meas(m)':>10} {'Δ_abs(m)':>10} {'Δ_rel(%)':>10}")
     print("----------------------------------------------------------")
+
+    topic = '/sensor/depth/image_raw'
+    msg = node.get_sensor_data(topic)
+    encoding = msg.encoding
+    
+    distances = [1.0, 3.0, 5.0]
     
     for distance in distances:
         try:
@@ -92,10 +95,12 @@ def depth_perception_test(node):  #TODO: это только примеры, н�
 def view_angle_test(node):
     print(f"\nТест на угол обзора")
     print("----------------------------------------------------------")
-    print(f"Нужно создасть сам тест")
+    print(f"Нужно создать сам тест")
     print("----------------------------------------------------------")
+
     topic = '/mono_camera/image_raw'
     msg = node.get_sensor_data(topic)
+
     return 0 #TODO: Что-то должен возращать, но пока лень
 
 test_functions = {

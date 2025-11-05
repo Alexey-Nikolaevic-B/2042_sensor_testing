@@ -28,9 +28,10 @@ def console_menu(manager):
             print(f"Ошибка: датчик '{n}' не найден в типе '{t}'.")
             return
         system("clear")
+        manager.launch()
         result = manager.new_sensor(t, sensor) #Todo: Придумать, как реализовать вывод
     elif choice == "4":
-        system("clear")
+        manager.kill()
         sys.exit()
     else:
         system("clear")
