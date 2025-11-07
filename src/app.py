@@ -90,7 +90,8 @@ class App:
         self.node.launch()
         result = self.test_manager.test_sensor(sensor_type, sensor)
 
-    def _exit(self):
+    def exit(self):
+        print('\nЗавершение процессов:')
         self.ros.kill()
         self.node.kill()
         self.gazebo.kill()
