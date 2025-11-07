@@ -35,7 +35,7 @@ class App:
         elif option == "3":
             self._launch_sensor_test()
         elif option == "4":
-            self.exit()
+            sys.exit()
         else:
             system("clear")
             print("Неверный выбор. Попробуйте снова.")

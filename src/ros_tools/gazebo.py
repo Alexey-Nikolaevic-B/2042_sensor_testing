@@ -19,8 +19,11 @@ class Gazebo:
     def launch(self, catkin_setup_dir, sensor_pkg, launch_file): #TODO: сделать получение ошибок из процесса
         roslaunch_cmd = f"source {catkin_setup_dir} && roslaunch {sensor_pkg} {launch_file}"
         try:
-            self.gazebo_process = subprocess.Popen(["bash", "-c", roslaunch_cmd])
-            print(f"\n✅ Gazebo started with PID: {self.gazebo_process.pid}")
+            self.gazebo_process = subprocess.Popen(["bash", "-c", roslaunch_cmd], 
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True)
+            print(f"✅ Gazebo started with PID: {self.gazebo_process.pid}")
             # print("Process is running in background...")
             time.sleep(5)
             return f"Gazebo started successfully with PID: {self.gazebo_process.pid}" # TODO: это немного не тот PID
@@ -32,6 +35,6 @@ class Gazebo:
         try:
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
-            print("\n💀 Gazebo was killed.")
+            print("💀 Gazebo was killed.")
         except Exception as e:
             print("⚠️ Ошибка при завершении Gazebo:", e)

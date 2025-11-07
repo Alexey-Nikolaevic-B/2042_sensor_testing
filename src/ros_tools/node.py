@@ -16,7 +16,7 @@ class Node:
             os.makedirs(save_path)
 
     def launch(self):
-        print(f"\n✅ Node \'sendor_data_receiver\' is working")
+        print(f"✅ Node \'sendor_data_receiver\' is working")
         self.ros_node = rospy.init_node('sendor_data_receiver', anonymous=True)
 
     def save_sensor_data(self, msg): # Эту функцию нужно переделать
@@ -64,4 +64,4 @@ class Node:
         
     def kill(self):
         rospy.signal_shutdown("Done")
-        print("\n💀 Node was killed.")
+        print("💀 Node was killed.")
