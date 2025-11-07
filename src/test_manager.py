@@ -2,11 +2,8 @@ import numpy as np
 import time
 from cv_bridge import CvBridge, CvBridgeError
 
-from ros_manager import Gazebo
-from ros_manager import Ros, Gazebo, Node
-
-class Test_manager:
-    def __init__(self):
+class TestManager:
+    def __init__(self, config, ros, node, gazebo):
         self.BASE_WORLD_PATH = 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world'
         self.SENSOR_PKG = 'scenario_test_pkg'
         self.LAUNCH_FILE = 'scenario.launch'
@@ -17,20 +14,12 @@ class Test_manager:
         self.MESSAGE_TIMEOUT = 10
         self.SAVE_SENSOR_DATA = True
         self.SAVE_DIR = 'captured_data'
-        self.ros = Ros()
-        self.node = Node(self.MESSAGE_TIMEOUT, self.SAVE_SENSOR_DATA, self.SAVE_DIR)
-        self.gazebo = Gazebo()
-        
-    def launch(self):
-        self.ros.launch()
-        self.node.launch()
 
-    def kill(self):
-        self.ros.kill()
-        self.gazebo.kill()
-        self.node.kill()
+        self.ros = ros
+        self.node = node
+        self.gazebo = gazebo
 
-    def new_sensor(self, sensor_type: str, sensor: list):
+    def test_sensor(self, sensor_type: str, sensor: list):
         result = []
 
         self.sensor_name = sensor['name']
