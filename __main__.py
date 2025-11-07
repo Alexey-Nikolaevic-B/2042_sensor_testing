@@ -1,9 +1,8 @@
 import traceback
 from src.app import App
 
-if __name__ == '__main__':
-    config = 1        
-    console = App(config)
+if __name__ == '__main__':    
+    console = App()
     
     try:
         console.run()

@@ -4,29 +4,16 @@ from os import system
 
 from .sensor_library import get_sensor_types, get_sensors_by_type, get_sensor
 from .test_manager import TestManager
-
 from .ros_tools import Gazebo, Node, Ros
 
-BASE_WORLD_PATH = 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world'
-SENSOR_PKG = 'scenario_test_pkg'
-LAUNCH_FILE = 'scenario.launch'
-CATKIN_SETUP_DIR = 'catkin_ws/devel/setup.bash'
-TEST_SCRIPT_PATH = 'catkin_ws/src/scenario_test_pkg/scripts/get_sensor_data.py'
-WORLDS_PATH = 'resources/worlds/'
-SENSORS_PATH = 'resources/sensors/'
-MESSAGE_TIMEOUT = 10
-SAVE_SENSOR_DATA = True
-SAVE_DIR = 'captured_data'
-
+import config
 class App:
-    def __init__(self, config):
-        self.config = config
-
+    def __init__(self):
         self.ros = Ros()
-        self.node = Node(MESSAGE_TIMEOUT, SAVE_SENSOR_DATA, SAVE_DIR)
+        self.node = Node(config.MESSAGE_TIMEOUT, config.SAVE_SENSOR_DATA, config.SAVE_DIR)
         self.gazebo = Gazebo()
 
-        self.test_manager = TestManager(self.config, self.ros, self.node, self.gazebo)
+        self.test_manager = TestManager(self.ros, self.node, self.gazebo)
 
     def run(self):
         while True:
@@ -48,7 +35,7 @@ class App:
         elif option == "3":
             self._launch_sensor_test()
         elif option == "4":
-            self._exit()
+            self.exit()
         else:
             system("clear")
             print("Неверный выбор. Попробуйте снова.")

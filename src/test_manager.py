@@ -1,20 +1,16 @@
 import numpy as np
 import time
 from cv_bridge import CvBridge, CvBridgeError
+import config
 
 class TestManager:
-    def __init__(self, config, ros, node, gazebo):
-        self.BASE_WORLD_PATH = 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world'
-        self.SENSOR_PKG = 'scenario_test_pkg'
-        self.LAUNCH_FILE = 'scenario.launch'
-        self.CATKIN_SETUP_DIR = 'catkin_ws/devel/setup.bash'
-        self.TEST_SCRIPT_PATH = 'catkin_ws/src/scenario_test_pkg/scripts/get_sensor_data.py'
-        self.WORLDS_PATH = 'resources/worlds/'
-        self.SENSORS_PATH = 'resources/sensors/'
-        self.MESSAGE_TIMEOUT = 10
-        self.SAVE_SENSOR_DATA = True
-        self.SAVE_DIR = 'captured_data'
+    BASE_WORLD_PATH = config.BASE_WORLD_PATH
+    SENSOR_PKG = config.SENSOR_PKG
+    LAUNCH_FILE = config.LAUNCH_FILE
+    CATKIN_SETUP_DIR = config.CATKIN_SETUP_DIR
+    WORLDS_PATH = config.WORLDS_PATH
 
+    def __init__(self, ros, node, gazebo):
         self.ros = ros
         self.node = node
         self.gazebo = gazebo
