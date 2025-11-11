@@ -7,13 +7,13 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 
 class Node:
-    def __init__(self, timeout, save_data, save_path):
-        self.timeout = timeout
-        self.save_data = save_data
-        self.save_path = save_path
+    def __init__(self, config):
+        self.TIMEOUT = config.get('TIMEOUT', 10)
+        self.SAVE_DATA = config.get('SAVE_DATA', True)
+        self.SAVE_PATH = config.get('SAVE_DIR', './captured_data')   
 
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
+        if not os.path.exists(self.SAVE_PATH):
+            os.makedirs(self.SAVE_PATH)
 
     def launch(self):
         print(f"✅ Node \'sendor_data_receiver\' is working")
@@ -27,7 +27,7 @@ class Node:
                 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{timestamp}.png"
-                full_path = os.path.join(self.save_path, filename)
+                full_path = os.path.join(self.SAVE_PATH, filename)
                 
                 cv2.imwrite(full_path, depth_visual)
                 print(f"📂 Sensor captured data saved: {full_path}")
@@ -38,7 +38,7 @@ class Node:
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{timestamp}.png"
-                full_path = os.path.join(self.save_path, filename)
+                full_path = os.path.join(self.SAVE_PATH, filename)
                 
                 cv2.imwrite(full_path, depth_visual)
                 print(f"📂 Sensor captured data saved: {full_path}")
@@ -48,7 +48,7 @@ class Node:
 
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"{timestamp}.png"
-                full_path = os.path.join(self.save_path, filename)
+                full_path = os.path.join(self.SAVE_PATH, filename)
 
                 cv2.imwrite(full_path, image)
                 print(f"📂 Sensor captured data saved: {full_path}")
@@ -58,8 +58,8 @@ class Node:
             return None
 
     def get_sensor_data(self, topic): 
-        msg = rospy.wait_for_message(topic, Image, timeout=self.timeout)
-        if self.save_data: self.save_sensor_data(msg)
+        msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
+        if self.SAVE_DATA: self.save_sensor_data(msg)
         return msg
         
     def kill(self):

@@ -4,16 +4,14 @@ from os import system
 
 from .sensor_library import get_sensor_types, get_sensors_by_type, get_sensor
 from .test_manager import TestManager
-from .ros_tools import Gazebo, Node, Ros
+from .simulator.simulator_factory import SimulatorFactory
 
-import config
+from config import CONFIG
+
 class App:
     def __init__(self):
-        self.ros = Ros()
-        self.node = Node(config.MESSAGE_TIMEOUT, config.SAVE_SENSOR_DATA, config.SAVE_DIR)
-        self.gazebo = Gazebo()
-
-        self.test_manager = TestManager(self.ros, self.node, self.gazebo)
+        self.simulator = SimulatorFactory.create_simulator('gazebo', CONFIG)
+        self.test_manager = TestManager(self.simulator, CONFIG)
 
     def run(self):
         while True:
@@ -73,13 +71,10 @@ class App:
             print(f"Ошибка: датчик '{sensor_name}' не найден в типе '{sensor_type}'.")
             return
         system("clear")
-        self.ros.launch()
-        self.node.launch()
+        self.simulator.launch()
         result = self.test_manager.test_sensor(sensor_type, sensor)
 
     def exit(self):
         print('\nЗавершение процессов:')
-        self.ros.kill()
-        self.node.kill()
-        self.gazebo.kill()
+        self.simulator.kill()
         sys.exit()

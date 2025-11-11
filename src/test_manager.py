@@ -1,20 +1,17 @@
 import numpy as np
-import time
 from cv_bridge import CvBridge, CvBridgeError
-import config
 
 class TestManager:
-    BASE_WORLD_PATH = config.BASE_WORLD_PATH
-    SENSOR_PKG = config.SENSOR_PKG
-    LAUNCH_FILE = config.LAUNCH_FILE
-    CATKIN_SETUP_DIR = config.CATKIN_SETUP_DIR
-    WORLDS_PATH = config.WORLDS_PATH
-    SENSORS_PATH = config.SENSORS_PATH
 
-    def __init__(self, ros, node, gazebo):
-        self.ros = ros
-        self.node = node
-        self.gazebo = gazebo
+    def __init__(self, simulator, config):
+        self.BASE_WORLD_PATH = config.get('BASE_WORLD_PATH')
+        self.SENSOR_PKG = config.get('SENSOR_PKG')
+        self.LAUNCH_FILE = config.get('LAUNCH_FILE')
+        self.CATKIN_SETUP_DIR = config.get('CATKIN_SETUP_DIR')
+        self.WORLDS_PATH = config.get('WORLDS_PATH')
+        self.SENSORS_PATH = config.get('SENSORS_PATH')
+
+        self.simulator = simulator
 
     def test_sensor(self, sensor_type: str, sensor: list):
         result = []
@@ -27,8 +24,6 @@ class TestManager:
             else:
                 print(f"\n⚠️  Warning: Test '{test_name}' not found")
 
-        self.gazebo.kill()
-        time.sleep(1)
         print('\n==========================================================')
         return result
 
@@ -50,13 +45,12 @@ class TestManager:
         for world in worlds:
             world_path = f'{self.WORLDS_PATH}{test_name}/{world}.world'
             camera_model_path = f'{self.SENSORS_PATH}{sensor_type}/{sensor_name}.sdf'
-            self.gazebo.generate_world(world_path, camera_model_path, self.BASE_WORLD_PATH) # Создаем мир, который запускает газибо. Объединяя мир и камеру.
-            self.gazebo.launch(self.CATKIN_SETUP_DIR, self.SENSOR_PKG, self.LAUNCH_FILE) # Запускаем газибо со сценой
-            
-            msg = self.node.get_sensor_data(topic) # Тут получаем данные из сенсора по топику
+
+            self.simulator.generate_world(world_path, camera_model_path, self.BASE_WORLD_PATH) # Создаем мир, который запускает газибо. Объединяя мир и камеру.
+            self.simulator.open_scene()
+            msg = self.simulator.receive_sensor_data(topic)
+
             sensor_data.append(msg)
-            time.sleep(5)
-            self.gazebo.kill()
         print('----------------------------------------------------------')
 
         # 3. ОБРАБОТКА И АНАЛИЗ ДАННЫХ
