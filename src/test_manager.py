@@ -13,7 +13,7 @@ class TestManager:
 
         self.simulator = simulator
 
-    def test_sensor(self, sensor_type: str, sensor: list):
+    def run_test(self, sensor_type: str, sensor: list):
         result = []
         tests_to_run = list(sensor['tests'].keys())
         print('\n========================  Tests  =========================')
@@ -26,6 +26,8 @@ class TestManager:
 
         print('\n==========================================================')
         return result
+
+
 
     def depth_perception_test(self, sensor_type, sensor):
         """

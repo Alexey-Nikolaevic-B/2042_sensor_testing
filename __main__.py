@@ -1,15 +1,18 @@
 import traceback
-from src.app import App
 
-if __name__ == '__main__':    
-    console = App()
-    
+from src.core import Core
+from src.console import ConsoleUi
+
+if __name__ == '__main__':
+    core = Core()
+    ui = ConsoleUi(core)
+
     try:
-        console.run()
+        ui.run()
     except Exception as e:
         print(f"\n❌ Erorr while running.")
         print(f"\nDetails:")
         traceback.print_exc()
         
     finally:
-        console.exit()
+        core.kill()

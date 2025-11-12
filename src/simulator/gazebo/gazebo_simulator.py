@@ -18,6 +18,8 @@ class GazeboSimulator(Simulator):
         self.ros  = Ros() 
         self.node = Node(CONFIG)
 
+        self.launch()
+
     def generate_world(self, world_path, camera_model_path, base_world_path):
         tree = ET.parse(world_path)
         root = tree.getroot()
@@ -55,7 +57,7 @@ class GazeboSimulator(Simulator):
         msg = self.node.get_sensor_data(topic)
     
         print("💀 Gazebo was killed.")
-        subprocess.run(["pkill", "-f", "gzserver"], check=False) # костыль, который вынуждает, перезапускать газибо
+        subprocess.run(["pkill", "-f", "gzserver"], check=False) # костыль, который перезапускать газибо
         subprocess.run(["pkill", "-f", "gzclient"], check=False)
         return msg 
 
