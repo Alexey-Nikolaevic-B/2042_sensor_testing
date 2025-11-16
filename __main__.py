@@ -1,14 +1,13 @@
 import traceback
 
 from src.core import Core
-from src.console import ConsoleUi
+from src.console import run
 
 if __name__ == '__main__':
     core = Core()
-    ui = ConsoleUi(core)
 
     try:
-        ui.run()
+        run(core)
     except Exception as e:
         print(f"\n❌ Erorr while running.")
         print(f"\nDetails:")
