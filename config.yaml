@@ -1,0 +1,9 @@
+BASE_WORLD_PATH: catkin_ws/src/scenario_test_pkg/worlds/base_world.world
+CATKIN_SETUP_DIR: catkin_ws/devel/setup.bash
+LAUNCH_FILE: scenario.launch
+MESSAGE_TIMEOUT: 11
+SAVE_DIR: captured_data
+SAVE_SENSOR_DATA: true
+SENSORS_PATH: resources/sensors/
+SENSOR_PKG: scenario_test_pkg
+WORLDS_PATH: resources/worlds/

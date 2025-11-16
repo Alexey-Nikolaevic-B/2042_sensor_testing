@@ -7,10 +7,10 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 
 class Node:
-    def __init__(self, config):
-        self.TIMEOUT = config.get('TIMEOUT', 10)
-        self.SAVE_DATA = config.get('SAVE_DATA', True)
-        self.SAVE_PATH = config.get('SAVE_DIR', './captured_data')   
+    def __init__(self, CONFIG):
+        self.TIMEOUT = CONFIG['MESSAGE_TIMEOUT']
+        self.SAVE_DATA = CONFIG['SAVE_SENSOR_DATA']
+        self.SAVE_PATH = CONFIG['SAVE_DIR']
 
         if not os.path.exists(self.SAVE_PATH):
             os.makedirs(self.SAVE_PATH)

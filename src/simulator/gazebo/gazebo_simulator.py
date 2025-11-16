@@ -11,9 +11,9 @@ class GazeboSimulator(Simulator):
     def __init__(self, CONFIG: dict = None):
         self.is_launched = False
 
-        self.CATKIN_SETUP_DIR = CONFIG.get('CATKIN_SETUP_DIR', '')
-        self.SENSOR_PKG = CONFIG.get('SENSOR_PKG', '')
-        self.LAUNCH_FILE = CONFIG.get('LAUNCH_FILE', '')
+        self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
+        self.SENSOR_PKG = CONFIG['SENSOR_PKG']
+        self.LAUNCH_FILE = CONFIG['LAUNCH_FILE']
 
         self.ros  = Ros() 
         self.node = Node(CONFIG)

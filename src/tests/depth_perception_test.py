@@ -1,19 +1,19 @@
 import numpy as np
 from cv_bridge import CvBridge, CvBridgeError
 
-def depth_perception_test(simulator, config, sensor_type, sensor):
+def depth_perception_test(simulator, CONFIG, sensor_type, sensor):
     """
     Тест точности измерения глубины камеры на дистанциях 1м, 3м, 5м.
     """
-    WORLDS_PATH = config.get('WORLDS_PATH')
-    SENSORS_PATH = config.get('SENSORS_PATH')
-    BASE_WORLD_PATH = config.get('BASE_WORLD_PATH')
+    WORLDS_PATH = CONFIG['WORLDS_PATH']
+    SENSORS_PATH = CONFIG['SENSORS_PATH']
+    BASE_WORLD_PATH = CONFIG['BASE_WORLD_PATH']
     
     # 1. ПОДГОТОВКА ДАННЫХ
     sensor_name = sensor['name']
     worlds = ['cube_1', 'cube_3', 'cube_5']
     topic = '/sensor/depth/image_raw'
-    
+
     sensor_data = []
 
     # 2. СБОР ДАННЫХ ИЗ GAZEBO
