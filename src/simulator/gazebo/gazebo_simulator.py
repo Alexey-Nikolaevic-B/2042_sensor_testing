@@ -1,6 +1,5 @@
 import time
 import subprocess
-import xml.etree.ElementTree as ET
 
 from src.simulator.simulator import Simulator
 
@@ -17,21 +16,6 @@ class GazeboSimulator(Simulator):
 
         self.ros  = Ros() 
         self.node = Node(CONFIG)
-
-        self.launch()
-
-    def generate_world(self, world_path, camera_model_path, base_world_path):
-        tree = ET.parse(world_path)
-        root = tree.getroot()
-        world = root.find('world')
-        camera_tree = ET.parse(camera_model_path)
-        camera_root = camera_tree.getroot()
-        camera_model = camera_root.find('model')
-        if camera_model is None:
-            print("Error: No model found in camera SDF file")
-            return
-        world.append(camera_model)
-        tree.write(base_world_path, encoding='utf-8', xml_declaration=True)
 
     def launch(self) -> str:
         self.ros.launch()
@@ -55,17 +39,15 @@ class GazeboSimulator(Simulator):
 
     def receive_sensor_data(self, topic: str) -> any:
         msg = self.node.get_sensor_data(topic)
-    
-        print("💀 Gazebo was killed.")
-        subprocess.run(["pkill", "-f", "gzserver"], check=False) # костыль, который перезапускать газибо
-        subprocess.run(["pkill", "-f", "gzclient"], check=False)
         return msg 
 
-    def kill(self) -> bool:
+    def kill_gazebo(self) -> None:
         print("💀 Gazebo was killed.")
         subprocess.run(["pkill", "-f", "gzserver"], check=False)
         subprocess.run(["pkill", "-f", "gzclient"], check=False)
-        
+
+    def kill(self) -> bool:
+        self.kill_gazebo()
         self.node.kill()    
         self.ros.kill()
         
