@@ -1,0 +1,169 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="cube_3m">
+
+    <scene>
+      <cast_shadows>true</cast_shadows>
+      <shadow_technique>stencil_additive</shadow_technique>
+      <grid>false</grid>
+      <origin_visual>false</origin_visual>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.1 0.1 0.1 1</background>
+    </scene>
+
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <light name='fill_light' type='directional'>
+      <pose>2 2 3 0 0 0</pose>
+      <diffuse>0.6 0.8 1.0 1</diffuse>
+      <direction>-0.3 -0.3 -0.5</direction>
+    </light>
+
+    <light name='main_key_light' type='directional'>
+        <pose>3 1 4 0 -0.5 -0.2</pose>
+        <diffuse>1 1 1 1</diffuse>
+        <specular>1 1 1 1</specular>
+        <direction>-0.5 -0.2 -0.8</direction>
+        <intensity>1.5</intensity>
+    </light>
+
+
+    <model name="chessboard_plane">
+      <pose>21 0 1.25 0 -1.5708 0</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+          <material>
+            <script>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/scripts</uri>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/textures</uri>
+              <name>ChessTexture</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Куб -->
+    <model name="cube1">
+      <pose>4 0 -1 0.4 1.2 1</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 0.1 0.1</size></box>
+          </geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Куб -->
+    <model name="cube11">
+      <pose>4 1 1 0.4 1.2 1</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 0.1 0.1</size></box>
+          </geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+
+    <!-- Куб -->
+    <model name="cube12">
+      <pose>4 -1 1 0.4 1.2 1</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 0.1 0.1</size></box>
+          </geometry>
+          <material>
+            <ambient>1 1 0 1</ambient>
+            <diffuse>1 1 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Куб -->
+    <model name="cube2">
+      <pose>2 0 0.25 0.4 1.2 1</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.5 0.5 0.5</size></box>
+          </geometry>
+          <material>
+            <script>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/scripts</uri>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/textures</uri>
+              <name>BlueprintTexture</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+
+    <!-- Куб -->
+    <model name="cube3">
+      <pose>0.1 -0.1 0.3 1 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 0.1 0.1</size></box>
+          </geometry>
+          <material>
+            <script>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/scripts</uri>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/textures</uri>
+              <name>BlueprintTexture</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Куб -->
+    <model name="cube4">
+      <pose>0.1 0.1 0.3 -1 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 0.1 0.1</size></box>
+          </geometry>
+          <material>
+            <script>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/scripts</uri>
+              <uri>file:///home/alexey/Documents/projects/2042/github/2042_sensor_testing/catkin_ws/src/scenario_test_pkg/worlds/materials/textures</uri>
+              <name>BlueprintTexture</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model> 
+  </world>
+</sdf>

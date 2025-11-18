@@ -1,66 +1,45 @@
 import os
-import cv2
 import rospy
 
-from datetime import datetime
-from cv_bridge import CvBridge
+from std_srvs.srv import Trigger, TriggerRequest
+import threading
+
 from sensor_msgs.msg import Image
 
 class Node:
     def __init__(self, CONFIG):
         self.TIMEOUT = CONFIG['MESSAGE_TIMEOUT']
-        self.SAVE_DATA = CONFIG['SAVE_SENSOR_DATA']
-        self.SAVE_PATH = CONFIG['SAVE_DIR']
-
-        if not os.path.exists(self.SAVE_PATH):
-            os.makedirs(self.SAVE_PATH)
-
+        
     def launch(self):
         print(f"✅ Node \'sendor_data_receiver\' is working")
         self.ros_node = rospy.init_node('sendor_data_receiver', anonymous=True)
 
-    def save_sensor_data(self, msg): # Эту функцию нужно переделать
-        try:
-            if msg.encoding == '32FC1':
-                depth_image = CvBridge().imgmsg_to_cv2(msg, "32FC1")
-                depth_visual = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-                
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}.png"
-                full_path = os.path.join(self.SAVE_PATH, filename)
-                
-                cv2.imwrite(full_path, depth_visual)
-                print(f"📂 Sensor captured data saved: {full_path}")
-                
-            elif msg.encoding == '16UC1':
-                depth_image = CvBridge().imgmsg_to_cv2(msg, "16UC1")
-                depth_visual = cv2.normalize(depth_image, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}.png"
-                full_path = os.path.join(self.SAVE_PATH, filename)
-                
-                cv2.imwrite(full_path, depth_visual)
-                print(f"📂 Sensor captured data saved: {full_path}")
-                
-            elif msg.encoding == 'rgb8':
-                image = CvBridge().imgmsg_to_cv2(msg, "bgr8")
-
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{timestamp}.png"
-                full_path = os.path.join(self.SAVE_PATH, filename)
-
-                cv2.imwrite(full_path, image)
-                print(f"📂 Sensor captured data saved: {full_path}")
-
-        except Exception as e:
-            print("❌ Error:", e)
-            return None
-
     def get_sensor_data(self, topic): 
         msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
-        if self.SAVE_DATA: self.save_sensor_data(msg)
         return msg
+    
+    def trigger_camera(self, camera_service):
+        try:
+            rospy.wait_for_service(camera_service, timeout=10)
+            trigger = rospy.ServiceProxy(camera_service, Trigger)
+            response = trigger(TriggerRequest())
+            return response.success, response.message  # Return both success and message
+        except rospy.ServiceException as e:
+            rospy.logerr(f"Service call failed: {e}")
+            return False, str(e)
+
+    def synchronized_capture(self, topic):
+        # Create a wrapper to capture return value
+        result = [None]  # Use list to store result (mutable)
+        
+        def thread_target():
+            result[0] = self.trigger_camera(topic)
+        
+        thread1 = threading.Thread(target=thread_target)
+        thread1.start()
+        thread1.join()  # Wait for thread to complete
+        
+        return result[0]  # Return the result
         
     def kill(self):
         rospy.signal_shutdown("Done")

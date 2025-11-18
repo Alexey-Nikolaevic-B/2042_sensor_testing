@@ -12,7 +12,10 @@ class Config:
         'SENSORS_PATH': str,
         'SAVE_DIR': str,
         'MESSAGE_TIMEOUT': int,
-        'SAVE_SENSOR_DATA': bool
+        'SAVE_SENSOR_DATA': bool,
+
+        'SAVE_DEBUG_DATA': bool,
+        'SAVE_DEBUG_DIR': str,
     }
 
     config_file = "config.yaml"
@@ -36,7 +39,7 @@ class Config:
     
     def _get_hardcoded_defaults(self) -> Dict[str, Any]:
         return {
-            'BASE_WORLD_PATH': 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world',
+            'BASE_WORLD_PATH': 'catkin_ws/scenario_test_pkg/worlds/base_world.world',
             'CATKIN_SETUP_DIR': 'catkin_ws/devel/setup.bash',
             'SENSOR_PKG': 'scenario_test_pkg',
             'LAUNCH_FILE': 'scenario.launch',
@@ -44,7 +47,10 @@ class Config:
             'SENSORS_PATH': 'resources/sensors/',
             'SAVE_DIR': 'captured_data',
             'MESSAGE_TIMEOUT': 10,
-            'SAVE_SENSOR_DATA': True
+            'SAVE_SENSOR_DATA': True,
+
+            'SAVE_DEBUG_DATA': True,
+            'SAVE_DEBUG_DIR': 'sensor_debug/',
         }
     
     def _save_to_yaml(self) -> None:

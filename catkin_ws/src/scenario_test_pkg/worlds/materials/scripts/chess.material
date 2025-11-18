@@ -1,0 +1,14 @@
+material ChessTexture
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture ../textures/chess.png
+        scale 0.1 0.1
+      }
+    }
+  }
+}

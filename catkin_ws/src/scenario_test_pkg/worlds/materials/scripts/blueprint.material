@@ -1,0 +1,14 @@
+material BlueprintTexture
+{
+  technique
+  {
+    pass
+    {
+      texture_unit
+      {
+        texture ../textures/blueprint.png
+        scale 1 1
+      }
+    }
+  }
+}

@@ -23,7 +23,3 @@ class Ros:
     def kill(self):
         subprocess.run(["bash", "-c", "pkill -f ros"])
         print("💀 Ros was killed.")
-
-        
-
-
