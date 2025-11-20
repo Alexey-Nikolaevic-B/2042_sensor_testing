@@ -27,12 +27,12 @@ def apply_depth(color_cv, depth_cv, focus_distance):
 
     return out.astype(np.uint8)
 
-def capture(CONFIG, simulator):
+def capture(CONFIG, simulator, camera_model_path, world_path):
     focus_distance = 2
     mono_camera_topic = '/mono_camera/image_raw'
     depth_camera_topic = '/sensor/depth/image_raw'
     
-    simulator.open_scene()
+    simulator.open_scene(world_path, camera_model_path)
     depth_msg = simulator.receive_sensor_data(depth_camera_topic)
     color_msg = simulator.receive_sensor_data(mono_camera_topic)
     
@@ -41,19 +41,15 @@ def capture(CONFIG, simulator):
         color_cv = bridge.imgmsg_to_cv2(color_msg, "bgr8")
         depth_cv = bridge.imgmsg_to_cv2(depth_msg, "32FC1")
     except Exception as e:
-        print(f"❌ Error converting images: {e}")
         return None
 
     focused_image = apply_depth(color_cv, depth_cv, focus_distance)
 
     if CONFIG['SAVE_SENSOR_DATA']:
         save_data(CONFIG, focused_image)
-
     if CONFIG['SAVE_DEBUG_DATA']:
         save_for_debug(CONFIG, color_cv, depth_cv)
-
     simulator.kill_gazebo()
-
     return focused_image
 
 def save_data(CONFIG, data):    
@@ -63,13 +59,10 @@ def save_data(CONFIG, data):
         
         focused_filename = f"{CONFIG['SAVE_DIR']}/focused_2m_{timestamp}.png"
         cv2.imwrite(focused_filename, data)
-        print(f"✅ Saved focused image (2m): {focused_filename}")  
     except Exception as e:
-        print(f"❌ Error saving images: {e}")
         return None
 
 def save_for_debug(CONFIG, color_cv, depth_cv):
-    print(f"\n✅ Saved debug data")  
     SAVE_DEBUG_DIR = CONFIG['SAVE_DEBUG_DIR']
     
     np.save(f'{SAVE_DEBUG_DIR}last_color.npy', color_cv)

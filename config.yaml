@@ -1,13 +1,16 @@
+# Gazebo
 BASE_WORLD_PATH: catkin_ws/src/scenario_test_pkg/worlds/base_world.world
 CATKIN_SETUP_DIR: catkin_ws/devel/setup.bash
 LAUNCH_FILE: scenario.launch
 MESSAGE_TIMEOUT: 10
 SAVE_DIR: captured_data
 SAVE_SENSOR_DATA: true
-SENSORS_PATH: resources/sensors/
 SENSOR_PKG: scenario_test_pkg
+
+# Resources
 WORLDS_PATH: resources/worlds/
+SENSORS_PATH: resources/sensors/
 
-
+# Debug
 SAVE_DEBUG_DATA: true
 SAVE_DEBUG_DIR: sensor_debug/

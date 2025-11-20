@@ -9,7 +9,6 @@ def run(simulator, config, sensor_type: str, sensor: dict):
     
     for test_name in tests_to_run:
         if test_name in test_functions:
-            print(f"\n🔧 Running test: {test_name}")
             
             test_function = test_functions[test_name]
             test_result = test_function(simulator, config, sensor_type, sensor)
@@ -18,8 +17,7 @@ def run(simulator, config, sensor_type: str, sensor: dict):
                 'result': test_result
             })
         else:
-            print(f"\n⚠️  Warning: Test '{test_name}' not found")
-        print('\n','='*60)
+            pass
     return result
 
 def load_test_functions():

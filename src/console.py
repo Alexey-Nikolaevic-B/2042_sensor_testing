@@ -61,7 +61,11 @@ def menu(core):
             system("clear")
             print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
             return
-        core.capture_data(sensor_category, sensor)
+        
+
+        world_path = 'resources/worlds/mono_camera/example.world'
+        camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
+        core.capture_data(camera_model_path, world_path)
         
     elif choice == MenuChoice.EXIT.value:
         system("clear")

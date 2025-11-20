@@ -1,7 +1,7 @@
 import sys
 
 from .sensor_library import get_sensor_types, get_sensors_by_type, get_sensor
-from .simulator.simulator_factory import SimulatorFactory
+from .gazebo_simulator import Simulator
 from .tests import _tests
 from .mono_camera import capture
 
@@ -9,7 +9,7 @@ from config import CONFIG
 
 class Core:
     def __init__(self) -> None:
-        self.simulator = SimulatorFactory.create_simulator('gazebo', CONFIG)
+        self.simulator = Simulator(CONFIG)
 
     def prepare_simulator(self) -> None:
         self.simulator.launch()
@@ -25,15 +25,9 @@ class Core:
     
     def run_test(self, sensor_category: str, sensor: str) -> tuple:
         return _tests.run(self.simulator, CONFIG, sensor_category, sensor)
-    
-    def generate_base_scene(self, world_path, camera_model_path):
-        self.simulator.self.simulator.generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
 
-    def capture_data(self, sensor_category: str, sensor_model: str) -> None:
-        world_path = 'resources/worlds/mono_camera/example.world'
-        camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
-        self.simulator.generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
-        capture(CONFIG, self.simulator)
+    def capture_data(self, camera_model_path, world_path) -> None:
+        capture(CONFIG, self.simulator, camera_model_path, world_path)
 
     def kill(self) -> None:
         print('\nЗавершение процессов:')

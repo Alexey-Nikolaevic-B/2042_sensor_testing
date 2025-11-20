@@ -3,8 +3,6 @@ import traceback
 from src.core import Core
 from src.console import run
 
-from config import CONFIG
-
 if __name__ == '__main__':
     core = Core()
 
