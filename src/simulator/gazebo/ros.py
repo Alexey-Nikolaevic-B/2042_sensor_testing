@@ -6,12 +6,7 @@ class Ros:
         subprocess.run(["bash", "-c", "pkill -f ros"])
         time.sleep(1)
         try:
-            self.ros_process = subprocess.Popen(
-                ["bash", "-c", "roscore"], 
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True
-            )
+            self.ros_process = subprocess.Popen(["bash", "-c", "roscore"])
             print(f"✅ Ros master started with PID: {self.ros_process.pid}") # TODO: это немного не тот PID
             print("Process is running in background...")
             time.sleep(2)

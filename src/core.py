@@ -5,8 +5,6 @@ from .simulator.simulator_factory import SimulatorFactory
 from .tests import _tests
 from .mono_camera import capture
 
-from .utils.utils import generate_world
-
 from config import CONFIG
 
 class Core:
@@ -29,12 +27,12 @@ class Core:
         return _tests.run(self.simulator, CONFIG, sensor_category, sensor)
     
     def generate_base_scene(self, world_path, camera_model_path):
-        generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
+        self.simulator.self.simulator.generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
 
-    def capture_data(self, ensor_category: str, sensor_model: str) -> None:
+    def capture_data(self, sensor_category: str, sensor_model: str) -> None:
         world_path = 'resources/worlds/mono_camera/example.world'
         camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
-        generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
+        self.simulator.generate_world(world_path, camera_model_path, CONFIG['BASE_WORLD_PATH'])
         capture(CONFIG, self.simulator)
 
     def kill(self) -> None:

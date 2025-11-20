@@ -5,6 +5,7 @@ from cv_bridge import CvBridge
 from datetime import datetime
 
 import matplotlib.pyplot as plt
+import os
 
 def apply_depth(color_cv, depth_cv, focus_distance):
     depth_cv[np.isnan(depth_cv)] = 0
@@ -58,6 +59,8 @@ def capture(CONFIG, simulator):
 def save_data(CONFIG, data):    
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     try:
+        os.makedirs(CONFIG['SAVE_DIR'], exist_ok=True)
+        
         focused_filename = f"{CONFIG['SAVE_DIR']}/focused_2m_{timestamp}.png"
         cv2.imwrite(focused_filename, data)
         print(f"✅ Saved focused image (2m): {focused_filename}")  

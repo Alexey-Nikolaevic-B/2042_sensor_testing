@@ -1,6 +1,8 @@
 import time
 import subprocess
 
+import xml.etree.ElementTree as ET
+
 from src.simulator.simulator import Simulator
 
 from .ros import Ros
@@ -16,6 +18,32 @@ class GazeboSimulator(Simulator):
 
         self.ros  = Ros() 
         self.node = Node(CONFIG)
+        
+
+    def generate_world(self, world_path, camera_model_path, base_world_path):
+        try:
+            tree = ET.parse(world_path)
+            root = tree.getroot()
+            world = root.find('world')
+            
+            camera_tree = ET.parse(camera_model_path)
+            camera_root = camera_tree.getroot()
+            
+            camera_models = camera_root.findall('model')
+            
+            if not camera_models:
+                print("Error: No models found in camera SDF file")
+                return
+            
+            for i, camera_model in enumerate(camera_models):
+                model_name = camera_model.get('name', f'unknown_{i}')
+                world.append(camera_model)
+            
+            tree.write(base_world_path, encoding='utf-8', xml_declaration=True)
+            
+        except Exception as e:
+            print(f"Error generating world: {e}")
+
 
     def launch(self) -> str:
         self.ros.launch()
@@ -24,10 +52,7 @@ class GazeboSimulator(Simulator):
     def open_scene(self) -> bool:        
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
         try:
-            self.gazebo_process = subprocess.Popen(["bash", "-c", roslaunch_cmd], 
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True)
+            self.gazebo_process = subprocess.Popen(["bash", "-c", roslaunch_cmd])
             print(f"✅ Gazebo started with PID: {self.gazebo_process.pid}") # это пид попена, а не газибо.
             time.sleep(5)
             
