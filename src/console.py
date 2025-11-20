@@ -16,56 +16,116 @@ def run(core):
         menu(core)
 
 def menu(core):
-    print("\n1. Типы датчиков\n2. Список датчиков\n3. Запуск теста с захватом\n4. Получить данные с датчика\n5. Выход")
-    choice = input("Выберите опцию: ")
+    print("\n[1] Типы датчиков")
+    print("[2] Список датчиков") 
+    print("[3] Запуск теста с захватом")
+    print("[4] Получить данные с датчика")
+    print("[5] Выход")
+    choice = input("Выбор: ")
 
     if choice == MenuChoice.SENSOR_TYPES.value:
         system("clear")
         print("Типы датчиков: ")
-        for sensor_category in core.get_sensor_categories(): 
-            print("-", sensor_category)
+        for i, sensor_category in enumerate(core.get_sensor_categories(), 1):
+            print(f"- {sensor_category}")
             
     elif choice == MenuChoice.SENSOR_LIST.value:
         system("clear")
-        sensor_category = input("Типы датчика: ")
-        for sensor_model in core.get_sensors_by_model(sensor_category): 
-            print("-", sensor_model["name"])
+        print("Типы датчиков: ")
+        sensor_categories = list(core.get_sensor_categories())
+        for i, category in enumerate(sensor_categories, 1):
+            print(f"[{i}] {category}")
+        
+        choice_num = int(input("Выбор: ")) - 1
+        if 0 <= choice_num < len(sensor_categories):
+            sensor_category = sensor_categories[choice_num]
+            print(f"\nДатчики типа '{sensor_category}':")
+            sensors = core.get_sensors_by_model(sensor_category)
+            for i, sensor_model in enumerate(sensors, 1):
+                print(f"- {sensor_model['name']}")
+        else:
+            system("clear")
+            print("Ошибка: неверный выбор.")
+            return
             
     elif choice == MenuChoice.RUN_TEST.value:
         system("clear")
         print("Типы датчиков: ")
-        for sensor_category in core.get_sensor_categories(): 
-            print("-", sensor_category)
-        sensor_category = input("Типы: ")
-        for sensor_model in core.get_sensors_by_model(sensor_category): 
-            print("-", sensor_model["name"])
-        sensor_model = input("Имя: ")
-        sensor = core.get_sensor(sensor_category, sensor_model)
-        if not sensor:
+        sensor_categories = list(core.get_sensor_categories())
+        for i, category in enumerate(sensor_categories, 1):
+            print(f"[{i}] {category}")
+        
+        category_choice = int(input("Выбор: ")) - 1
+        if 0 <= category_choice < len(sensor_categories):
+            sensor_category = sensor_categories[category_choice]
+            print(f"\nДатчики типа '{sensor_category}':")
+            sensors = core.get_sensors_by_model(sensor_category)
+            for i, sensor_model in enumerate(sensors, 1):
+                print(f"[{i}] {sensor_model['name']}")
+            
+            sensor_choice = int(input("Выбор: ")) - 1
+            if 0 <= sensor_choice < len(sensors):
+                sensor_model = sensors[sensor_choice]["name"]
+                sensor = core.get_sensor(sensor_category, sensor_model)
+                if not sensor:
+                    system("clear")
+                    print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
+                    return
+                print('\n')
+                result = core.run_test(sensor_category, sensor)
+
+                test_name = result[0]['test_name']
+                result_score = result[0]['result']
+
+                print(f'\n{test_name}')
+                print(result_score)
+            else:
+                system("clear")
+                print("Ошибка: неверный выбор датчика.")
+                return
+        else:
             system("clear")
-            print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
+            print("Ошибка: неверный выбор типа датчика.")
             return
-        result = core.run_test(sensor_category, sensor)
 
     elif choice == MenuChoice.CAPURE_DATA.value:
         system("clear")
         print("Типы датчиков: ")
-        for sensor_category in core.get_sensor_categories(): 
-            print("-", sensor_category)
-        sensor_category = input("Типы: ")
-        for sensor_model in core.get_sensors_by_model(sensor_category): 
-            print("-", sensor_model["name"])
-        sensor_model = input("Имя: ")
-        sensor = core.get_sensor(sensor_category, sensor_model)
-        if not sensor:
-            system("clear")
-            print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
-            return
+        sensor_categories = list(core.get_sensor_categories())
+        for i, category in enumerate(sensor_categories, 1):
+            print(f"[{i}] {category}")
         
+        category_choice = int(input("Выбор: ")) - 1
 
-        world_path = 'resources/worlds/mono_camera/example.world'
-        camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
-        core.capture_data(camera_model_path, world_path)
+        if 0 <= category_choice < len(sensor_categories):
+            sensor_category = sensor_categories[category_choice]
+            print(f"\nДатчики типа '{sensor_category}':")
+            sensors = core.get_sensors_by_model(sensor_category)
+            for i, sensor_model in enumerate(sensors, 1):
+                print(f"[{i}] {sensor_model['name']}")
+            
+            sensor_choice = int(input("Выбор: ")) - 1
+            if 0 <= sensor_choice < len(sensors):
+                sensor_model = sensors[sensor_choice]["name"]
+                sensor = core.get_sensor(sensor_category, sensor_model)
+                if not sensor:
+                    system("clear")
+                    print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
+                    return
+
+                world_path = 'resources/worlds/mono_camera/example.world'
+                camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
+                print('\n')
+                core.capture_data(camera_model_path, world_path)
+            else:
+                system("clear")
+                print("Ошибка: неверный выбор датчика.")
+                return
+        else:
+            system("clear")
+            print("Ошибка: неверный выбор типа датчика.")
+            return
+
         
     elif choice == MenuChoice.EXIT.value:
         system("clear")
@@ -73,3 +133,4 @@ def menu(core):
         
     else:
         system("clear")
+        print("Ошибка: неверный выбор. Попробуйте снова.")

@@ -9,7 +9,7 @@ if __name__ == '__main__':
     try:
         run(core)
     except Exception as e:
-        print(f"\n❌ Erorr while running.")
+        print(f"\n❌ Unexpected erorr while running.")
         print(f"\nDetails:")
         traceback.print_exc()
         

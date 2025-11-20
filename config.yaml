@@ -1,3 +1,5 @@
+ROOT_PATH: '' 
+
 # Gazebo
 BASE_WORLD_PATH: catkin_ws/src/scenario_test_pkg/worlds/base_world.world
 CATKIN_SETUP_DIR: catkin_ws/devel/setup.bash
@@ -6,6 +8,7 @@ MESSAGE_TIMEOUT: 10
 SAVE_DIR: captured_data
 SAVE_SENSOR_DATA: true
 SENSOR_PKG: scenario_test_pkg
+ROS_LOG_PATH: ros_log
 
 # Resources
 WORLDS_PATH: resources/worlds/

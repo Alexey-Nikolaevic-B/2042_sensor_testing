@@ -1,5 +1,5 @@
 import os
-import time
+import json
 import subprocess
 import rospy
 import threading
@@ -9,43 +9,32 @@ import xml.etree.ElementTree as ET
 from sensor_msgs.msg import Image
 
 import logging
+with open('log_config.json') as f_in:
+    log_config = json.load(f_in)
+logging.config.dictConfig(log_config)
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s]- %(name)s - %(message)s - %(asctime)s', filemode='w')
-
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('[%(levelname)s]- %(name)s - %(message)s - %(asctime)s')
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
 
 class Simulator():
     def __init__(self, CONFIG: dict = None):
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
-
-        if not CONFIG:
-            logger.error("CONFIG dictionary is required")
-            raise ValueError("CONFIG dictionary is required")
-        
-        required_params = ['CATKIN_SETUP_DIR', 'SENSOR_PKG', 'LAUNCH_FILE', 'MESSAGE_TIMEOUT', 'BASE_WORLD_PATH']
-        for param in required_params:
-            if param not in CONFIG:
-                logger.error(f"Missing required configuration parameter: {param}")
-                raise ValueError(f"Missing required configuration parameter: {param}")
         
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
         self.LAUNCH_FILE = CONFIG['LAUNCH_FILE']
         self.TIMEOUT = CONFIG['MESSAGE_TIMEOUT']
         self.BASE_WORLD_PATH = CONFIG['BASE_WORLD_PATH']
+        self.ROS_LOG_PATH = CONFIG['ROS_LOG_PATH']
 
     def launch_ros(self):
         self._kill_ros()
         try:
             env = os.environ.copy()
-            env['ROS_LOG_DIR'] = "logs"
+            env['ROS_LOG_DIR'] = self.ROS_LOG_PATH
+
+            os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
             
             self.ros_process = subprocess.Popen(
                 ["bash", "-c", "roscore"],
@@ -55,7 +44,7 @@ class Simulator():
                 text=True
             )
             self.ros_is_running = True
-            logger.info('ROS core started successfully')
+            logger.info('ROS score started')
         except Exception as e:
             logger.error(f'Failed to start ROS core: {str(e)}')
 
@@ -78,24 +67,19 @@ class Simulator():
     def receive_sensor_data(self, topic):
         try: 
             msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
-            logger.info(f'Successfully received sensor data from topic: {topic}')
+            logger.info(f'Received sensor data from topic: {topic}')
             return msg
         except Exception as e:
             logger.error(f'Failed to receive sensor data from topic {topic}: {str(e)}')
 
-    def is_gazebo_ready(self):
-        try:
-            ps_output = subprocess.check_output(['ps', 'aux'])
-            ps_output_str = ps_output.decode('utf-8')
-            if 'gzclient' in ps_output_str:
-                return True
-            else:
-                return False
-        except Exception as e:
-            logger.error(f'Error checking Gazebo status: {str(e)}')
-            return False
-
     def open_scene(self, world_path, camera_model_path) -> bool:
+        if not self.ros_is_running:
+            logger.error(f'Failed to start Gazebo: ros is not running')
+            return
+        if not self.node_is_running:
+            logger.error(f'Failed to start Gazebo: node is not running')
+            return
+            
         self._generate_world(world_path, camera_model_path)     
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
         try:
@@ -105,12 +89,9 @@ class Simulator():
                 stderr=subprocess.DEVNULL,
                 text=True
                 )
-            # while not self.is_gazebo_ready():
-            #     print('TEST')
-            #     time.sleep(1)
             
             self.gazebo_is_running = True
-            logger.info('Gazebo started successfully')
+            logger.info('Gazebo started')
         except Exception as e:
             logger.error(f'Failed to start Gazebo: {str(e)}')
 
@@ -130,7 +111,7 @@ class Simulator():
                 world.append(camera_model)
             
             tree.write(self.BASE_WORLD_PATH, encoding='utf-8', xml_declaration=True)
-            logger.info('World file generated successfully')
+            logger.info('World file generated')
         except Exception as e:
             logger.error(f'Failed to generate world file: {str(e)}')
 
@@ -143,7 +124,7 @@ class Simulator():
                 capture_output=True, 
                 timeout=10
             )
-            logger.info('ROS processes killed successfully')
+            logger.info('ROS processes killed')
         except Exception as e:
             logger.error(f'Failed to kill ROS processes: {str(e)}')
 
@@ -153,7 +134,7 @@ class Simulator():
         try:
             rospy.signal_shutdown("Simulator shutdown")
             self.node_is_running = False
-            logger.info('ROS node shut down successfully')
+            logger.info('ROS node shut down')
         except Exception as e:
             logger.error(f'Failed to shut down ROS node: {str(e)}')
 
@@ -163,7 +144,7 @@ class Simulator():
         try:
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
-            logger.info('Gazebo processes killed successfully')
+            logger.info('Gazebo processes killed')
         except Exception as e:
             logger.error(f'Failed to kill Gazebo processes: {str(e)}')
 
@@ -175,4 +156,4 @@ class Simulator():
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
-        logger.info('All simulator components stopped successfully')
+        logger.info('All simulator components stopped')

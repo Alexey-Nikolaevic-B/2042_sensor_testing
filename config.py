@@ -1,6 +1,8 @@
+import os
 import yaml
 from typing import Any, Dict
 from pathlib import Path
+
 
 class Config:
     EXPECTED_TYPES = {
@@ -16,12 +18,15 @@ class Config:
 
         'SAVE_DEBUG_DATA': bool,
         'SAVE_DEBUG_DIR': str,
+        'ROS_LOG_PATH': str,
+        'ROOT_PATH': str
     }
 
     config_file = "config.yaml"
     
     def __init__(self):
         self._data = self._load_defaults()
+        self._data['ROOT_PATH'] = os.path.dirname(os.path.abspath(__file__))
     
     def _load_defaults(self) -> Dict[str, Any]:
         if self.config_file and Path(self.config_file).exists():
@@ -48,9 +53,11 @@ class Config:
             'SAVE_DIR': 'captured_data',
             'MESSAGE_TIMEOUT': 10,
             'SAVE_SENSOR_DATA': True,
+            'ROS_LOG_PATH': 'ros_log',
 
             'SAVE_DEBUG_DATA': True,
             'SAVE_DEBUG_DIR': 'sensor_debug/',
+            'ROOT_PATH': ''
         }
     
     def _save_to_yaml(self) -> None:

@@ -1,5 +1,14 @@
+import json
+
 import importlib.util
 from pathlib import Path
+
+import logging
+with open('log_config.json') as f_in:
+    log_config = json.load(f_in)
+logging.config.dictConfig(log_config)
+
+logger = logging.getLogger(__name__)
 
 def run(simulator, config, sensor_type: str, sensor: dict):
     result = []
@@ -9,6 +18,7 @@ def run(simulator, config, sensor_type: str, sensor: dict):
     
     for test_name in tests_to_run:
         if test_name in test_functions:
+            logger.info(f'Starting test: {test_name}')
             
             test_function = test_functions[test_name]
             test_result = test_function(simulator, config, sensor_type, sensor)
@@ -17,7 +27,7 @@ def run(simulator, config, sensor_type: str, sensor: dict):
                 'result': test_result
             })
         else:
-            pass
+            logger.warning(f'Test not found: {test_name}')
     return result
 
 def load_test_functions():
