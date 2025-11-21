@@ -70,30 +70,98 @@ class Simulator():
             logger.info(f'Received sensor data from topic: {topic}')
             return msg
         except Exception as e:
-            logger.error(f'Failed to receive sensor data from topic {topic}: {str(e)}')
+            logger.error(f'Failed to receive sensor data from topic: {str(e)}')
+
+    def is_gazebo_running(self):
+        try:
+            import rospy
+            from gazebo_msgs.srv import GetWorldProperties
+            
+            rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
+            get_world_properties = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
+            response = get_world_properties()
+            return True
+        except:
+            return False
 
     def open_scene(self, world_path, camera_model_path) -> bool:
         if not self.ros_is_running:
-            logger.error(f'Failed to start Gazebo: ros is not running')
-            return
+            logger.error('Failed to start Gazebo: Ros is not running')
+            return False
         if not self.node_is_running:
-            logger.error(f'Failed to start Gazebo: node is not running')
-            return
+            logger.error('Failed to start Gazebo: Node is not running')
+            return False
             
         self._generate_world(world_path, camera_model_path)     
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
+        
         try:
             self.gazebo_process = subprocess.Popen(
                 ["bash", "-c", roslaunch_cmd],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True
-                )
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1
+            )
+
+            stdout_thread = threading.Thread(
+                target=self._log_stdout_output,
+                args=(self.gazebo_process.stdout,)
+            )
+            stdout_thread.daemon = True
+            stdout_thread.start()
+            
+            stderr_thread = threading.Thread(
+                target=self._log_stderr_output,
+                args=(self.gazebo_process.stderr,)
+            )
+            stderr_thread.daemon = True
+            stderr_thread.start()
             
             self.gazebo_is_running = True
-            logger.info('Gazebo started')
+
+            if self.is_gazebo_running():
+                logger.info('Gazebo started')
+                return True
+            else:
+                logger.error('Failed to start Gazebo')
+                return False
+                
         except Exception as e:
             logger.error(f'Failed to start Gazebo: {str(e)}')
+            return False
+
+    def _log_stdout_output(self, stdout_stream):
+        try:
+            for line in iter(stdout_stream.readline, ''):
+                if line.strip():
+                    line_clean = line.strip()
+                    self._process_output_line(line_clean, "stdout")
+        except ValueError:
+            pass
+
+    def _log_stderr_output(self, stderr_stream):
+        try:
+            for line in iter(stderr_stream.readline, ''):
+                if line.strip():
+                    line_clean = line.strip()
+                    self._process_output_line(line_clean, "stderr")
+        except ValueError:
+            pass
+
+    def _process_output_line(self, line, stream_type):
+        line_lower = line.lower()
+        if line.startswith('bash:') or 'command not found' in line_lower:
+            logger.warning(f"[Gazebo/bash] {line}")
+        elif any(word in line_lower for word in ['error', 'exception', 'fail', 'cannot', 'invalid']):
+            logger.error(f"[Gazebo] {line}")
+        elif 'warning' in line_lower:
+            logger.warning(f"[Gazebo] {line}")
+        else:
+            if any(keyword in line_lower for keyword in ['start', 'complete', 'ready', 'initializ']):
+                # logger.info(f"[Gazebo] {line}")
+                pass
+
 
     def _generate_world(self, world_path, camera_model_path):
         try:
@@ -111,7 +179,7 @@ class Simulator():
                 world.append(camera_model)
             
             tree.write(self.BASE_WORLD_PATH, encoding='utf-8', xml_declaration=True)
-            logger.info('World file generated')
+            logger.info('Base .world file generated')
         except Exception as e:
             logger.error(f'Failed to generate world file: {str(e)}')
 
@@ -156,4 +224,3 @@ class Simulator():
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
-        logger.info('All simulator components stopped')

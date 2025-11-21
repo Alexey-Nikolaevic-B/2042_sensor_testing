@@ -19,8 +19,11 @@ def depth_perception_test(simulator, CONFIG, sensor_type, sensor):
     for world in worlds:
         world_path = f'{WORLDS_PATH}depth_perception_test/{world}.world'
         camera_model_path = f'{SENSORS_PATH}{sensor_type}/{sensor_name}.sdf'
+        
+        simulator_is_running = simulator.open_scene(world_path, camera_model_path)
+        if not simulator_is_running:
+            return False
 
-        simulator.open_scene(world_path, camera_model_path)
         msg = simulator.receive_sensor_data(topic)
         sensor_data.append(msg)
 

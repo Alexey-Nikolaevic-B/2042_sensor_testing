@@ -22,6 +22,9 @@ def run(simulator, config, sensor_type: str, sensor: dict):
             
             test_function = test_functions[test_name]
             test_result = test_function(simulator, config, sensor_type, sensor)
+            if not test_result:
+                return False
+
             result.append({
                 'test_name': test_name,
                 'result': test_result

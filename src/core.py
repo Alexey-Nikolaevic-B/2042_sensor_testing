@@ -26,10 +26,10 @@ class Core:
     def run_test(self, sensor_category: str, sensor: str) -> tuple:
         return _tests.run(self.simulator, CONFIG, sensor_category, sensor)
 
-    def capture_data(self, camera_model_path: str, world_path: str) -> None:
-        capture(CONFIG, self.simulator, camera_model_path, world_path)
+    def capture_data(self, camera_model_path: str, world_path: str) -> any:
+        data = capture(CONFIG, self.simulator, camera_model_path, world_path)
+        return data
 
     def kill(self) -> None:
-        print('\nЗавершение процессов:')
         self.simulator.kill()
         sys.exit()

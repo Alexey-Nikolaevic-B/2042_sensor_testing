@@ -74,6 +74,10 @@ def menu(core):
                 print('\n')
                 result = core.run_test(sensor_category, sensor)
 
+                if not result:
+                    print('\nОшибка при тестировании')
+                    return
+
                 test_name = result[0]['test_name']
                 result_score = result[0]['result']
 
@@ -116,7 +120,12 @@ def menu(core):
                 world_path = 'resources/worlds/mono_camera/example.world'
                 camera_model_path = 'resources/sensors/camera/mono_camera.sdf'
                 print('\n')
-                core.capture_data(camera_model_path, world_path)
+                result = core.capture_data(camera_model_path, world_path)
+                if not result:
+                    print('\nОшибка при получении данных с датчика')
+                    return
+
+
             else:
                 system("clear")
                 print("Ошибка: неверный выбор датчика.")

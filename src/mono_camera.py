@@ -32,7 +32,10 @@ def capture(CONFIG, simulator, camera_model_path, world_path):
     mono_camera_topic = '/mono_camera/image_raw'
     depth_camera_topic = '/sensor/depth/image_raw'
     
-    simulator.open_scene(world_path, camera_model_path)
+    simulator_is_running = simulator.open_scene(world_path, camera_model_path)
+    if not simulator_is_running:
+        return False
+
     depth_msg = simulator.receive_sensor_data(depth_camera_topic)
     color_msg = simulator.receive_sensor_data(mono_camera_topic)
     
