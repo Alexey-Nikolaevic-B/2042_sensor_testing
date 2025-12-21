@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <!-- RFID считыватель с характерной дальностью - 2м -->
+  <!-- RFID reader / antenna model for Abdu-lybot RFID_antenna_plugin -->
+  <model name="rfid_reader">
+    <pose>0 0 0.25 0 0 0</pose>
+    <static>true</static>
+
+    <link name="base_link">
+      <collision name="collision">
+        <geometry>
+          <box><size>0.08 0.08 0.08</size></box>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <box><size>0.08 0.08 0.08</size></box>
+        </geometry>
+        <material>
+          <ambient>0.1 0.9 0.1 1</ambient>
+          <diffuse>0.1 0.9 0.1 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Custom RFID sensor -->
+      <sensor name="rfid_antenna" type="rfid">
+        <always_on>1</always_on>
+        <update_rate>20</update_rate>
+
+        <plugin name="rfid_antenna_plugin" filename="libRFID_antenna_plugin.so">
+          <!-- final antenna frame/name is typically antenna_name + antenna_id -->
+          <antenna_name>antenna_</antenna_name>
+          <antenna_id>1</antenna_id>
+
+          <!-- Tag naming base -->
+          <tag_name>rfid_tag</tag_name>
+
+          <!-- Name base used in published detections / spawned visualization models -->
+          <detected_tag_name>rfid_tag_</detected_tag_name>
+          <detected_tag_colour>blue</detected_tag_colour>
+
+          <!-- Detection model params -->
+          <azimuth_beamwidth>1</azimuth_beamwidth>
+          <elevation_beamwidth>1</elevation_beamwidth>
+          <rzero>2</rzero>
+
+          <!-- IMPORTANT: replace these with ABSOLUTE paths on your machine -->
+          <tag_yellow_sdf_path>/ABS/PATH/TO/RFID_antenna_plugin/Models/RFID_3/model.sdf</tag_yellow_sdf_path>
+          <tag_red_sdf_path>/ABS/PATH/TO/RFID_antenna_plugin/Models/RFID_2/model.sdf</tag_red_sdf_path>
+          <tag_blue_sdf_path>/ABS/PATH/TO/RFID_antenna_plugin/Models/RFID_5/model.sdf</tag_blue_sdf_path>
+          <tag_purple_sdf_path>/ABS/PATH/TO/RFID_antenna_plugin/Models/RFID_4/model.sdf</tag_purple_sdf_path>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>
