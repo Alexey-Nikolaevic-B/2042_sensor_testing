@@ -14,6 +14,14 @@ sensor_library = {
                 "Определение разрешающей способности камеры": ("5 см", "6 см")
             }
         }
+    ],
+    "rfid": [
+        {
+            "name": "rfid_antenna",
+            "tests": {
+                "change_distance_test": (3, 4)
+            }
+        }
     ]
 }
 

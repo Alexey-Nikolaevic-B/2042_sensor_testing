@@ -1,42 +1,11 @@
-<?xml version="1.0" ?>
+<?xml version="1.0"?>
 <sdf version="1.6">
-  <world name="scene8_rfid_distance">
+  <world name="rfid_change_distance">
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
 
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
-
-    <!-- A single tag that we'll move away from the reader with /gazebo/set_model_state -->
-    <model name="rfid_tag_1">
-      <pose>0.5 0 0.25 0 0 0</pose>
-      <static>false</static>
-
-      <link name="link">
-        <!-- make it easy to teleport with set_model_state -->
-        <gravity>false</gravity>
-        <kinematic>true</kinematic>
-
-        <collision name="collision">
-          <geometry>
-            <box><size>0.02 0.02 0.002</size></box>
-          </geometry>
-        </collision>
-
-        <visual name="visual">
-          <geometry>
-            <box><size>0.02 0.02 0.002</size></box>
-          </geometry>
-          <material>
-            <ambient>0.2 0.2 1 1</ambient>
-            <diffuse>0.2 0.2 1 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
+    <!-- Никаких тегов в world НЕ добавляем.
+         RFID_tag_plugin заспавнит rfid_tag1 из map.txt -->
   </world>
 </sdf>
