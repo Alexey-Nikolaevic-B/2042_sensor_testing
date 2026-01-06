@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import traceback
 
 from src.core import Core
