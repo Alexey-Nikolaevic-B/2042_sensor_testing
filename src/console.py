@@ -72,17 +72,12 @@ def menu(core):
                     print(f"Ошибка: датчик '{sensor_model}' не найден в типе '{sensor_category}'.")
                     return
                 print('\n')
-                result = core.run_test(sensor_category, sensor)
 
-                if not result:
-                    print('\nОшибка при тестировании')
-                    return
+                results = core.run_test(sensor_category, sensor)
 
-                test_name = result[0]['test_name']
-                result_score = result[0]['result']
-
-                print(f'\n{test_name}')
-                print(result_score)
+                for result in results:
+                    print('Test name:', result['test_name'])
+                    print('Result:', result['result'], end='\n\n')
             else:
                 system("clear")
                 print("Ошибка: неверный выбор датчика.")
