@@ -49,25 +49,35 @@ def change_distance_test(simulator, CONFIG, sensor_type, sensor):
 
     results = {"tag": tag_name, "max_detected_distance": None, "steps": []}
     max_dist = None
-
+    reset_distance = 100
     dist = 0.5
+
     while dist <= 10.0 + 1e-9:
 
-        # перемещаем метку вдоль оси x
-        _set_pose(set_state, tag_name, dist, 0, 0.25)
+        detected_count = 0
 
-        # читаем сообщение из топика
-        try:
-            msg = rospy.wait_for_message('/detected_tags', PoseStamped, timeout=0.3)
-        except: 
-            msg = None
+        # делаем 10 попыток считывания метки
+        tag_msg = None
+        for _ in range(10):
+            try:
+                # перемещаем метку далеко, чтобы сбросить попытку
+                _set_pose(set_state, tag_name, reset_distance, 0, 0.25)
+                time.sleep(0.05)
+                # перемещаем метку на тестовую дистанцию
+                _set_pose(set_state, tag_name, dist, 0, 0.25)
+                msg = rospy.wait_for_message('/detected_tags', PoseStamped, timeout=0.1)
+                tag_msg = msg
+                if msg.header.frame_id == tag_name:
+                    detected_count += 1
+            except:
+                continue
 
-        is_tag_detected = msg is not None
+        is_tag_detected = bool(detected_count >= 8)
 
         results["steps"].append({
             "distance": dist,
             "detected": is_tag_detected,
-            "pose": {"x": msg.pose.position.x, "y": msg.pose.position.y, "z": msg.pose.position.z} if msg else
+            "pose": {"x": tag_msg.pose.position.x, "y": tag_msg.pose.position.y, "z": tag_msg.pose.position.z} if tag_msg else
                     {"x": None, "y": None, "z": None}
         })
 
