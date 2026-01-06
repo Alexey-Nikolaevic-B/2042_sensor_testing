@@ -1,6 +1,5 @@
 import time
 import rospy
-from rosgraph_msgs.msg import Clock
 from gazebo_msgs.srv import SetModelState
 from gazebo_msgs.msg import ModelState, ModelStates
 from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
@@ -24,17 +23,22 @@ def change_distance_test(simulator, CONFIG, sensor_type, sensor):
     world_path = f"{WORLDS_PATH}rfid/change_distance.world"
     sensor_model_path = f"{SENSORS_PATH}{sensor_type}/{sensor_name}.sdf"
 
+    # плагин читает файл map.txt и по нему создает метки в gazebo (такая уж особенность работы)
+    with open(CONFIG['RFID_MAP_PATH'], 'w') as f:
+        f.write('fix1 1 0.5 0.0 0.25')
+        f.flush()
+
     if not simulator.open_scene(world_path, sensor_model_path):
         return False
 
-    tag = "rfid_tag1"
+    tag_name = "rfid_tag1"
 
     # ждем спавна rfid_tag1
     t0 = time.time()
     while (time.time() - t0 < 30):
         try:
             msg = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=1.0)
-            if tag in msg.name:
+            if tag_name in msg.name:
                 break
         except rospy.ROSException:
             msg = None
@@ -43,14 +47,14 @@ def change_distance_test(simulator, CONFIG, sensor_type, sensor):
     rospy.wait_for_service("/gazebo/set_model_state", timeout=5)
     set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
 
-    results = {"tag": tag, "max_detected_distance": None, "steps": []}
+    results = {"tag": tag_name, "max_detected_distance": None, "steps": []}
     max_dist = None
 
     dist = 0.5
     while dist <= 10.0 + 1e-9:
 
         # перемещаем метку вдоль оси x
-        _set_pose(set_state, tag, dist, 0, 0.25)
+        _set_pose(set_state, tag_name, dist, 0, 0.25)
 
         # читаем сообщение из топика
         try:

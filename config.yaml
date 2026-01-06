@@ -3,6 +3,7 @@ ROOT_PATH: ''
 # Gazebo
 BASE_WORLD_PATH: catkin_ws/src/scenario_test_pkg/worlds/base_world.world
 CATKIN_SETUP_DIR: catkin_ws/devel/setup.bash
+RFID_MAP_PATH: catkin_ws/src/RFID_Sensor_Plugin_gazebo/RFID_tag_plugin/map_layouts/map.txt
 LAUNCH_FILE: scenario.launch
 MESSAGE_TIMEOUT: 10
 SAVE_DIR: captured_data
