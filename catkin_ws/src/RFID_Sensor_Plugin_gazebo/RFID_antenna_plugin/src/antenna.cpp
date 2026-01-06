@@ -1,6 +1,7 @@
 // RFID_antenna_plugin.cpp
 #include <ros/ros.h>
 #include <gazebo/gazebo.hh>
+#include <gazebo/common/SystemPaths.hh>
 #include <gazebo_msgs/SpawnModel.h>
 #include <gazebo_msgs/GetModelState.h>
 
@@ -12,9 +13,12 @@
 #include <cmath>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <iostream>
 #include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <cstdlib>
+#include <cctype>
 #include <unistd.h>
 #include <ros/package.h>
 
@@ -53,6 +57,104 @@ static bool event_only = true;
 
 static bool deterministic = true;
 static double deterministic_threshold = 0.5; // pdf >= threshold
+
+static std::string g_plugin_sdf_file;
+static std::string g_plugin_sdf_dir;
+
+// --- Path helpers ---
+static inline bool starts_with(const std::string &s, const std::string &p) {
+  return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
+}
+
+static inline std::string trim_copy(std::string s) {
+  auto not_space = [](unsigned char c){ return !std::isspace(c); };
+  while (!s.empty() && !not_space((unsigned char)s.front())) s.erase(s.begin());
+  while (!s.empty() && !not_space((unsigned char)s.back())) s.pop_back();
+  return s;
+}
+
+static inline bool is_abs_path(const std::string &p) {
+  return !p.empty() && p[0] == '/';
+}
+
+static inline std::string dirname_of(const std::string &p) {
+  if (p.empty()) return "";
+  const auto pos = p.find_last_of("/\\");
+  if (pos == std::string::npos) return "";
+  if (pos == 0) return "/";
+  return p.substr(0, pos);
+}
+
+static inline std::string join_path(const std::string &a, const std::string &b) {
+  if (a.empty()) return b;
+  if (b.empty()) return a;
+  if (a.back() == '/' || a.back() == '\\') return a + b;
+  return a + "/" + b;
+}
+
+static inline bool readable_file(const std::string &p) {
+  return !p.empty() && ::access(p.c_str(), R_OK) == 0;
+}
+
+static std::string expand_tilde(const std::string &p) {
+  if (!starts_with(p, "~/")) return p;
+  const char *home = std::getenv("HOME");
+  if (!home || !*home) return p;
+  return join_path(std::string(home), p.substr(2));
+}
+
+static std::string expand_package_uri(const std::string &p) {
+  // package://my_pkg/path/to/file.sdf
+  const std::string prefix = "package://";
+  if (!starts_with(p, prefix)) return p;
+
+  const std::string rest = p.substr(prefix.size());
+  const auto slash = rest.find('/');
+  const std::string pkg = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+  const std::string sub = (slash == std::string::npos) ? ""   : rest.substr(slash + 1);
+
+  const std::string pkgPath = ros::package::getPath(pkg);
+  if (pkgPath.empty()) return p;
+
+  return sub.empty() ? pkgPath : join_path(pkgPath, sub);
+}
+
+static std::string resolve_custom_path(std::string raw) {
+  raw = trim_copy(raw);
+  if (raw.empty()) return raw;
+
+  raw = expand_package_uri(raw);
+
+  if (raw.find("://") != std::string::npos) {
+    const std::string found = gazebo::common::SystemPaths::Instance()->FindFileURI(raw);
+    if (!found.empty()) return found;
+
+    const std::string filePrefix = "file://";
+    if (starts_with(raw, filePrefix)) {
+      const std::string noScheme = raw.substr(filePrefix.size());
+      if (is_abs_path(noScheme) && readable_file(noScheme)) return noScheme;
+      raw = noScheme;
+    }
+  }
+
+  if (is_abs_path(raw)) return raw;
+
+  raw = expand_tilde(raw);
+  if (is_abs_path(raw)) return raw;
+
+  if (!g_plugin_sdf_dir.empty()) {
+    const std::string candidate = join_path(g_plugin_sdf_dir, raw);
+    if (readable_file(candidate)) return candidate;
+  }
+
+  {
+    const std::string found = gazebo::common::SystemPaths::Instance()->FindFile(raw, true);
+    if (!found.empty()) return found;
+  }
+
+  if (!g_plugin_sdf_dir.empty()) return join_path(g_plugin_sdf_dir, raw);
+  return raw;
+}
 
 enum Tag_colors { white, yellow, blue, red, purple };
 
@@ -138,8 +240,17 @@ public:
     static_br.sendTransform(t);
   }
 
-  static string slurp(const string& path){
+  static string slurp(const string& raw_path){
+    const std::string path = resolve_custom_path(raw_path);
+
     std::ifstream f(path);
+    if (!f.is_open()) {
+      std::ostringstream ss;
+      ss << "[RFID_antenna_plugin] Can't open model SDF file: '" << path
+         << "' (raw: '" << raw_path << "')";
+      throw std::runtime_error(ss.str());
+    }
+
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
@@ -159,7 +270,15 @@ public:
 
   void spawn_detected_model(const string& model_name, float x, float y, float z, Tag_colors c){
     Antenna a;
-    string xml = slurp(a.get_color_path_from_sdf(c));
+
+    string xml;
+    try {
+      xml = slurp(a.get_color_path_from_sdf(c));
+    } catch (const std::exception& e) {
+      ROS_ERROR_STREAM(e.what());
+      return;
+    }
+
     auto req = make_spawn(model_name, x, y, z, xml);
     ros::service::waitForService("gazebo/spawn_sdf_model");
     spawn_cli.call(req);
@@ -276,7 +395,10 @@ public:
       return;
     }
 
-    // mandatory-ish
+    g_plugin_sdf_file = _sdf ? _sdf->FilePath() : "";
+    g_plugin_sdf_dir  = dirname_of(g_plugin_sdf_file);
+    if (g_plugin_sdf_dir.empty()) g_plugin_sdf_dir = ".";
+
     target_frame = _sdf->HasElement("antenna_name") ? _sdf->Get<string>("antenna_name") : "antenna_";
     source_frame = _sdf->HasElement("tag_name") ? _sdf->Get<string>("tag_name") : "rfid_tag";
 
@@ -288,10 +410,16 @@ public:
     beam_width_v = _sdf->HasElement("elevation_beamwidth") ? _sdf->Get<float>("elevation_beamwidth") : 1.0f;
     r_zero = _sdf->HasElement("rzero") ? _sdf->Get<float>("rzero") : 10.0f;
 
+    // Paths from SDF (raw)
     path_yellow_tag = _sdf->HasElement("tag_yellow_sdf_path") ? _sdf->Get<string>("tag_yellow_sdf_path") : "";
     path_blue_tag   = _sdf->HasElement("tag_blue_sdf_path")   ? _sdf->Get<string>("tag_blue_sdf_path")   : "";
     path_red_tag    = _sdf->HasElement("tag_red_sdf_path")    ? _sdf->Get<string>("tag_red_sdf_path")    : "";
     path_purple_tag = _sdf->HasElement("tag_purple_sdf_path") ? _sdf->Get<string>("tag_purple_sdf_path") : "";
+
+    if (!path_yellow_tag.empty()) path_yellow_tag = resolve_custom_path(path_yellow_tag);
+    if (!path_blue_tag.empty())   path_blue_tag   = resolve_custom_path(path_blue_tag);
+    if (!path_red_tag.empty())    path_red_tag    = resolve_custom_path(path_red_tag);
+    if (!path_purple_tag.empty()) path_purple_tag = resolve_custom_path(path_purple_tag);
 
     // scan limits
     if (_sdf->HasElement("max_tags")) max_tags = _sdf->Get<int>("max_tags");
@@ -312,6 +440,9 @@ public:
 
     deterministic = _sdf->HasElement("deterministic") ? _sdf->Get<bool>("deterministic") : true;
     deterministic_threshold = _sdf->HasElement("deterministic_threshold") ? _sdf->Get<double>("deterministic_threshold") : 0.5;
+
+    ROS_INFO_STREAM("[RFID_antenna_plugin] plugin SDF: " << g_plugin_sdf_file);
+    ROS_INFO_STREAM("[RFID_antenna_plugin] base dir : " << g_plugin_sdf_dir);
 
     auto sp = std::make_shared<Spawner>(ros::NodeHandle());
     std::thread([sp]() { sp->antenna_loop(); }).detach();
