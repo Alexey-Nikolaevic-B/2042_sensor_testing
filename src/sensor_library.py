@@ -2,24 +2,24 @@ sensor_library = {
     "camera": [
         {
             "name": "depth_camera",
-            "tests": {
+            "tests": (
                 "depth_perception_test"
-            }
+            )
         },
         {
             "name": "mono_camera",
-            "tests": {
+            "tests": (
                 "depth_perception_test"
-            }
+            )
         }
     ],
     "rfid": [
         {
             "name": "rfid_antenna",
-            "tests": {
+            "tests": (
                 "change_distance_test",
                 "min_stable_read_distance_test"
-            }
+            )
         }
     ]
 }
