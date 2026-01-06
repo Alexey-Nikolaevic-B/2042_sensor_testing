@@ -35,7 +35,7 @@ class Simulator():
             env['ROS_LOG_DIR'] = self.ROS_LOG_PATH
 
             os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
-            
+
             self.ros_process = subprocess.Popen(
                 ["bash", "-c", "roscore"],
                 env=env,
