@@ -1,10 +1,9 @@
-// rfid_tag_plugin.cpp
-
 #include <ros/ros.h>
 #include <ros/package.h>
 
 #include <gazebo/gazebo.hh>
 #include <gazebo/sensors/sensors.hh>
+#include <gazebo/common/SystemPaths.hh>
 
 #include <gazebo_msgs/SpawnModel.h>
 #include <gazebo_msgs/GetModelState.h>
@@ -24,6 +23,8 @@
 #include <random>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <unistd.h>
 
 using std::string;
 
@@ -39,6 +40,101 @@ struct Tag {
   string name;
   double x = 0, y = 0, z = 0;
 };
+
+static std::string g_plugin_sdf_file;
+static std::string g_plugin_sdf_dir;
+
+static inline bool starts_with(const std::string& s, const std::string& pref) {
+  return s.size() >= pref.size() && s.compare(0, pref.size(), pref) == 0;
+}
+
+static inline std::string dirname_of(const std::string& p) {
+  const auto pos = p.find_last_of("/\\");
+  if (pos == std::string::npos) return {};
+  if (pos == 0) return "/";
+  return p.substr(0, pos);
+}
+
+static inline std::string join_path(const std::string& a, const std::string& b) {
+  if (a.empty()) return b;
+  if (b.empty()) return a;
+  if (a.back() == '/' || a.back() == '\\') return a + b;
+  return a + "/" + b;
+}
+
+static inline bool is_abs_path(const std::string& p) {
+  return !p.empty() && p[0] == '/';
+}
+
+static inline bool readable_file(const std::string& p) {
+  return !p.empty() && ::access(p.c_str(), R_OK) == 0;
+}
+
+static inline std::string trim_copy(std::string s) {
+  auto not_space = [](unsigned char c){ return !std::isspace(c); };
+  while (!s.empty() && !not_space(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+  while (!s.empty() && !not_space(static_cast<unsigned char>(s.back()))) s.pop_back();
+  return s;
+}
+
+static std::string expand_tilde(const std::string& p) {
+  if (!starts_with(p, "~/")) return p;
+  const char* home = std::getenv("HOME");
+  if (!home || !*home) return p;
+  return join_path(std::string(home), p.substr(2));
+}
+
+static std::string expand_package_uri(const std::string& p) {
+  const std::string prefix = "package://";
+  if (!starts_with(p, prefix)) return p;
+
+  const std::string rest = p.substr(prefix.size());
+  const auto slash = rest.find('/');
+  const std::string pkg = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+  const std::string sub = (slash == std::string::npos) ? ""   : rest.substr(slash + 1);
+
+  const std::string pkgPath = ros::package::getPath(pkg);
+  if (pkgPath.empty()) return p;
+
+  return sub.empty() ? pkgPath : join_path(pkgPath, sub);
+}
+
+static std::string resolve_custom_path(std::string raw) {
+  raw = trim_copy(raw);
+  if (raw.empty()) return raw;
+
+  raw = expand_package_uri(raw);
+
+  if (raw.find("://") != std::string::npos) {
+    const std::string found = gazebo::common::SystemPaths::Instance()->FindFileURI(raw);
+    if (!found.empty()) return found;
+
+    const std::string filePrefix = "file://";
+    if (starts_with(raw, filePrefix)) {
+      const std::string noScheme = raw.substr(filePrefix.size());
+      if (is_abs_path(noScheme) && readable_file(noScheme)) return noScheme;
+      raw = noScheme;
+    }
+  }
+
+  if (is_abs_path(raw)) return raw;
+
+  raw = expand_tilde(raw);
+  if (is_abs_path(raw)) return raw;
+
+  if (!g_plugin_sdf_dir.empty()) {
+    const std::string candidate = join_path(g_plugin_sdf_dir, raw);
+    if (readable_file(candidate)) return candidate;
+  }
+
+  {
+    const std::string found = gazebo::common::SystemPaths::Instance()->FindFile(raw, true);
+    if (!found.empty()) return found;
+  }
+
+  if (!g_plugin_sdf_dir.empty()) return join_path(g_plugin_sdf_dir, raw);
+  return raw;
+}
 
 static inline bool ros_ready() {
   if (!ros::isInitialized()) {
@@ -61,7 +157,6 @@ static inline void rtrim_inplace(std::string& s) {
 }
 
 static inline void strip_bom_inplace(std::string& s) {
-  // UTF-8 BOM: EF BB BF
   if (s.size() >= 3 &&
       static_cast<unsigned char>(s[0]) == 0xEF &&
       static_cast<unsigned char>(s[1]) == 0xBB &&
@@ -70,12 +165,13 @@ static inline void strip_bom_inplace(std::string& s) {
   }
 }
 
-static inline std::vector<Fixture> read_map_robust(const string& path) {
+static inline std::vector<Fixture> read_map_robust(const string& raw_path) {
   std::vector<Fixture> out;
 
+  const std::string path = resolve_custom_path(raw_path);
   std::ifstream f(path);
   if (!f.is_open()) {
-    ROS_ERROR_STREAM("[RFID_tag_plugin] cannot open map: " << path);
+    ROS_ERROR_STREAM("[RFID_tag_plugin] cannot open map: " << path << " (raw: " << raw_path << ")");
     return out;
   }
 
@@ -110,7 +206,6 @@ static inline std::vector<Fixture> read_map_robust(const string& path) {
 
 class Spawner {
 public:
-  // Params (from SDF)
   string parent_frame = "base_link_sim";
   string tag_prefix   = "rfid_tag";
   int tags_per_fix    = 1;
@@ -120,24 +215,18 @@ public:
   string map_path;
 
   bool randomize = false;
-  double rand_xy = 0.0;   // max abs offset in x/y
-  double rand_z  = 0.0;   // max add offset in z [0..rand_z]
+  double rand_xy = 0.0;
+  double rand_z  = 0.0;
 
-  // TF mode:
-  // - static: publish once (best for static map, no TF_REPEATED_DATA)
-  // - dynamic: publish at tf_rate reading /gazebo/get_model_state (needed if ты двигаешь теги в тестах)
   bool dynamic_tf = false;
   double tf_rate  = 20.0;
 
-  // state
   std::vector<Tag> tags;
 
-  // ROS
   ros::NodeHandle nh;
   ros::ServiceClient spawn_cli;
   ros::ServiceClient get_state_cli;
 
-  // threading
   std::atomic<bool> stop{false};
   std::thread tf_thread;
 
@@ -153,10 +242,11 @@ public:
     if (tf_thread.joinable()) tf_thread.join();
   }
 
-  static string slurp_file(const string& path) {
+  static string slurp_file(const string& raw_path) {
+    const std::string path = resolve_custom_path(raw_path);
     std::ifstream f(path);
     if (!f.is_open()) {
-      ROS_ERROR_STREAM("[RFID_tag_plugin] cannot open SDF file: " << path);
+      ROS_ERROR_STREAM("[RFID_tag_plugin] cannot open SDF file: " << path << " (raw: " << raw_path << ")");
       return {};
     }
     std::ostringstream ss;
@@ -178,8 +268,8 @@ public:
 
   void wait_services_or_stop() {
     while (!stop.load() && ros::ok()) {
-      if (ros::service::exists("gazebo/spawn_sdf_model", /*print_failure*/false) &&
-          ros::service::exists("gazebo/get_model_state", /*print_failure*/false)) {
+      if (ros::service::exists("gazebo/spawn_sdf_model", false) &&
+          ros::service::exists("gazebo/get_model_state", false)) {
         return;
       }
       ros::Duration(0.1).sleep();
@@ -286,7 +376,7 @@ public:
                     << " tf_rate=" << tf_rate);
 
     if (fix_sdf_path.empty() || tag_sdf_path.empty()) {
-      ROS_ERROR("[RFID_tag_plugin] fix_sdf_path/tag_sdf_path is empty. Check your .world plugin params.");
+      ROS_ERROR("[RFID_tag_plugin] fix_sdf_path/tag_sdf_path is empty.");
       return;
     }
 
@@ -303,7 +393,6 @@ public:
       return;
     }
 
-    // random offsets (optional)
     std::mt19937 rng(12345);
     std::uniform_real_distribution<double> dxy(-rand_xy, rand_xy);
     std::uniform_real_distribution<double> dz(0.0, rand_z);
@@ -314,13 +403,11 @@ public:
     for (const auto& fx : fixtures) {
       if (stop.load()) return;
 
-      // spawn fixture model
       {
         auto req = make_spawn(fx.name, fx.x, fx.y, fx.z, fix_xml);
         spawn_call(req);
       }
 
-      // spawn tags
       for (int k = 0; k < tags_per_fix; ++k) {
         ++tag_counter;
         Tag t;
@@ -361,12 +448,15 @@ public:
     spawner_.reset();
   }
 
-  void Load(sensors::SensorPtr /*_sensor*/, sdf::ElementPtr _sdf) override {
+  void Load(sensors::SensorPtr, sdf::ElementPtr _sdf) override {
     if (!ros_ready()) return;
+
+    g_plugin_sdf_file = _sdf ? _sdf->FilePath() : "";
+    g_plugin_sdf_dir  = dirname_of(g_plugin_sdf_file);
+    if (g_plugin_sdf_dir.empty()) g_plugin_sdf_dir = ".";
 
     spawner_ = std::make_shared<Spawner>(ros::NodeHandle());
 
-    // --- params with defaults ---
     spawner_->parent_frame = _sdf->HasElement("parent_frame")
                                ? _sdf->Get<string>("parent_frame")
                                : "base_link_sim";
@@ -402,10 +492,8 @@ public:
     spawner_->tf_rate    = _sdf->HasElement("tf_rate")    ? _sdf->Get<double>("tf_rate")  : 20.0;
 
     worker_ = std::thread([this]() {
-
       spawner_->wait_services_or_stop();
       if (stop_.load() || !ros::ok()) return;
-
       ros::Duration(0.5).sleep();
       spawner_->spawn_from_map();
     });

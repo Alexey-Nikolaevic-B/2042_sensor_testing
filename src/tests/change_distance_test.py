@@ -25,7 +25,7 @@ def change_distance_test(simulator, CONFIG, sensor_type, sensor):
 
     # плагин читает файл map.txt и по нему создает метки в gazebo (такая уж особенность работы)
     with open(CONFIG['RFID_MAP_PATH'], 'w') as f:
-        f.write('fix1 1 0.5 0.0 0.25')
+        f.write('fix1 1 0.5 0.0 0')
         f.flush()
 
     if not simulator.open_scene(world_path, sensor_model_path):
@@ -61,10 +61,10 @@ def change_distance_test(simulator, CONFIG, sensor_type, sensor):
         for _ in range(10):
             try:
                 # перемещаем метку далеко, чтобы сбросить попытку
-                _set_pose(set_state, tag_name, reset_distance, 0, 0.25)
-                time.sleep(0.05)
+                _set_pose(set_state, tag_name, reset_distance, 0, 0)
+                time.sleep(0.025)
                 # перемещаем метку на тестовую дистанцию
-                _set_pose(set_state, tag_name, dist, 0, 0.25)
+                _set_pose(set_state, tag_name, dist, 0, 0)
                 msg = rospy.wait_for_message('/detected_tags', PoseStamped, timeout=0.1)
                 tag_msg = msg
                 if msg.header.frame_id == tag_name:
