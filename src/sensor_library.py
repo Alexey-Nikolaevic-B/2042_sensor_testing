@@ -3,15 +3,13 @@ sensor_library = {
         {
             "name": "depth_camera",
             "tests": {
-                "depth_perception_test": (3, 4),
-                "Определение разрешающей способности камеры": ("5 см", "6 см")
+                "depth_perception_test"
             }
         },
         {
             "name": "mono_camera",
             "tests": {
-                "depth_perception_test": (3, 4),
-                "Определение разрешающей способности камеры": ("5 см", "6 см")
+                "depth_perception_test"
             }
         }
     ],
@@ -19,7 +17,8 @@ sensor_library = {
         {
             "name": "rfid_antenna",
             "tests": {
-                "change_distance_test": (3, 4)
+                "change_distance_test",
+                "min_stable_read_distance_test"
             }
         }
     ]

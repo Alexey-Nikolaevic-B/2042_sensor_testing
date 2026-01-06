@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 def run(simulator, config, sensor_type: str, sensor: dict):
     result = []
-    tests_to_run = list(sensor['tests'].keys())
+    tests_to_run = list(sensor['tests'])
     
     test_functions = load_test_functions()
     
