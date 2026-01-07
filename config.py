@@ -51,7 +51,7 @@ class Config:
             'LAUNCH_FILE': 'scenario.launch',
             'WORLDS_PATH': 'resources/worlds/',
             'SENSORS_PATH': 'resources/sensors/',
-            'RFID_MAP_PATH': 'catkin_ws/src/RFID_Sensor_Plugin_gazebo/RFID_tag_plugin/map_layouts/map.txt',
+            'RFID_MAP_PATH': 'catkin_ws/src/RFID_Sensor_Plugin_gazebo/rfid_tag_plugin/map_layouts/map.txt',
             'SAVE_DIR': 'captured_data',
             'MESSAGE_TIMEOUT': 10,
             'SAVE_SENSOR_DATA': True,
