@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(RFID_antenna_plugin)
+project(rfid_antenna_plugin)
 # add_subdirectory(third_party/yaml-cpp)
 
 ## Compile as C++11, supported in ROS Kinetic and newer

@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 def run(simulator, config, sensor_type: str, sensor: dict):
     result = []
     tests_to_run = sensor['tests']
-    
+
     test_functions = load_test_functions()
-    
+
     for test_name in tests_to_run:
         if test_name in test_functions:
             logger.info(f'Starting test: {test_name}')

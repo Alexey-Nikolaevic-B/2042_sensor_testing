@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(RFID_tag_plugin)
+project(rfid_tag_plugin)
 # add_subdirectory(third_party/yaml-cpp)
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)

@@ -29,7 +29,7 @@
           <parent_frame>base_link_sim</parent_frame>
           <tags_per_fix>1</tags_per_fix>
 
-          <map_path>../../RFID_Sensor_Plugin_gazebo/RFID_tag_plugin/map_layouts/map.txt</map_path>
+          <map_path>../../RFID_Sensor_Plugin_gazebo/rfid_tag_plugin/map_layouts/map.txt</map_path>
           <fix_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/normal_size_fixture/model.sdf</fix_sdf_path>
           <tag_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_1/model.sdf</tag_sdf_path>
 

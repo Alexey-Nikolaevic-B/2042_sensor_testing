@@ -3,13 +3,13 @@ sensor_library = {
         {
             "name": "depth_camera",
             "tests": (
-                "depth_perception_test"
+                "depth_perception_test",
             )
         },
         {
             "name": "mono_camera",
             "tests": (
-                "depth_perception_test"
+                "depth_perception_test",
             )
         }
     ],
