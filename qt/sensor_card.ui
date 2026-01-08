@@ -7,19 +7,19 @@
     <x>0</x>
     <y>0</y>
     <width>350</width>
-    <height>350</height>
+    <height>250</height>
    </rect>
   </property>
   <property name="minimumSize">
    <size>
     <width>350</width>
-    <height>350</height>
+    <height>250</height>
    </size>
   </property>
   <property name="maximumSize">
    <size>
     <width>350</width>
-    <height>350</height>
+    <height>250</height>
    </size>
   </property>
   <property name="styleSheet">
@@ -51,17 +51,17 @@ QFrame#SensorCardWidget:hover {
      <property name="minimumSize">
       <size>
        <width>180</width>
-       <height>140</height>
+       <height>10</height>
       </size>
      </property>
      <property name="maximumSize">
       <size>
-       <width>350</width>
-       <height>300</height>
+       <width>10000</width>
+       <height>10000</height>
       </size>
      </property>
      <property name="styleSheet">
-      <string notr="true"/>
+      <string notr="true">background-color: rgb(84, 194, 249);</string>
      </property>
      <property name="text">
       <string/>
