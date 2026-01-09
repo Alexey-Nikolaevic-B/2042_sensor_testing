@@ -29,16 +29,16 @@
           </noise>
         </camera>
         <plugin name="depth_camera_plugin" filename="libgazebo_ros_depth_camera.so">
-          <cameraName>sensor</cameraName>  <!-- Changed camera name -->
+          <cameraName>depth_camera</cameraName>
           <ros>
-            <namespace>/sensor</namespace>  <!-- Changed namespace -->
+            <namespace>/depth_camera</namespace>
             <argument>image_raw:=image_raw</argument>
             <argument>depth/image_raw:=depth/image_raw</argument>
             <argument>points:=points</argument>
           </ros>
           <frame_name>camera_depth_optical_frame</frame_name>
           <optical_frame_id>camera_depth_optical_frame</optical_frame_id>
-          <update_rate>30</update_rate>
+          <update_rate>5</update_rate>
         </plugin>
       </sensor>
     </link>
