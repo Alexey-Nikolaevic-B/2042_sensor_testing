@@ -97,7 +97,7 @@ class Rfid(Sensor):
 
         # ждем спавна rfid_tag1
         tag_name = "rfid_tag1"
-        is_tag_spawned = self._wait_for_tag_spawn(tag_name, 10)
+        is_tag_spawned = self._wait_for_tag_spawn(tag_name, 30)
         if not is_tag_spawned:
             raise RuntimeError("tag not spawned")
 
@@ -148,7 +148,7 @@ class Rfid(Sensor):
             return None
 
         tag_name = "rfid_tag1"
-        if not self._wait_for_tag_spawn(tag_name, 10):
+        if not self._wait_for_tag_spawn(tag_name, 30):
             raise RuntimeError("tag not spawned")
 
         rospy.wait_for_service("/gazebo/set_model_state", timeout=5)
