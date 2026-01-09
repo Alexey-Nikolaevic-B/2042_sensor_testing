@@ -43,13 +43,13 @@ class DepthCamera(MonoCamera):
             return None
 
         start = time.time()
-        while time.time() - start < 15.0:
+        while time.time() - start < 30.0:
             try:
                 ms = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=1.0)
                 if cube_name in ms.name:
                     break
             except rospy.ROSException:
-                pass
+                continue
         else:
             raise RuntimeError(f'cube not spawned: {cube_name}')
 
