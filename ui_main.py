@@ -34,10 +34,10 @@ class Main_UI(QMainWindow):
             QPushButton:pressed { background-color: rgba(255, 255, 255, 0.2); }
         """
         
-        self.wt_top.setStyleSheet("QWidget {background-color : rgb(60, 60, 60)}")
-        self.wt_sideabar_min.setStyleSheet("QWidget {background-color : rgb(177, 177, 177)}")
-        self.wt_sideabar_max.setStyleSheet("QWidget {background-color : rgb(177, 177, 177)}")
-        self.wt_main.setStyleSheet("QWidget {background-color : rgb(230, 230, 230)}")
+        self.wt_top.setStyleSheet("QWidget {background-color : rgb(30,30,30)}")
+        self.wt_sideabar_min.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
+        self.wt_sideabar_max.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
+        self.wt_main.setStyleSheet("QWidget {background-color : rgb(62,62,66)}")
         
         top_buttons = [self.btn_minimize, self.btn_maximize, self.btn_close]
         top_icons = ["minimize.png", "maximize.png", "close.png"]

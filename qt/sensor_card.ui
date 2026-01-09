@@ -86,9 +86,7 @@ QFrame#SensorCardWidget:hover {
       </size>
      </property>
      <property name="styleSheet">
-      <string notr="true">font-size: 16px;
-font-weight: bold;
-color: #333333;</string>
+      <string notr="true"/>
      </property>
      <property name="text">
       <string>Sensor Name</string>

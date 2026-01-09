@@ -15,6 +15,24 @@ class SensorCard(QFrame):
         
         self.setCursor(Qt.PointingHandCursor)
         self.setup_card()
+        self.set_styles()
+
+    def set_styles(self):
+        style_name = """
+            background-color: gray; 
+            border: none; padding: 5px; 
+            font-size: 16px;
+            font-weight: bold;
+            color: rgb(45,45,48);
+            """
+        self.name_label.setStyleSheet(style_name)
+
+        style_image = """
+            background-color: rgb(0,122,204);
+            font-size: 16px;
+            font-weight: bold;
+            """
+        self.image_label.setStyleSheet(style_image)
     
     def setup_card(self):
         self.name_label.setText(self.sensor_data['name'])
