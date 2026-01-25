@@ -1,6 +1,7 @@
 from typing import List
 from .sensors import REGISTRY
 
+
 def get_sensor_types() -> List[str]:
     """Возвращает список из всех типов датчиков"""
     sensor_types = set()

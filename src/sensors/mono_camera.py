@@ -1,10 +1,16 @@
 import re
-from typing import Optional
+import rospy
+
+from sensor_msgs.msg import Image
+
+from typing import Optional, Dict, Any
 from .sensor import Sensor, register_sensor
 
 
 @register_sensor('camera', 'mono_camera')
 class MonoCamera(Sensor):
+    IMAGE_TOPIC = '/mono_camera/image_raw'
+
     """Моно камера"""
     def __init__(self, CONFIG):
         super().__init__()
@@ -17,6 +23,34 @@ class MonoCamera(Sensor):
         self.test_to_world = {}
 
         self._load_params_from_sdf()
+
+
+    def capture_data(
+        self,
+        simulator,
+        world_path : Optional[str] = None,
+        timeout: float = 1.0,
+        convert2cv = False
+    ) -> Optional[Dict[str, Any]]:
+        if world_path:
+            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+                return None
+            rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+
+        msg = rospy.wait_for_message(self.IMAGE_TOPIC, Image, timeout=timeout)
+
+        if msg is None:
+            return None
+        
+        result = {"raw_image": msg}
+
+        if convert2cv:
+            from cv_bridge import CvBridge
+            bridge = CvBridge()
+            cv = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+            result["cv_image"] = cv
+
+        return result
 
 
     def _read_sdf(self) -> str:
@@ -170,42 +204,36 @@ class MonoCamera(Sensor):
         self._replace_one(pattern, rf'\1{self.noise_stddev}\3', "noise stddev")
 
 
-    def print_params(self) -> None:
-        print('mono camera с параметрами:')
-        print(f'угол обзора (fov) = {self.horizontal_fov}')
-        print(f'разрешение изображения = {self.image_width}x{self.image_height}')
-        print(f'формат изображения = {self.image_format}')
-        print(f'ближняя плоскость отсечения = {self.clip_near}')
-        print(f'дальняя плоскость отсечения = {self.clip_far}')
-        print(f'тип шума = {self.noise_type}')
-        print(f'математическое ожидание шума = {self.noise_mean}')
-        print(f'среднеквадратическое отклонение шума = {self.noise_stddev}')
+    def get_params(self) -> Dict[str, Any]:
+        return {
+            "horizontal_fov": self.horizontal_fov,
+            "image_width": self.image_width,
+            "image_height": self.image_height,
+            "image_format": self.image_format,
+            "clip_near": self.clip_near,
+            "clip_far": self.clip_far,
+            "noise_type": self.noise_type,
+            "noise_mean": self.noise_mean,
+            "noise_stddev": self.noise_stddev,
+        }
+    
 
-
-    def set_params(self) -> None:
-        self.horizontal_fov = float(input('введите угол обзора (fov, рад): '))
-        self.set_horizontal_fov()
-
-        self.image_width = int(input('введите ширину изображения: '))
-        self.set_image_width()
-
-        self.image_height = int(input('введите высоту изображения: '))
-        self.set_image_height()
-
-        self.image_format = input('введите формат изображения (например R8G8B8): ').strip()
-        self.set_image_format()
-
-        self.clip_near = float(input('введите ближнюю плоскость отсечения (м): '))
-        self.set_clip_near()
-
-        self.clip_far = float(input('введите дальнюю плоскость отсечения (м): '))
-        self.set_clip_far()
-
-        self.noise_type = input('введите тип шума (например gaussian): ').strip()
-        self.set_noise_type()
-
-        self.noise_mean = float(input('введите математическое ожидание шума: '))
-        self.set_noise_mean()
-
-        self.noise_stddev = float(input('введите среднеквадратическое отклонение шума: '))
-        self.set_noise_stddev()
+    def set_params(self, **params) -> None:
+        if "horizontal_fov" in params:
+            self.set_horizontal_fov(float(params["horizontal_fov"]))
+        if "image_width" in params:
+            self.set_image_width(int(params["image_width"]))
+        if "image_height" in params:
+            self.set_image_height(int(params["image_height"]))
+        if "image_format" in params:
+            self.set_image_format(str(params["image_format"]))
+        if "clip_near" in params:
+            self.set_clip_near(float(params["clip_near"]))
+        if "clip_far" in params:
+            self.set_clip_far(float(params["clip_far"]))
+        if "noise_type" in params:
+            self.set_noise_type(str(params["noise_type"]))
+        if "noise_mean" in params:
+            self.set_noise_mean(float(params["noise_mean"]))
+        if "noise_stddev" in params:
+            self.set_noise_stddev(float(params["noise_stddev"]))

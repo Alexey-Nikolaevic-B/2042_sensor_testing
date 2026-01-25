@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Dict, Type, Optional, Tuple
+from typing import Dict, Type, Optional, Tuple, Any
 
 
 class Sensor(ABC):
@@ -11,14 +10,24 @@ class Sensor(ABC):
 
 
     @abstractmethod
-    def set_params(self) -> None:
-        """Для изменения параметров датчика"""
+    def capture_data(self, simulator, world_path : Optional[str] = None, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        Сделать одно измерение датчика
+        Если вызывается внутри теста - world_path = None
+        Если из ui - нужно передать корректный world_path
+        """
         raise NotImplementedError
 
 
     @abstractmethod
-    def print_params(self) -> None:
-        """Выводит параметры датчика"""
+    def set_params(self, **params) -> None:
+        """Принять новые параметры"""
+        raise NotImplementedError
+
+
+    @abstractmethod
+    def get_params(self) -> None:
+        """Вернуть текущие параметры"""
         raise NotImplementedError
 
 

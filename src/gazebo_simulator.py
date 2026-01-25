@@ -3,10 +3,14 @@ import json
 import subprocess
 import rospy
 import threading
+import time
 
 import xml.etree.ElementTree as ET
 
+from gazebo_msgs.srv import SetModelState, GetWorldProperties
 from sensor_msgs.msg import Image
+from geometry_msgs.msg import Pose, Point, Quaternion
+from gazebo_msgs.msg import ModelState, ModelStates
 
 import logging
 with open('log_config.json') as f_in:
@@ -64,6 +68,7 @@ class Simulator():
         self.launch_ros()
         self.launch_node()
 
+
     def receive_sensor_data(self, topic):
         try: 
             msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
@@ -74,7 +79,6 @@ class Simulator():
 
     def is_gazebo_running(self):
         try:
-            import rospy
             from gazebo_msgs.srv import GetWorldProperties
             
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
@@ -85,13 +89,18 @@ class Simulator():
             return False
 
     def open_scene(self, world_path, camera_model_path) -> bool:
+        if self.is_gazebo_running():
+            self.kill_gazebo()
+            time.sleep(1.0)
+
         if not self.ros_is_running:
             logger.error('Failed to start Gazebo: Ros is not running')
             return False
+
         if not self.node_is_running:
             logger.error('Failed to start Gazebo: Node is not running')
             return False
-            
+
         self._generate_world(world_path, camera_model_path)     
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
         
@@ -117,7 +126,14 @@ class Simulator():
             )
             stderr_thread.daemon = True
             stderr_thread.start()
-            
+
+            if not self.wait_gazebo_quiet(30.0):
+                logger.error("Gazebo services did not appear")
+                return False
+
+            rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+            rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+
             self.gazebo_is_running = True
 
             if self.is_gazebo_running():
@@ -206,15 +222,41 @@ class Simulator():
         except Exception as e:
             logger.error(f'Failed to shut down ROS node: {str(e)}')
 
+
+    def wait_for_model_spawn(self, model_name: str, timeout = 10) -> bool:
+        """Метод чтобы дождаться появления модели в симуляции"""
+        start_time = time.time()
+        while (time.time() - start_time < timeout):
+            try:
+                msg = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=1.0)
+                if model_name in msg.name:
+                    return True
+            except rospy.ROSException:
+                continue
+        return False
+
+
+    def set_pose(self, model, x = 0, y = 0, z = 0):
+        """Метод для перемещения моделей в симуляции"""
+        set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
+        state = ModelState()
+        state.model_name = model
+        state.reference_frame = "world"
+        state.pose = Pose(Point(x, y, z), Quaternion(0, 0, 0, 1))
+        response = set_state(state)
+        if not response.success:
+            raise RuntimeError(response.status_message)
+
+
     def kill_gazebo(self) -> None:
-        if not self.gazebo_is_running:
-            return
         try:
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
+            self.gazebo_is_running = False
             logger.info('Gazebo processes killed')
         except Exception as e:
             logger.error(f'Failed to kill Gazebo processes: {str(e)}')
+
 
     def kill(self) -> bool:
         self.kill_gazebo()
@@ -224,3 +266,15 @@ class Simulator():
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
+
+
+    def wait_gazebo_quiet(self, timeout=30.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                proxy = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
+                proxy()
+                return True
+            except Exception:
+                time.sleep(0.2)
+        return False
