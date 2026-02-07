@@ -1,0 +1,42 @@
+<launch>
+  <!--
+    Что это:
+    - Универсальный launch для сцены C1.
+    - Загружает мир C1 и спавнит камеру из произвольного SDF-файла.
+
+    Как запускать:
+    - roslaunch scenario_test_pkg scene_c1.launch camera_sdf_file:=<path> camera_model_name:=<name> image_topic:=<topic>
+
+    Топики:
+    - Фактический image topic публикуется камерой из camera_sdf_file.
+      Аргумент image_topic используется тест-раннером как ожидаемый topic.
+
+    Тест:
+    - scripts/run_camera_suite.py (запускает C1/C4/C7 последовательно)
+  -->
+  <arg name="world_file" default="$(find scenario_test_pkg)/worlds/c1_single_cube.world"/>
+  <arg name="camera_sdf_file" default="$(find scenario_test_pkg)/../../../resources/sensors/camera/uvc_profile_640x480_60deg.sdf"/>
+  <arg name="camera_model_name" default="uvc_profile_640x480_60deg_model"/>
+  <arg name="image_topic" default="/uvc_profile_640x480_60deg/image_raw"/>
+  <arg name="namespace" default=""/>
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(arg world_file)"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="false"/>
+    <arg name="headless" value="true"/>
+  </include>
+
+  <group ns="$(arg namespace)">
+    <node
+      pkg="gazebo_ros"
+      type="spawn_model"
+      name="spawn_camera_model"
+      args="-sdf -file $(arg camera_sdf_file) -model $(arg camera_model_name) -x 0 -y 0 -z 0"
+      output="screen" />
+
+    <!-- Фиксируем ожидаемый image topic параметром для прозрачной отладки запусков. -->
+    <param name="suite_expected_image_topic" value="$(arg image_topic)"/>
+  </group>
+</launch>
