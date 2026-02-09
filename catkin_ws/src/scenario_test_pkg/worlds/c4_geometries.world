@@ -11,7 +11,7 @@
   - Камера в world не зашита. Топик изображения задается выбранной SDF-камерой в launch.
 
   Тест:
-  - scripts/test_camera_c4_geometries_presence.py (функция run_test_c4)
+  - src/sensors/uvc_profile_640x480_60deg.py::c4_geometries_presence_test
 -->
 <sdf version="1.6">
   <world name="c4_geometries">

@@ -12,7 +12,7 @@
   - Камера в world не зашита. Топик изображения задается выбранной SDF-камерой в launch.
 
   Тест:
-  - scripts/test_camera_c7_occlusion.py (функция run_test_c7)
+  - src/sensors/uvc_profile_640x480_60deg.py::c7_occlusion_test
 -->
 <sdf version="1.6">
   <world name="c7_occlusion">

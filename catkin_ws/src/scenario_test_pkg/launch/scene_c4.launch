@@ -12,7 +12,7 @@
       Аргумент image_topic используется тест-раннером как ожидаемый topic.
 
     Тест:
-    - scripts/run_camera_suite.py
+    - test_runner.py + discovery методов *_test в src/sensors
   -->
   <arg name="world_file" default="$(find scenario_test_pkg)/worlds/c4_geometries.world"/>
   <arg name="camera_sdf_file" default="$(find scenario_test_pkg)/../../../resources/sensors/camera/uvc_profile_640x480_60deg.sdf"/>
