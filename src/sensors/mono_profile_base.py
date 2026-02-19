@@ -1,23 +1,7 @@
-"""
-Sensor-profile модуль камеры `uvc_profile_640x480_60deg`.
-
-Это не конфигурационный файл: класс ниже регистрируется в sensor registry как
-полноценный сенсор с profile-id `uvc_profile_640x480_60deg`.
-
-Тесты в этом модуле валидируют именно этот профиль (640x480, FOV 60deg,
-ожидаемые сцены C1/C4/C7). Для нового camera-profile заводится новый sensor
-module и, при необходимости, свой набор `*_test`; общие helper-методы
-переиспользуются внутри модуля.
-
-Артефакты тестов:
-- results/uvc_profile_640x480_60deg/captured_images/
-"""
-
 from __future__ import annotations
 
 import os
 import time
-from math import radians
 from typing import Any, Dict, List, Tuple
 
 import cv2
@@ -26,28 +10,16 @@ import rospy
 from sensor_msgs.msg import Image
 
 from .mono_camera import MonoCamera
-from .sensor import register_sensor
 
 
-@register_sensor("camera", "uvc_profile_640x480_60deg")
-class UvcProfile640x48060Deg(MonoCamera):
-    """
-    Профиль виртуальной моно-камеры 640x480, FOV 60deg, clip 0.1..50, 30 FPS.
-
-    Методы `*_test` ниже профиль-специфичны: они проверяют поведение именно
-    этой камеры на закрепленных test scenes и порогах методики.
-    """
-
-    IMAGE_TOPIC = "/uvc_profile_640x480_60deg/image_raw"
-    CAMERA_MODEL_NAME = "uvc_profile_640x480_60deg_model"
+class MonoProfileBase(MonoCamera):
+    IMAGE_TOPIC = ""
 
     IMAGE_WIDTH = 640
     IMAGE_HEIGHT = 480
     UPDATE_RATE = 30
 
-    HORIZONTAL_FOV_DEG = 60.0
-    HORIZONTAL_FOV_RAD = radians(HORIZONTAL_FOV_DEG)
-
+    HORIZONTAL_FOV_RAD = 1.0471975512
     CLIP_NEAR = 0.1
     CLIP_FAR = 50.0
 
@@ -55,25 +27,31 @@ class UvcProfile640x48060Deg(MonoCamera):
     C7_FRONT_CUBE_NAME = "front_cube"
     C7_BACK_CUBE_NAME = "back_cube"
 
+    C1_POSITIONS = (1.0, 3.0, 5.0)
+    C1_MIN_MARGIN_RATIO = 1.10
+    C4_MIN_PIXELS = 1500
+    C7_CASES = {"occ_25": 0.10, "occ_50": 0.20}
+    C7_MIN_PIXELS = 800
+
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
 
         self.CONFIG = CONFIG
-        self.image_width = self.IMAGE_WIDTH
-        self.image_height = self.IMAGE_HEIGHT
-        self.horizontal_fov = self.HORIZONTAL_FOV_RAD
-        self.clip_near = self.CLIP_NEAR
-        self.clip_far = self.CLIP_FAR
-        self.update_rate = self.UPDATE_RATE
+        self.image_width = int(self.IMAGE_WIDTH)
+        self.image_height = int(self.IMAGE_HEIGHT)
+        self.horizontal_fov = float(self.HORIZONTAL_FOV_RAD)
+        self.clip_near = float(self.CLIP_NEAR)
+        self.clip_far = float(self.CLIP_FAR)
+        self.update_rate = int(self.UPDATE_RATE)
 
-        base_world_path = CONFIG["BASE_WORLD_PATH"]
-        if not os.path.isabs(base_world_path):
-            base_world_path = os.path.join(CONFIG["ROOT_PATH"], base_world_path)
-        worlds_dir = os.path.dirname(base_world_path)
+        worlds_root = CONFIG["WORLDS_PATH"]
+        if not os.path.isabs(worlds_root):
+            worlds_root = os.path.join(CONFIG["ROOT_PATH"], worlds_root)
+
         self.test_to_world = {
-            "c1_size_order_test": os.path.join(worlds_dir, "c1_single_cube.world"),
-            "c4_geometries_presence_test": os.path.join(worlds_dir, "c4_geometries.world"),
-            "c7_occlusion_test": os.path.join(worlds_dir, "c7_occlusion.world"),
+            "c1_size_order_test": os.path.join(worlds_root, "camera_c1_single_cube.world"),
+            "c4_geometries_presence_test": os.path.join(worlds_root, "camera_c4_geometries.world"),
+            "c7_occlusion_test": os.path.join(worlds_root, "camera_c7_occlusion.world"),
         }
 
     def _results_dir(self) -> str:
@@ -166,25 +144,26 @@ class UvcProfile640x48060Deg(MonoCamera):
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
         rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
 
-    def _move_and_settle(self, simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8) -> None:
+    @staticmethod
+    def _move_and_settle(simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8) -> None:
         simulator.set_pose(model_name, x=x, y=y, z=z)
         time.sleep(settle_s)
 
     def c1_size_order_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
-            "positions": [1.0, 3.0, 5.0],
+            "positions": list(self.C1_POSITIONS),
             "bbox_area_px": {},
-            "min_margin_ratio": 1.10,
+            "min_margin_ratio": float(self.C1_MIN_MARGIN_RATIO),
         }
 
         self._open_test_scene(simulator, "c1_size_order_test")
         if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
 
-        for x in metrics["positions"]:
+        for x in self.C1_POSITIONS:
             label = f"x{int(x)}"
-            self._move_and_settle(simulator, self.C1_CUBE_NAME, x=x, y=0.0, z=0.25)
+            self._move_and_settle(simulator, self.C1_CUBE_NAME, x=float(x), y=0.0, z=0.25)
 
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
@@ -204,8 +183,8 @@ class UvcProfile640x48060Deg(MonoCamera):
         x3 = metrics["bbox_area_px"].get("x3", 0)
         x5 = metrics["bbox_area_px"].get("x5", 0)
         order_ok = x1 > x3 > x5
-        margin_ok = (x1 >= x3 * 1.10) and (x3 >= x5 * 1.10)
-        metrics["checks"] = {"size_order": order_ok, "size_margin": margin_ok}
+        margin_ok = (x1 >= x3 * self.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * self.C1_MIN_MARGIN_RATIO)
+        metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
 
         if not (order_ok and margin_ok):
             raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
@@ -214,7 +193,7 @@ class UvcProfile640x48060Deg(MonoCamera):
 
     def c4_geometries_presence_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
-        metrics: Dict[str, Any] = {"pixel_counts": {}, "threshold": 1500}
+        metrics: Dict[str, Any] = {"pixel_counts": {}, "threshold": int(self.C4_MIN_PIXELS)}
 
         self._open_test_scene(simulator, "c4_geometries_presence_test")
         msg = self._wait_image(timeout=35.0)
@@ -236,9 +215,9 @@ class UvcProfile640x48060Deg(MonoCamera):
     def c7_occlusion_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
-            "cases": {"occ_25": 0.10, "occ_50": 0.20},
+            "cases": dict(self.C7_CASES),
             "blue_pixels": {},
-            "threshold": 800,
+            "threshold": int(self.C7_MIN_PIXELS),
         }
 
         self._open_test_scene(simulator, "c7_occlusion_test")
@@ -249,8 +228,8 @@ class UvcProfile640x48060Deg(MonoCamera):
 
         self._move_and_settle(simulator, self.C7_FRONT_CUBE_NAME, x=3.0, y=0.0, z=0.25)
 
-        for case_name, y in metrics["cases"].items():
-            self._move_and_settle(simulator, self.C7_BACK_CUBE_NAME, x=3.0, y=y, z=0.25)
+        for case_name, y in self.C7_CASES.items():
+            self._move_and_settle(simulator, self.C7_BACK_CUBE_NAME, x=3.0, y=float(y), z=0.25)
 
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
@@ -267,13 +246,13 @@ class UvcProfile640x48060Deg(MonoCamera):
         blue_25 = metrics["blue_pixels"].get("occ_25", 0)
         blue_50 = metrics["blue_pixels"].get("occ_50", 0)
         relation_ok = blue_25 > blue_50
-        threshold_ok = blue_25 > metrics["threshold"] and blue_50 > metrics["threshold"]
-        metrics["checks"] = {"occlusion_relation": relation_ok, "threshold_ok": threshold_ok}
+        threshold_ok = blue_25 > self.C7_MIN_PIXELS and blue_50 > self.C7_MIN_PIXELS
+        metrics["checks"] = {"occlusion_relation": bool(relation_ok), "threshold_ok": bool(threshold_ok)}
 
         if not (relation_ok and threshold_ok):
             raise AssertionError(
                 f"C7 checks failed: {metrics['checks']}, blue_pixels={metrics['blue_pixels']}, "
-                f"threshold={metrics['threshold']}"
+                f"threshold={self.C7_MIN_PIXELS}"
             )
 
         return {"id": "C7", "metrics": metrics, "artifacts": artifacts}
