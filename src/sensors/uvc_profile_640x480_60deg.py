@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import time
 from math import radians
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import cv2
@@ -66,14 +67,14 @@ class UvcProfile640x48060Deg(MonoCamera):
         self.clip_far = self.CLIP_FAR
         self.update_rate = self.UPDATE_RATE
 
-        base_world_path = CONFIG["BASE_WORLD_PATH"]
-        if not os.path.isabs(base_world_path):
-            base_world_path = os.path.join(CONFIG["ROOT_PATH"], base_world_path)
-        worlds_dir = os.path.dirname(base_world_path)
+        worlds_dir = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_dir.is_absolute():
+            worlds_dir = Path(CONFIG["ROOT_PATH"]) / worlds_dir
+
         self.test_to_world = {
-            "c1_size_order_test": os.path.join(worlds_dir, "c1_single_cube.world"),
-            "c4_geometries_presence_test": os.path.join(worlds_dir, "c4_geometries.world"),
-            "c7_occlusion_test": os.path.join(worlds_dir, "c7_occlusion.world"),
+            "c1_size_order_test": str(worlds_dir / "camera_c1_single_cube.world"),
+            "c4_geometries_presence_test": str(worlds_dir / "camera_c4_geometries.world"),
+            "c7_occlusion_test": str(worlds_dir / "camera_c7_occlusion.world"),
         }
 
     def _results_dir(self) -> str:

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, List, Tuple
+from collections import deque
+from math import tan
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -33,14 +36,21 @@ class StereoProfileBase(Sensor):
     C7_CASES = {"occ_25": 0.10, "occ_50": 0.20}
     C7_MIN_PIXELS = 800
     MIN_DISPARITY_PX = 2
+    C8_OBJECTS = ("obj_near_cube", "obj_near_sphere", "obj_far_cube", "obj_far_sphere", "wall_left", "wall_right")
+    S1_MAX_REL_ERROR = 0.10
+    S1_MIN_PASS_OBJECTS = 3
+    S2_MIN_VALID_GAIN = 0.05
+    PAIR_TIMEOUT_S = 4.0
+    PAIR_RETRIES = 3
+    PAIR_MAX_SKEW_S = 0.08
 
     def __init__(self, CONFIG):
         super().__init__()
         self.CONFIG = CONFIG
 
-        worlds_root = CONFIG["WORLDS_PATH"]
-        if not os.path.isabs(worlds_root):
-            worlds_root = os.path.join(CONFIG["ROOT_PATH"], worlds_root)
+        worlds_root = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_root.is_absolute():
+            worlds_root = Path(CONFIG["ROOT_PATH"]) / worlds_root
 
         sensors_root = CONFIG["SENSORS_PATH"]
         if not os.path.isabs(sensors_root):
@@ -49,9 +59,11 @@ class StereoProfileBase(Sensor):
         self.sensor_sdf_path = os.path.join(sensors_root, self.sensor_type, f"{self.sensor_name}.sdf")
 
         self.test_to_world = {
-            "stereo_topics_presence_test": os.path.join(worlds_root, "camera_c4_geometries.world"),
-            "stereo_disparity_test": os.path.join(worlds_root, "camera_c1_single_cube.world"),
-            "stereo_occlusion_test": os.path.join(worlds_root, "camera_c7_occlusion.world"),
+            "stereo_topics_presence_test": str(worlds_root / "camera_c4_geometries.world"),
+            "stereo_disparity_test": str(worlds_root / "camera_c1_single_cube.world"),
+            "stereo_occlusion_test": str(worlds_root / "camera_c7_occlusion.world"),
+            "s1_stereo_accuracy_test": str(worlds_root / "camera_c8_stereo_complex.world"),
+            "s2_texture_vs_smooth_stability_test": str(worlds_root / "camera_c8_stereo_complex.world"),
         }
 
         self.image_width = int(self.IMAGE_WIDTH)
@@ -107,6 +119,170 @@ class StereoProfileBase(Sensor):
         left = rospy.wait_for_message(self.LEFT_IMAGE_TOPIC, Image, timeout=timeout)
         right = rospy.wait_for_message(self.RIGHT_IMAGE_TOPIC, Image, timeout=timeout)
         return left, right
+
+    @staticmethod
+    def _msg_stamp(msg: Image) -> float:
+        stamp = float(msg.header.stamp.to_sec())
+        if stamp <= 0.0:
+            return float(time.time())
+        return stamp
+
+    def _find_closest_pair(
+        self,
+        left_buf: List[Image],
+        right_buf: List[Image],
+    ) -> Optional[Tuple[Image, Image, float]]:
+        if not left_buf or not right_buf:
+            return None
+
+        best_pair: Optional[Tuple[Image, Image, float]] = None
+        for left in left_buf:
+            t_left = self._msg_stamp(left)
+            for right in right_buf:
+                skew = abs(t_left - self._msg_stamp(right))
+                if best_pair is None or skew < best_pair[2]:
+                    best_pair = (left, right, float(skew))
+        return best_pair
+
+    def _wait_pair_closest(
+        self,
+        timeout: float = 4.0,
+        retries: int = 3,
+        max_skew_s: float = 0.08,
+    ) -> Tuple[Image, Image, float]:
+        for _ in range(int(retries)):
+            left_buf = deque(maxlen=40)
+            right_buf = deque(maxlen=40)
+
+            def _left_cb(msg: Image) -> None:
+                left_buf.append(msg)
+
+            def _right_cb(msg: Image) -> None:
+                right_buf.append(msg)
+
+            left_sub = rospy.Subscriber(self.LEFT_IMAGE_TOPIC, Image, _left_cb, queue_size=40)
+            right_sub = rospy.Subscriber(self.RIGHT_IMAGE_TOPIC, Image, _right_cb, queue_size=40)
+
+            best_pair: Optional[Tuple[Image, Image, float]] = None
+            started = time.time()
+            try:
+                while (time.time() - started) < float(timeout):
+                    if left_buf and right_buf:
+                        candidate = self._find_closest_pair(list(left_buf), list(right_buf))
+                        if candidate is not None and (best_pair is None or candidate[2] < best_pair[2]):
+                            best_pair = candidate
+                        if best_pair is not None and best_pair[2] <= float(max_skew_s):
+                            break
+                    time.sleep(0.02)
+            finally:
+                left_sub.unregister()
+                right_sub.unregister()
+
+            if best_pair is not None:
+                return best_pair
+
+        raise RuntimeError("Failed to capture left/right pair with timestamp proximity")
+
+    @staticmethod
+    def _fx_from_fov(width_px: int, horizontal_fov_rad: float) -> float:
+        if width_px <= 0 or horizontal_fov_rad <= 0.0:
+            raise RuntimeError(f"Invalid camera intrinsics for fx estimation: width={width_px}, fov={horizontal_fov_rad}")
+        return float((width_px / 2.0) / tan(horizontal_fov_rad / 2.0))
+
+    def _compute_disparity_and_depth(
+        self,
+        left_bgr: np.ndarray,
+        right_bgr: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, float]:
+        if left_bgr.shape[:2] != right_bgr.shape[:2]:
+            raise RuntimeError(f"Stereo size mismatch: left={left_bgr.shape[:2]}, right={right_bgr.shape[:2]}")
+
+        if self.baseline <= 0.0:
+            raise RuntimeError(f"Invalid baseline: {self.baseline}")
+
+        gray_left = cv2.cvtColor(left_bgr, cv2.COLOR_BGR2GRAY)
+        gray_right = cv2.cvtColor(right_bgr, cv2.COLOR_BGR2GRAY)
+        h, w = gray_left.shape[:2]
+        fx = self._fx_from_fov(w, float(self.horizontal_fov))
+
+        num_disp = max(16, min(256, ((w // 4) // 16) * 16))
+        if num_disp < 16:
+            num_disp = 16
+        block_size = 7
+
+        matcher = cv2.StereoSGBM_create(
+            minDisparity=0,
+            numDisparities=int(num_disp),
+            blockSize=int(block_size),
+            P1=8 * block_size * block_size,
+            P2=32 * block_size * block_size,
+            disp12MaxDiff=1,
+            preFilterCap=31,
+            uniquenessRatio=8,
+            speckleWindowSize=50,
+            speckleRange=2,
+            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
+        )
+
+        disparity = matcher.compute(gray_left, gray_right).astype(np.float32) / 16.0
+        depth = np.full(disparity.shape, np.nan, dtype=np.float32)
+        valid = disparity > 0.0
+        depth[valid] = float(fx * float(self.baseline)) / disparity[valid]
+        return disparity, depth, float(fx)
+
+    @staticmethod
+    def _disparity_to_viz(disparity: np.ndarray) -> np.ndarray:
+        valid = np.isfinite(disparity) & (disparity > 0.0)
+        h, w = disparity.shape[:2]
+        norm_u8 = np.zeros((h, w), dtype=np.uint8)
+
+        if np.any(valid):
+            vals = disparity[valid]
+            lo = float(np.percentile(vals, 5))
+            hi = float(np.percentile(vals, 95))
+            if hi <= lo:
+                hi = lo + 1e-3
+            scaled = np.clip((disparity - lo) / (hi - lo), 0.0, 1.0)
+            norm_u8[valid] = (scaled[valid] * 255.0).astype(np.uint8)
+
+        return cv2.applyColorMap(norm_u8, cv2.COLORMAP_TURBO)
+
+    @staticmethod
+    def _expand_bbox(
+        bbox: Tuple[int, int, int, int],
+        width: int,
+        height: int,
+        pad: int = 6,
+    ) -> Tuple[int, int, int, int]:
+        x, y, bw, bh = bbox
+        x0 = max(0, int(x) - int(pad))
+        y0 = max(0, int(y) - int(pad))
+        x1 = min(int(width), int(x + bw + pad))
+        y1 = min(int(height), int(y + bh + pad))
+        return int(x0), int(y0), int(max(1, x1 - x0)), int(max(1, y1 - y0))
+
+    @staticmethod
+    def _median_depth_in_bbox(
+        depth_map: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Tuple[Optional[float], int]:
+        x, y, w, h = bbox
+        roi = depth_map[y:y + h, x:x + w]
+        valid = roi[np.isfinite(roi) & (roi > 0.0)]
+        if valid.size == 0:
+            return None, 0
+        return float(np.median(valid)), int(valid.size)
+
+    @staticmethod
+    def _valid_ratio(
+        disparity: np.ndarray,
+        mask: np.ndarray,
+    ) -> float:
+        area = int(np.count_nonzero(mask))
+        if area <= 0:
+            return 0.0
+        valid = mask & np.isfinite(disparity) & (disparity > 0.0)
+        return float(np.count_nonzero(valid) / area)
 
     @staticmethod
     def _clean_mask(mask: np.ndarray) -> np.ndarray:
@@ -328,3 +504,215 @@ class StereoProfileBase(Sensor):
                 )
 
         return {"id": "STEREO_C7", "metrics": metrics}
+
+    def s1_stereo_accuracy_test(self, simulator) -> Dict[str, Any]:
+        self._open_test_scene(simulator, "s1_stereo_accuracy_test")
+        for model_name in self.C8_OBJECTS:
+            if not simulator.wait_for_model_spawn(model_name, timeout=20):
+                raise RuntimeError(f"Model not spawned: {model_name}")
+
+        left_msg, right_msg, skew = self._wait_pair_closest(
+            timeout=float(self.PAIR_TIMEOUT_S),
+            retries=int(self.PAIR_RETRIES),
+            max_skew_s=float(self.PAIR_MAX_SKEW_S),
+        )
+        left = self._msg_to_bgr(left_msg)
+        right = self._msg_to_bgr(right_msg)
+        disparity, depth_map, fx = self._compute_disparity_and_depth(left, right)
+
+        h, w = left.shape[:2]
+        left_hsv = cv2.cvtColor(left, cv2.COLOR_BGR2HSV)
+        disparity_viz = self._disparity_to_viz(disparity)
+
+        objects = {
+            "obj_near_cube": {"color": "red", "depth_gt": 2.0},
+            "obj_near_sphere": {"color": "green", "depth_gt": 2.0},
+            "obj_far_cube": {"color": "blue", "depth_gt": 4.5},
+            "obj_far_sphere": {"color": "yellow", "depth_gt": 4.5},
+        }
+
+        metrics: Dict[str, Any] = {
+            "pair_skew_s": float(skew),
+            "baseline_m": float(self.baseline),
+            "horizontal_fov_rad": float(self.horizontal_fov),
+            "fx_px": float(fx),
+            "objects": {},
+            "max_rel_error": float(self.S1_MAX_REL_ERROR),
+            "min_pass_objects": int(self.S1_MIN_PASS_OBJECTS),
+        }
+
+        left_dbg = left.copy()
+        disp_dbg = disparity_viz.copy()
+        passed = 0
+
+        for obj_name, cfg in objects.items():
+            mask = self._color_mask(left_hsv, cfg["color"])
+            area, bbox = self._bbox(mask)
+            if area <= 0:
+                metrics["objects"][obj_name] = {"detected": False, "reason": "color contour not found"}
+                continue
+
+            roi = self._expand_bbox(bbox, width=w, height=h, pad=6)
+            depth_est, valid_px = self._median_depth_in_bbox(depth_map, roi)
+            if depth_est is None:
+                metrics["objects"][obj_name] = {
+                    "detected": True,
+                    "depth_gt_m": float(cfg["depth_gt"]),
+                    "depth_est_m": None,
+                    "valid_px": int(valid_px),
+                    "ok": False,
+                    "reason": "no valid disparity in ROI",
+                }
+                continue
+
+            rel_err = abs(float(depth_est) - float(cfg["depth_gt"])) / float(cfg["depth_gt"])
+            ok = rel_err <= float(self.S1_MAX_REL_ERROR)
+            if ok:
+                passed += 1
+
+            metrics["objects"][obj_name] = {
+                "detected": True,
+                "depth_gt_m": float(cfg["depth_gt"]),
+                "depth_est_m": float(depth_est),
+                "valid_px": int(valid_px),
+                "relative_error": float(rel_err),
+                "ok": bool(ok),
+            }
+
+            x, y, bw, bh = roi
+            color = (0, 255, 0) if ok else (0, 0, 255)
+            cv2.rectangle(left_dbg, (x, y), (x + bw, y + bh), color, 2)
+            cv2.rectangle(disp_dbg, (x, y), (x + bw, y + bh), color, 2)
+            label = f"{obj_name}: z={depth_est:.2f}m gt={cfg['depth_gt']:.2f} err={rel_err:.2f}"
+            cv2.putText(left_dbg, label, (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+
+        metrics["passed_objects"] = int(passed)
+        metrics["checks"] = {"pass_count_ok": bool(passed >= int(self.S1_MIN_PASS_OBJECTS))}
+
+        artifacts = [
+            self._save_frame("s1_c8_left.png", left),
+            self._save_frame("s1_c8_right.png", right),
+            self._save_frame("s1_c8_disparity.png", disparity_viz),
+            self._save_frame("s1_c8_left_rois.png", left_dbg),
+            self._save_frame("s1_c8_disparity_rois.png", disp_dbg),
+        ]
+
+        if passed < int(self.S1_MIN_PASS_OBJECTS):
+            raise AssertionError(
+                f"S1 failed: passed_objects={passed} < {self.S1_MIN_PASS_OBJECTS}, "
+                f"objects={metrics['objects']}"
+            )
+
+        return {"id": "S1", "metrics": metrics, "artifacts": artifacts}
+
+    def s2_texture_vs_smooth_stability_test(self, simulator) -> Dict[str, Any]:
+        self._open_test_scene(simulator, "s2_texture_vs_smooth_stability_test")
+        for model_name in self.C8_OBJECTS:
+            if not simulator.wait_for_model_spawn(model_name, timeout=20):
+                raise RuntimeError(f"Model not spawned: {model_name}")
+
+        left_msg, right_msg, skew = self._wait_pair_closest(
+            timeout=float(self.PAIR_TIMEOUT_S),
+            retries=int(self.PAIR_RETRIES),
+            max_skew_s=float(self.PAIR_MAX_SKEW_S),
+        )
+        left = self._msg_to_bgr(left_msg)
+        right = self._msg_to_bgr(right_msg)
+        disparity, depth_map, _ = self._compute_disparity_and_depth(left, right)
+        disparity_viz = self._disparity_to_viz(disparity)
+
+        h, w = disparity.shape[:2]
+        y0 = int(0.18 * h)
+        y1 = int(0.70 * h)
+        x0 = int(0.12 * w)
+        x1 = int(0.88 * w)
+        xm = (x0 + x1) // 2
+
+        wall_band = np.zeros((h, w), dtype=bool)
+        wall_band[y0:y1, x0:x1] = True
+
+        wall_depth_mask = np.isfinite(depth_map) & (depth_map >= 4.2) & (depth_map <= 5.8)
+        wall_mask = wall_band & wall_depth_mask
+
+        left_half_mask = np.zeros((h, w), dtype=bool)
+        right_half_mask = np.zeros((h, w), dtype=bool)
+        left_half_mask[y0:y1, x0:xm] = True
+        right_half_mask[y0:y1, xm:x1] = True
+
+        left_wall = wall_mask & left_half_mask
+        right_wall = wall_mask & right_half_mask
+
+        # Fallback if depth-based wall isolation is too sparse.
+        if np.count_nonzero(left_wall) < 200 or np.count_nonzero(right_wall) < 200:
+            left_wall = left_half_mask
+            right_wall = right_half_mask
+
+        gray = cv2.cvtColor(left, cv2.COLOR_BGR2GRAY)
+        left_texture = float(np.std(gray[left_wall])) if np.count_nonzero(left_wall) > 0 else 0.0
+        right_texture = float(np.std(gray[right_wall])) if np.count_nonzero(right_wall) > 0 else 0.0
+
+        left_ratio = self._valid_ratio(disparity, left_wall)
+        right_ratio = self._valid_ratio(disparity, right_wall)
+
+        if right_texture >= left_texture:
+            textured_side = "right"
+            smooth_side = "left"
+            valid_ratio_textured = float(right_ratio)
+            valid_ratio_smooth = float(left_ratio)
+        else:
+            textured_side = "left"
+            smooth_side = "right"
+            valid_ratio_textured = float(left_ratio)
+            valid_ratio_smooth = float(right_ratio)
+
+        gain = float(valid_ratio_textured - valid_ratio_smooth)
+        check_gain_005 = gain >= float(self.S2_MIN_VALID_GAIN)
+        check_non_worse = valid_ratio_textured >= valid_ratio_smooth
+
+        metrics = {
+            "pair_skew_s": float(skew),
+            "assignment_by_texture_std": {
+                "left_std": float(left_texture),
+                "right_std": float(right_texture),
+                "textured_side": textured_side,
+                "smooth_side": smooth_side,
+            },
+            "valid_ratio": {
+                "left": float(left_ratio),
+                "right": float(right_ratio),
+                "textured": float(valid_ratio_textured),
+                "smooth": float(valid_ratio_smooth),
+                "gain_textured_minus_smooth": float(gain),
+            },
+            "checks": {
+                "textured_ge_smooth_plus_0_05": bool(check_gain_005),
+                "textured_ge_smooth": bool(check_non_worse),
+            },
+        }
+
+        dbg = disparity_viz.copy()
+        left_color = (255, 255, 0) if textured_side == "left" else (200, 200, 200)
+        right_color = (255, 255, 0) if textured_side == "right" else (200, 200, 200)
+        cv2.rectangle(dbg, (x0, y0), (xm, y1), left_color, 2)
+        cv2.rectangle(dbg, (xm, y0), (x1, y1), right_color, 2)
+        cv2.putText(dbg, f"left ratio={left_ratio:.3f} std={left_texture:.1f}", (x0, max(20, y0 - 28)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, left_color, 2, cv2.LINE_AA)
+        cv2.putText(dbg, f"right ratio={right_ratio:.3f} std={right_texture:.1f}", (xm, max(20, y0 - 28)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, right_color, 2, cv2.LINE_AA)
+        cv2.putText(dbg, f"gain={gain:.3f}", (x0, max(20, y0 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+
+        artifacts = [
+            self._save_frame("s2_c8_left.png", left),
+            self._save_frame("s2_c8_right.png", right),
+            self._save_frame("s2_c8_disparity.png", disparity_viz),
+            self._save_frame("s2_c8_disparity_rois.png", dbg),
+        ]
+
+        if not check_non_worse:
+            raise AssertionError(
+                f"S2 failed: textured_ratio={valid_ratio_textured:.4f} < smooth_ratio={valid_ratio_smooth:.4f}, "
+                f"gain={gain:.4f}"
+            )
+
+        return {"id": "S2", "metrics": metrics, "artifacts": artifacts}
