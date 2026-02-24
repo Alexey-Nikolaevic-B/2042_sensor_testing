@@ -4,6 +4,7 @@ from PyQt5.QtCore import *
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 from ui_sensor_page import SensorPage
+from ui_sensor_test import TestingWindow
 
 icon_path = "./icon"
 
@@ -11,52 +12,21 @@ class Main_UI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.is_maximized = False
+
+        self.sensor_page = SensorPage(parent=self)
+        self.test_page = TestingWindow(parent=self)
+        
         self.init_ui()
         self.setup_styles()
-        self.connect_actions()
-        self.setup_sensor_page()
+        self.setup_connections()
+        self.setup_signals()
+        
+        self.open_sensor_page()
 
-    def init_ui(self):
-        uic.loadUi('./qt/untitled.ui', self)
-        self.setWindowFlag(Qt.FramelessWindowHint)
-        self.setWindowFlags(Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.wt_sideabar_max.setVisible(False)
+    def setup_signals(self):
+        self.sensor_page.details_widget.signal_test_window.connect(self.open_testing_window)
 
-    def setup_sensor_page(self):
-        self.sensor_page = SensorPage(parent=self)
-        self.stackedWidget.insertWidget(0, self.sensor_page)
-
-    def setup_styles(self):
-        button_style = """
-            QPushButton { background-color: transparent; border: none; padding: 5px; }
-            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border-radius: 4px; }
-            QPushButton:pressed { background-color: rgba(255, 255, 255, 0.2); }
-        """
-        
-        self.wt_top.setStyleSheet("QWidget {background-color : rgb(30,30,30)}")
-        self.wt_sideabar_min.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
-        self.wt_sideabar_max.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
-        self.wt_main.setStyleSheet("QWidget {background-color : rgb(62,62,66)}")
-        
-        top_buttons = [self.btn_minimize, self.btn_maximize, self.btn_close]
-        top_icons = ["minimize.png", "maximize.png", "close.png"]
-        
-        for button, icon in zip(top_buttons, top_icons):
-            button.setIcon(QIcon(f"{icon_path}/{icon}"))
-            button.setStyleSheet(button_style)
-        
-        sidebar_buttons = [
-            self.btn_sidebar_menu, self.btn_sidebar_sensor, self.btn_sidebar_test,
-            self.btn_sidebar_menu_2, self.btn_sidebar_sensor_2, self.btn_sidebar_test_2
-        ]
-        sidebar_icons = ["menu.png", "sensor.png", "minimize.png"] * 2
-        
-        for button, icon in zip(sidebar_buttons, sidebar_icons):
-            button.setIcon(QIcon(f"{icon_path}/{icon}"))
-            button.setStyleSheet(button_style)
-
-    def connect_actions(self):
+    def setup_connections(self):
         self.btn_minimize.clicked.connect(self.showMinimized)
         self.btn_maximize.clicked.connect(self.toggle_maximize)
         self.btn_close.clicked.connect(self.close)
@@ -91,3 +61,52 @@ class Main_UI(QMainWindow):
     def toggle_sidebar(self, toggle):
         self.wt_sideabar_min.setVisible(toggle)
         self.wt_sideabar_max.setVisible(not toggle)
+
+    def open_testing_window(self, sensor_data):
+        self.stackedWidget.insertWidget(1, self.test_page)
+        self.stackedWidget.setCurrentIndex(1)
+
+        self.test_page.load_new_sensor(sensor_data)
+
+    def open_sensor_page(self):
+        self.stackedWidget.insertWidget(0, self.sensor_page)
+        self.stackedWidget.setCurrentIndex(0)
+
+    def init_ui(self):
+        uic.loadUi('./qt/untitled.ui', self)
+        self.setWindowFlag(Qt.FramelessWindowHint)
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.wt_sideabar_max.setVisible(False)
+
+    def setup_styles(self):
+        button_style = """
+            QPushButton { background-color: transparent; border: none; padding: 5px; }
+            QPushButton:hover { background-color: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+            QPushButton:pressed { background-color: rgba(255, 255, 255, 0.2); }
+        """
+        
+        self.wt_top.setStyleSheet("QWidget {background-color : rgb(30,30,30)}")
+        self.wt_sideabar_min.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
+        self.wt_sideabar_max.setStyleSheet("QWidget {background-color : rgb(37,37,38)}")
+        self.wt_main.setStyleSheet("QWidget {background-color : rgb(62,62,66)}")
+        
+        top_buttons = [self.btn_minimize, self.btn_maximize, self.btn_close]
+        top_icons = ["minimize.png", "maximize.png", "close.png"]
+        
+        for button, icon in zip(top_buttons, top_icons):
+            button.setIcon(QIcon(f"{icon_path}/{icon}"))
+            button.setStyleSheet(button_style)
+        
+        sidebar_buttons = [
+            self.btn_sidebar_menu, self.btn_sidebar_sensor, self.btn_sidebar_test,
+            self.btn_sidebar_menu_2, self.btn_sidebar_sensor_2, self.btn_sidebar_test_2
+        ]
+        sidebar_icons = ["menu.png", "sensor.png", "test_menu.png"] * 2
+        
+        for button, icon in zip(sidebar_buttons, sidebar_icons):
+            button.setIcon(QIcon(f"{icon_path}/{icon}"))
+            button.setStyleSheet(button_style)
+
+        app_icon = QIcon("icon/fail.png")
+        self.app_icon.setPixmap(app_icon.pixmap(24, 24))

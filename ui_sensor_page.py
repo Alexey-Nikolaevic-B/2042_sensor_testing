@@ -8,11 +8,17 @@ import os
 from ui_sensor_card import SensorCard
 from ui_sensor_details import SensorDetails
 
+from PyQt5.QtCore import pyqtSignal
+
 icon_path = "./icon"
 
 class SensorPage(QWidget):
+    signal_closed_details = pyqtSignal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        self.details_widget = SensorDetails()
 
         self.sensors_data = self.get_data('sensors', '_mock.json')
         self.sensor_types = self.get_data('types', '_types.json')
@@ -24,10 +30,14 @@ class SensorPage(QWidget):
         self.current_filter = None
         self.cards_dict = {}
         
+        self.setup_signals()
         self.create_all_cards()
         self.setup_styles()
         self.connect_actions()
         self.update_cards_grid()
+
+    def setup_signals(self):
+        self.details_widget.signal_closed_details.connect(self.hide_details)
 
     def init_ui(self):
         uic.loadUi('./qt/sensor_page.ui', self)
@@ -39,7 +49,6 @@ class SensorPage(QWidget):
         self.btn_filter.setMenu(filter_menu)
         filter_menu.triggered.connect(self.filter_sensors)
 
-        self.details_widget = SensorDetails()
         self.verticalLayout_2.addWidget(self.details_widget)
         self.details_widget.hide()
         
@@ -92,7 +101,7 @@ class SensorPage(QWidget):
 
     def connect_actions(self):
         self.search_input.textChanged.connect(self.search_sensors)
-        self.details_widget.btn_close_details.clicked.connect(self.close_details)
+        # self.details_widget.btn_close_details.clicked.connect(self.close_details)
         self.btn_disable_filter.clicked.connect(self.remove_filter)
 
     def create_all_cards(self):

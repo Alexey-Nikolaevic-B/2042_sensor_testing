@@ -58,12 +58,15 @@
         <number>0</number>
        </property>
        <item>
-        <widget class="QTextEdit" name="app_icon">
-         <property name="maximumSize">
+        <widget class="QLabel" name="app_icon">
+         <property name="minimumSize">
           <size>
            <width>30</width>
            <height>30</height>
           </size>
+         </property>
+         <property name="text">
+          <string/>
          </property>
         </widget>
        </item>

@@ -1,116 +1,212 @@
 {
   "sensors": [
     {
-      "id": "SENSOR_RFID_001",
-      "name": "OmniScan-RF100",
+      "id": "HC-SR04",
+      "name": "HC-SR04 Ultrasonic Sensor",
       "type": "rfid",
       "description": "Ultra-high frequency RFID reader with 10-meter range",
-      "image_path": "./img/rfid_sensor.png"
+      "image_path": "./img/sensor.png",
+      "tests": [
+        {"name": "1 Test","description": " 1",  "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration","description": " 2",   "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test","description": " 3",   "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy","description": " 4",   "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]  
     },
     {
       "id": "SENSOR_RFID_002",
       "name": "TagMaster Pro-X",
       "type": "rfid",
       "description": "Industrial RFID reader with anti-collision technology",
-      "image_path": "./img/rfid_pro.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "2 Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_CAM_001",
       "name": "VisionEye HD-4K",
       "type": "camera",
       "description": "4K industrial camera with IR night vision",
-      "image_path": "./img/camera_hd.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_CAM_002",
       "name": "PanoramaView 360",
       "type": "camera",
       "description": "360-degree surveillance camera with motion detection",
-      "image_path": "./img/camera_360.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TACT_001",
       "name": "TouchSense T-200",
       "type": "tactile",
       "description": "Pressure-sensitive tactile sensor array",
-      "image_path": "./img/tactile_sensor.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TACT_002",
       "name": "FlexiForce A201",
       "type": "tactile",
       "description": "Thin-film force sensor for robotic grippers",
-      "image_path": "./img/flexiforce.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TORQ_001",
       "name": "TorqueMaster Q100",
       "type": "torque",
       "description": "Digital torque sensor with USB output",
-      "image_path": "./img/torque_sensor.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TORQ_002",
       "name": "RotaryTorque R-45",
       "type": "torque",
       "description": "Rotary torque sensor for assembly lines",
-      "image_path": "./img/rotary_torque.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_CAM_003",
       "name": "ThermalCam T-800",
       "type": "camera",
       "description": "Thermal imaging camera for temperature monitoring",
-      "image_path": "./img/thermal_camera.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_RFID_003",
       "name": "NanoTag NT-50",
       "type": "rfid",
       "description": "Miniature RFID tag for small parts tracking",
-      "image_path": "./img/nanotag.png"
+      "image_path": "./img/image.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TACT_003",
       "name": "TextureScan TS-10",
       "type": "tactile",
       "description": "Surface texture and roughness detection sensor",
-      "image_path": "./img/texturescan.png"
+      "image_path": "./img/texturescanimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TORQ_003",
       "name": "SmartWrench SW-200",
       "type": "torque",
       "description": "Wireless torque wrench with Bluetooth connectivity",
-      "image_path": "./img/smartwrench.png"
+      "image_path": "./img/smartwrenchimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_CAM_004",
       "name": "DepthSense D-3D",
       "type": "camera",
       "description": "3D depth sensing camera for object recognition",
-      "image_path": "./img/depth_camera.png"
+      "image_path": "./img/depth_cameraimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_RFID_004",
       "name": "SecureScan S-500",
       "type": "rfid",
       "description": "Encrypted RFID system for high-security applications",
-      "image_path": "./img/securescan.png"
+      "image_path": "./img/securescanimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TACT_004",
       "name": "VibraCheck VC-30",
       "type": "tactile",
       "description": "Vibration and touch detection sensor",
-      "image_path": "./img/vibracheck.png"
+      "image_path": "./img/vibracheckimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     },
     {
       "id": "SENSOR_TORQ_004",
       "name": "MultiAxis MA-12",
       "type": "torque",
       "description": "Multi-axis torque sensor for robotic joints",
-      "image_path": "./img/multiaxis.png"
+      "image_path": "./img/multiaxisimage.png",
+      "tests": [
+        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
+      ]
     }
   ]
 }
