@@ -11,7 +11,6 @@ project(rfid_antenna_plugin)
 find_package(catkin REQUIRED COMPONENTS
   gazebo_msgs
   geometry_msgs
-  mavros_msgs
   roscpp
   roslib
   rospy

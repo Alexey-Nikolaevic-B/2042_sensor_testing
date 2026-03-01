@@ -11,7 +11,6 @@ find_package(catkin REQUIRED COMPONENTS
         gazebo_msgs
         geometry_msgs
         tf2_ros
-        mavros_msgs
         roscpp
         roslib
         rospy

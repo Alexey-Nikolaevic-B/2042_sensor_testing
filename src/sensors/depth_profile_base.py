@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
@@ -46,6 +47,7 @@ class DepthProfileBase(DepthCamera):
     C5_END_X = 10.0
     C5_STEP = 0.5
     C5_DEPTH_TOLERANCE_M = 0.10
+    DEPTH_ROI_HALF_WINDOW = 2  # 5x5 ROI
 
     C6_START_X = 2.0
     C6_END_X = 1.0
@@ -56,6 +58,7 @@ class DepthProfileBase(DepthCamera):
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
         self.CONFIG = CONFIG
+        self._last_test_diagnostics: Dict[str, Any] = {}
 
         self.image_width = int(self.IMAGE_WIDTH)
         self.image_height = int(self.IMAGE_HEIGHT)
@@ -73,6 +76,12 @@ class DepthProfileBase(DepthCamera):
             "c6_small_displacement_sensitivity_test": str(worlds_root / "camera_c6_small_shifts.world"),
         }
         self.camera_model_name = self._read_camera_model_name()
+
+    def _set_test_diagnostics(self, **kwargs) -> None:
+        self._last_test_diagnostics.update(kwargs)
+
+    def get_last_test_diagnostics(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._last_test_diagnostics)
 
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
@@ -101,6 +110,7 @@ class DepthProfileBase(DepthCamera):
         return out
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
+        self._last_test_diagnostics = {}
         world = self.test_to_world[test_name]
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = {}
@@ -135,14 +145,35 @@ class DepthProfileBase(DepthCamera):
         enc = (msg.encoding or "").lower()
 
         if enc == "32fc1":
-            arr = np.frombuffer(msg.data, dtype=np.float32)
-            return arr.reshape(h, w)
+            dtype = np.float32
+            bytes_per_px = 4
+        elif enc == "16uc1":
+            dtype = np.uint16
+            bytes_per_px = 2
+        else:
+            raise ValueError(f"Unsupported depth encoding: {msg.encoding}")
 
+        row_stride_bytes = int(msg.step) if int(msg.step) > 0 else int(w * bytes_per_px)
+        min_row_bytes = int(w * bytes_per_px)
+        if row_stride_bytes < min_row_bytes:
+            raise ValueError(
+                f"Invalid depth step for encoding={msg.encoding}: step={row_stride_bytes}, min_required={min_row_bytes}"
+            )
+
+        cols_with_stride = row_stride_bytes // bytes_per_px
+        raw = np.frombuffer(msg.data, dtype=dtype)
+        expected_size = int(h * cols_with_stride)
+        if raw.size < expected_size:
+            raise ValueError(
+                f"Depth buffer too small for encoding={msg.encoding}: got={raw.size}, expected={expected_size}"
+            )
+
+        arr = raw[:expected_size].reshape(h, cols_with_stride)[:, :w]
         if enc == "16uc1":
-            arr_mm = np.frombuffer(msg.data, dtype=np.uint16).reshape(h, w)
+            arr_mm = arr.astype(np.uint16, copy=False)
             return arr_mm.astype(np.float32) / 1000.0
 
-        raise ValueError(f"Unsupported depth encoding: {msg.encoding}")
+        return arr.astype(np.float32, copy=False)
 
     @staticmethod
     def _color_msg_to_bgr(msg: Image) -> np.ndarray:
@@ -198,17 +229,79 @@ class DepthProfileBase(DepthCamera):
         return cx, cy
 
     @staticmethod
-    def _depth_at_pixel(depth_m: np.ndarray, x: int, y: int, window: int = 3) -> Optional[float]:
+    def _depth_at_pixel_with_meta(depth_m: np.ndarray, x: int, y: int, half_window: int = 2) -> Tuple[Optional[float], Dict[str, Any]]:
         h, w = depth_m.shape[:2]
-        x0 = max(0, int(x) - int(window))
-        y0 = max(0, int(y) - int(window))
-        x1 = min(w, int(x) + int(window) + 1)
-        y1 = min(h, int(y) + int(window) + 1)
+        x0 = max(0, int(x) - int(half_window))
+        y0 = max(0, int(y) - int(half_window))
+        x1 = min(w, int(x) + int(half_window) + 1)
+        y1 = min(h, int(y) + int(half_window) + 1)
         roi = depth_m[y0:y1, x0:x1]
         valid = roi[np.isfinite(roi) & (roi > 0.0)]
+        meta = {
+            "pixel": {"x": int(x), "y": int(y)},
+            "roi_xyxy": [int(x0), int(y0), int(x1), int(y1)],
+            "roi_shape": [int(max(0, y1 - y0)), int(max(0, x1 - x0))],
+            "valid_count": int(valid.size),
+            "aggregator": "mean",
+        }
         if valid.size == 0:
-            return None
-        return float(np.median(valid))
+            return None, meta
+        return float(np.mean(valid)), meta
+
+    def _depth_at_pixel(self, depth_m: np.ndarray, x: int, y: int, window: int = 2) -> Optional[float]:
+        z, _ = self._depth_at_pixel_with_meta(depth_m, x=x, y=y, half_window=window)
+        return z
+
+    def _depth_frame_stats(self, depth_msg: Image, depth_m: np.ndarray) -> Dict[str, Any]:
+        finite = depth_m[np.isfinite(depth_m)]
+        positive = finite[finite > 0.0] if finite.size > 0 else np.array([], dtype=np.float32)
+        stats: Dict[str, Any] = {
+            "encoding": str(depth_msg.encoding),
+            "dtype": str(depth_m.dtype),
+            "shape": [int(depth_m.shape[0]), int(depth_m.shape[1])],
+            "step_bytes": int(depth_msg.step),
+            "is_bigendian": int(depth_msg.is_bigendian),
+            "finite_count": int(finite.size),
+            "positive_count": int(positive.size),
+            "finite_min_m": None,
+            "finite_max_m": None,
+        }
+        if finite.size > 0:
+            stats["finite_min_m"] = float(np.min(finite))
+            stats["finite_max_m"] = float(np.max(finite))
+        return stats
+
+    def _measure_depth_with_meta(
+        self,
+        depth_m: np.ndarray,
+        bgr: Optional[np.ndarray] = None,
+        color_hint: Optional[str] = None,
+    ) -> Tuple[Optional[float], Tuple[int, int], Dict[str, Any]]:
+        h, w = depth_m.shape[:2]
+        if bgr is not None and color_hint:
+            centroid = self._find_centroid(bgr, color_hint)
+            if centroid is not None:
+                z, roi_meta = self._depth_at_pixel_with_meta(
+                    depth_m,
+                    centroid[0],
+                    centroid[1],
+                    half_window=int(self.DEPTH_ROI_HALF_WINDOW),
+                )
+                if z is not None:
+                    roi_meta["source"] = "color_centroid"
+                    roi_meta["color_hint"] = str(color_hint)
+                    return z, centroid, roi_meta
+
+        cx, cy = w // 2, h // 2
+        z_center, roi_meta = self._depth_at_pixel_with_meta(
+            depth_m,
+            cx,
+            cy,
+            half_window=int(self.DEPTH_ROI_HALF_WINDOW),
+        )
+        roi_meta["source"] = "frame_center"
+        roi_meta["color_hint"] = str(color_hint) if color_hint else None
+        return z_center, (cx, cy), roi_meta
 
     def _measure_depth(
         self,
@@ -216,17 +309,8 @@ class DepthProfileBase(DepthCamera):
         bgr: Optional[np.ndarray] = None,
         color_hint: Optional[str] = None,
     ) -> Tuple[Optional[float], Tuple[int, int]]:
-        h, w = depth_m.shape[:2]
-        if bgr is not None and color_hint:
-            centroid = self._find_centroid(bgr, color_hint)
-            if centroid is not None:
-                z = self._depth_at_pixel(depth_m, centroid[0], centroid[1], window=3)
-                if z is not None:
-                    return z, centroid
-
-        cx, cy = w // 2, h // 2
-        z_center = self._depth_at_pixel(depth_m, cx, cy, window=4)
-        return z_center, (cx, cy)
+        z, point, _ = self._measure_depth_with_meta(depth_m=depth_m, bgr=bgr, color_hint=color_hint)
+        return z, point
 
     @staticmethod
     def _draw_debug(
@@ -334,6 +418,7 @@ class DepthProfileBase(DepthCamera):
 
         results = []
         measured_values = []
+        first_frame_diagnostics: Optional[Dict[str, Any]] = None
 
         for d in self.TEST_DISTANCES:
             simulator.set_pose(cube_name, reset_x, 0.0, cube_z)
@@ -344,9 +429,17 @@ class DepthProfileBase(DepthCamera):
 
             depth_msg = self._wait_depth(timeout=1.5)
             depth_m = self._depth_msg_to_meters(depth_msg)
-            z, _ = self._measure_depth(depth_m, bgr=None, color_hint=None)
+            color_msg = self._try_wait_color(timeout=1.0)
+            bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+            z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr=bgr, color_hint="green")
             if z is None or np.isnan(z) or z <= 0.0:
                 raise RuntimeError(f"Invalid depth measurement at distance={d}: {z}")
+
+            if first_frame_diagnostics is None:
+                first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
+                first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                first_frame_diagnostics["measurement_roi"] = roi_meta
+                self._set_test_diagnostics(depth_perception_first_frame=first_frame_diagnostics)
 
             if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
                 raise AssertionError(f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})")
@@ -365,6 +458,7 @@ class DepthProfileBase(DepthCamera):
                     "measured": float(z),
                     "abs_error": float(abs_err),
                     "rel_error": float(rel_err),
+                    "measurement_roi": roi_meta,
                 }
             )
             measured_values.append(float(z))
@@ -380,6 +474,7 @@ class DepthProfileBase(DepthCamera):
                 "max_abs_error_m": float(self.MAX_ABS_ERROR_M),
                 "measurements": results,
                 "monotonic_increasing": True,
+                "first_frame_diagnostics": first_frame_diagnostics or {},
             },
         }
 
@@ -488,19 +583,27 @@ class DepthProfileBase(DepthCamera):
             "x_values_m": self._iter_float_range(self.C5_START_X, self.C5_END_X, self.C5_STEP),
             "tolerance_m": float(self.C5_DEPTH_TOLERANCE_M),
             "samples": [],
+            "first_frame_diagnostics": {},
         }
 
         self._open_test_scene(simulator, "c5_working_range_test")
         if not simulator.wait_for_model_spawn(self.C5_RANGE_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C5_RANGE_CUBE_NAME}")
 
+        first_frame_diagnostics: Optional[Dict[str, Any]] = None
         for x in metrics["x_values_m"]:
             self._move_and_settle(simulator, self.C5_RANGE_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.3)
             depth_msg = self._wait_depth(timeout=2.0)
             depth_m = self._depth_msg_to_meters(depth_msg)
             color_msg = self._try_wait_color(timeout=1.0)
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
-            z, point = self._measure_depth(depth_m, bgr, color_hint="green")
+            z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr, color_hint="green")
+
+            if first_frame_diagnostics is None:
+                first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
+                first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                first_frame_diagnostics["measurement_roi"] = roi_meta
+                self._set_test_diagnostics(c5_first_frame=first_frame_diagnostics)
 
             finite_ok = bool(z is not None and np.isfinite(z))
             abs_err = float(abs(float(z) - float(x))) if finite_ok else float("inf")
@@ -510,6 +613,7 @@ class DepthProfileBase(DepthCamera):
                 {
                     "x_m": float(x),
                     "depth_m": None if z is None else float(z),
+                    "measurement_roi": roi_meta,
                     "finite_ok": finite_ok,
                     "abs_error_m": abs_err if np.isfinite(abs_err) else None,
                     "ok": sample_ok,
@@ -524,6 +628,9 @@ class DepthProfileBase(DepthCamera):
                     [f"C5 x={x:.2f}m", f"depth={z if z is not None else float('nan'):.3f}m", f"ok={sample_ok}"],
                 )
                 artifacts.append(self._save_frame(f"c5_x_{str(x).replace('.', '_')}.png", dbg))
+
+        if first_frame_diagnostics is not None:
+            metrics["first_frame_diagnostics"] = first_frame_diagnostics
 
         best_start = None
         best_end = None

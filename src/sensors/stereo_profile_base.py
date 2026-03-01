@@ -165,28 +165,66 @@ class StereoProfileBase(Sensor):
     def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
         expected_left = str(self.LEFT_IMAGE_TOPIC)
         expected_right = str(self.RIGHT_IMAGE_TOPIC)
+        sensor_name = str(self.sensor_name)
+
+        preferred_pairs: List[Tuple[str, str, str]] = [
+            (expected_left, expected_right, "expected"),
+            (f"/{sensor_name}_left/image_raw", f"/{sensor_name}_right/image_raw", "name_underscore"),
+            (f"/{sensor_name}/left/image_raw", f"/{sensor_name}/right/image_raw", "name_namespace"),
+        ]
 
         deadline = time.time() + float(warmup_timeout)
         last_topics: List[str] = []
         while time.time() < deadline:
             topics = self._list_image_topics()
             last_topics = topics
-            if expected_left in topics and expected_right in topics:
-                return expected_left, expected_right, {
-                    "expected_left": expected_left,
-                    "expected_right": expected_right,
-                    "selected_left": expected_left,
-                    "selected_right": expected_right,
-                    "topics_found": topics,
-                    "topic_mapping_changed": False,
-                }
-            if topics:
-                break
+            for left_topic, right_topic, source in preferred_pairs:
+                if left_topic in topics and right_topic in topics:
+                    return left_topic, right_topic, {
+                        "expected_left": expected_left,
+                        "expected_right": expected_right,
+                        "selected_left": left_topic,
+                        "selected_right": right_topic,
+                        "selected_source": source,
+                        "topics_found": topics,
+                        "topic_mapping_changed": bool(left_topic != expected_left or right_topic != expected_right),
+                    }
             time.sleep(0.2)
 
-        token = str(self.sensor_name)
-        left_candidates = [t for t in last_topics if "/left/" in t and ("image_raw" in t or t.endswith("/image"))]
-        right_candidates = [t for t in last_topics if "/right/" in t and ("image_raw" in t or t.endswith("/image"))]
+        if expected_left in last_topics and expected_right in last_topics:
+            return expected_left, expected_right, {
+                "expected_left": expected_left,
+                "expected_right": expected_right,
+                "selected_left": expected_left,
+                "selected_right": expected_right,
+                "selected_source": "expected_after_warmup",
+                "topics_found": last_topics,
+                "topic_mapping_changed": False,
+            }
+
+        for left_topic, right_topic, source in preferred_pairs[1:]:
+            if left_topic in last_topics and right_topic in last_topics:
+                return left_topic, right_topic, {
+                    "expected_left": expected_left,
+                    "expected_right": expected_right,
+                    "selected_left": left_topic,
+                    "selected_right": right_topic,
+                    "selected_source": f"{source}_after_warmup",
+                    "topics_found": last_topics,
+                    "topic_mapping_changed": True,
+                }
+
+        token = sensor_name
+        left_candidates = [
+            t for t in last_topics
+            if (("/left/" in t) or ("_left/" in t) or t.endswith("_left/image_raw"))
+            and ("image_raw" in t or t.endswith("/image"))
+        ]
+        right_candidates = [
+            t for t in last_topics
+            if (("/right/" in t) or ("_right/" in t) or t.endswith("_right/image_raw"))
+            and ("image_raw" in t or t.endswith("/image"))
+        ]
 
         # Сначала ищем кандидаты в namespace профиля, затем общий fallback.
         ns_left = [t for t in left_candidates if token in t]
@@ -199,6 +237,7 @@ class StereoProfileBase(Sensor):
             "expected_right": expected_right,
             "selected_left": selected_left,
             "selected_right": selected_right,
+            "selected_source": "heuristic_fallback",
             "topics_found": last_topics,
             "topic_mapping_changed": bool(selected_left != expected_left or selected_right != expected_right),
         }
@@ -506,6 +545,9 @@ class StereoProfileBase(Sensor):
             raise AssertionError(f"Right frame shape mismatch: {right.shape[:2]} != {(self.image_height, self.image_width)}")
 
         metrics: Dict[str, Any] = {"left": {}, "right": {}, "threshold": int(self.C4_MIN_PIXELS)}
+        pair_diag = self.get_last_test_diagnostics().get("stereo_pair_capture", {})
+        if pair_diag:
+            metrics["topic_diagnostics"] = pair_diag
 
         for side, frame in (("left", left), ("right", right)):
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -569,6 +611,7 @@ class StereoProfileBase(Sensor):
                 "right_center_x": float(r_center_x),
                 "disparity_px": float(disparity_px),
                 "min_disparity_px": float(self.MIN_DISPARITY_PX),
+                "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
             },
         }
 
@@ -587,6 +630,7 @@ class StereoProfileBase(Sensor):
             "right": {"blue_pixels": {}},
             "cases": dict(self.C7_CASES),
             "threshold": int(self.C7_MIN_PIXELS),
+            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
         }
 
         for case_name, y in self.C7_CASES.items():
