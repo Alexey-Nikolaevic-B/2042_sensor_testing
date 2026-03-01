@@ -103,7 +103,11 @@ class DepthProfileBase(DepthCamera):
     def _open_test_scene(self, simulator, test_name: str) -> None:
         world = self.test_to_world[test_name]
         if not simulator.open_scene(world, self.sensor_sdf_path):
-            raise RuntimeError(f"Failed to open scene for {test_name}: {world}")
+            diag = {}
+            if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+                diag = simulator.get_last_scene_diagnostics()
+            reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
 

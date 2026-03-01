@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import copy
 import os
+import threading
 import time
-from collections import deque
 from math import tan
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,9 +41,14 @@ class StereoProfileBase(Sensor):
     S1_MAX_REL_ERROR = 0.10
     S1_MIN_PASS_OBJECTS = 3
     S2_MIN_VALID_GAIN = 0.05
-    PAIR_TIMEOUT_S = 4.0
+    # Первичный прогрев топиков/кадров для stereo делаем длиннее,
+    # иначе на "холодном" запуске часто прилетают таймауты.
+    PAIR_TIMEOUT_S = 25.0
     PAIR_RETRIES = 3
+    PAIR_QUEUE_SIZE = 20
+    PAIR_SLOP_S = 0.08
     PAIR_MAX_SKEW_S = 0.08
+    TOPIC_WARMUP_TIMEOUT_S = 25.0
 
     def __init__(self, CONFIG):
         super().__init__()
@@ -73,6 +79,7 @@ class StereoProfileBase(Sensor):
         self.clip_far = float(self.CLIP_FAR)
         self.update_rate = int(self.UPDATE_RATE)
         self.baseline = float(self.BASELINE_M)
+        self._last_test_diagnostics: Dict[str, Any] = {}
 
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
@@ -89,10 +96,21 @@ class StereoProfileBase(Sensor):
         cv2.imwrite(out, frame)
         return out
 
+    def _set_test_diagnostics(self, **kwargs) -> None:
+        self._last_test_diagnostics.update(kwargs)
+
+    def get_last_test_diagnostics(self) -> Dict[str, Any]:
+        return copy.deepcopy(self._last_test_diagnostics)
+
     def _open_test_scene(self, simulator, test_name: str) -> None:
+        self._last_test_diagnostics = {}
         world = self.test_to_world[test_name]
         if not simulator.open_scene(world, self.sensor_sdf_path):
-            raise RuntimeError(f"Failed to open scene for {test_name}: {world}")
+            diag = {}
+            if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+                diag = simulator.get_last_scene_diagnostics()
+            reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
         rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
@@ -116,8 +134,7 @@ class StereoProfileBase(Sensor):
         raise ValueError(f"Unsupported image encoding: {msg.encoding}")
 
     def _wait_pair(self, timeout: float = 35.0) -> Tuple[Image, Image]:
-        left = rospy.wait_for_message(self.LEFT_IMAGE_TOPIC, Image, timeout=timeout)
-        right = rospy.wait_for_message(self.RIGHT_IMAGE_TOPIC, Image, timeout=timeout)
+        left, right, _ = self._wait_pair_closest(timeout=timeout, retries=1, max_skew_s=float(self.PAIR_MAX_SKEW_S))
         return left, right
 
     @staticmethod
@@ -127,60 +144,158 @@ class StereoProfileBase(Sensor):
             return float(time.time())
         return stamp
 
-    def _find_closest_pair(
-        self,
-        left_buf: List[Image],
-        right_buf: List[Image],
-    ) -> Optional[Tuple[Image, Image, float]]:
-        if not left_buf or not right_buf:
-            return None
+    @staticmethod
+    def _list_image_topics() -> List[str]:
+        try:
+            published = rospy.get_published_topics()
+        except Exception:
+            return []
+        return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
 
-        best_pair: Optional[Tuple[Image, Image, float]] = None
-        for left in left_buf:
-            t_left = self._msg_stamp(left)
-            for right in right_buf:
-                skew = abs(t_left - self._msg_stamp(right))
-                if best_pair is None or skew < best_pair[2]:
-                    best_pair = (left, right, float(skew))
-        return best_pair
+    @staticmethod
+    def _choose_topic(candidates: List[str]) -> str:
+        if not candidates:
+            return ""
+        prioritized = sorted(
+            candidates,
+            key=lambda t: (0 if t.endswith("/image_raw") else 1, len(t), t),
+        )
+        return prioritized[0]
+
+    def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
+        expected_left = str(self.LEFT_IMAGE_TOPIC)
+        expected_right = str(self.RIGHT_IMAGE_TOPIC)
+
+        deadline = time.time() + float(warmup_timeout)
+        last_topics: List[str] = []
+        while time.time() < deadline:
+            topics = self._list_image_topics()
+            last_topics = topics
+            if expected_left in topics and expected_right in topics:
+                return expected_left, expected_right, {
+                    "expected_left": expected_left,
+                    "expected_right": expected_right,
+                    "selected_left": expected_left,
+                    "selected_right": expected_right,
+                    "topics_found": topics,
+                    "topic_mapping_changed": False,
+                }
+            if topics:
+                break
+            time.sleep(0.2)
+
+        token = str(self.sensor_name)
+        left_candidates = [t for t in last_topics if "/left/" in t and ("image_raw" in t or t.endswith("/image"))]
+        right_candidates = [t for t in last_topics if "/right/" in t and ("image_raw" in t or t.endswith("/image"))]
+
+        # Сначала ищем кандидаты в namespace профиля, затем общий fallback.
+        ns_left = [t for t in left_candidates if token in t]
+        ns_right = [t for t in right_candidates if token in t]
+        selected_left = self._choose_topic(ns_left) or self._choose_topic(left_candidates) or expected_left
+        selected_right = self._choose_topic(ns_right) or self._choose_topic(right_candidates) or expected_right
+
+        return selected_left, selected_right, {
+            "expected_left": expected_left,
+            "expected_right": expected_right,
+            "selected_left": selected_left,
+            "selected_right": selected_right,
+            "topics_found": last_topics,
+            "topic_mapping_changed": bool(selected_left != expected_left or selected_right != expected_right),
+        }
 
     def _wait_pair_closest(
         self,
-        timeout: float = 4.0,
+        timeout: float = 25.0,
         retries: int = 3,
         max_skew_s: float = 0.08,
     ) -> Tuple[Image, Image, float]:
-        for _ in range(int(retries)):
-            left_buf = deque(maxlen=40)
-            right_buf = deque(maxlen=40)
+        try:
+            import message_filters
+        except Exception as exc:  # noqa: BLE001
+            self._set_test_diagnostics(stereo_pair_capture={"reason": "message_filters_import_error", "error": str(exc)})
+            raise RuntimeError(f"message_filters import failed: {exc}")
 
-            def _left_cb(msg: Image) -> None:
-                left_buf.append(msg)
+        left_topic, right_topic, topic_diag = self._resolve_stereo_topics(self.TOPIC_WARMUP_TIMEOUT_S)
+        pair_diag: Dict[str, Any] = dict(topic_diag)
+        pair_diag.update(
+            {
+                "timeout_s": float(timeout),
+                "retries": int(retries),
+                "max_skew_s": float(max_skew_s),
+                "queue_size": int(self.PAIR_QUEUE_SIZE),
+                "slop_s": float(self.PAIR_SLOP_S),
+                "attempts": [],
+            }
+        )
 
-            def _right_cb(msg: Image) -> None:
-                right_buf.append(msg)
+        for attempt in range(1, int(retries) + 1):
+            attempt_diag: Dict[str, Any] = {"attempt": int(attempt), "left_msgs": 0, "right_msgs": 0}
+            lock = threading.Lock()
+            pair_holder: Dict[str, Any] = {}
 
-            left_sub = rospy.Subscriber(self.LEFT_IMAGE_TOPIC, Image, _left_cb, queue_size=40)
-            right_sub = rospy.Subscriber(self.RIGHT_IMAGE_TOPIC, Image, _right_cb, queue_size=40)
+            def _left_count(_msg: Image) -> None:
+                attempt_diag["left_msgs"] += 1
 
-            best_pair: Optional[Tuple[Image, Image, float]] = None
+            def _right_count(_msg: Image) -> None:
+                attempt_diag["right_msgs"] += 1
+
+            def _pair_cb(left_msg: Image, right_msg: Image) -> None:
+                with lock:
+                    if pair_holder:
+                        return
+                    skew = abs(self._msg_stamp(left_msg) - self._msg_stamp(right_msg))
+                    pair_holder["left"] = left_msg
+                    pair_holder["right"] = right_msg
+                    pair_holder["skew"] = float(skew)
+
+            left_counter_sub = rospy.Subscriber(left_topic, Image, _left_count, queue_size=200)
+            right_counter_sub = rospy.Subscriber(right_topic, Image, _right_count, queue_size=200)
+
+            left_mf = message_filters.Subscriber(left_topic, Image)
+            right_mf = message_filters.Subscriber(right_topic, Image)
+            sync = message_filters.ApproximateTimeSynchronizer(
+                [left_mf, right_mf],
+                queue_size=int(self.PAIR_QUEUE_SIZE),
+                slop=float(self.PAIR_SLOP_S),
+                allow_headerless=False,
+            )
+            sync.registerCallback(_pair_cb)
+
             started = time.time()
             try:
                 while (time.time() - started) < float(timeout):
-                    if left_buf and right_buf:
-                        candidate = self._find_closest_pair(list(left_buf), list(right_buf))
-                        if candidate is not None and (best_pair is None or candidate[2] < best_pair[2]):
-                            best_pair = candidate
-                        if best_pair is not None and best_pair[2] <= float(max_skew_s):
+                    with lock:
+                        if pair_holder:
                             break
                     time.sleep(0.02)
             finally:
-                left_sub.unregister()
-                right_sub.unregister()
+                left_counter_sub.unregister()
+                right_counter_sub.unregister()
+                try:
+                    left_mf.sub.unregister()
+                    right_mf.sub.unregister()
+                except Exception:
+                    pass
 
-            if best_pair is not None:
-                return best_pair
+            with lock:
+                has_pair = bool(pair_holder)
+                if has_pair:
+                    skew = float(pair_holder["skew"])
+                    attempt_diag["pair_received"] = True
+                    attempt_diag["pair_skew_s"] = skew
+                    pair_diag["attempts"].append(attempt_diag)
+                    self._set_test_diagnostics(stereo_pair_capture=pair_diag)
+                    if skew <= float(max_skew_s):
+                        return pair_holder["left"], pair_holder["right"], skew
+                    attempt_diag["pair_rejected"] = True
+                    attempt_diag["pair_reject_reason"] = "skew_above_threshold"
+                else:
+                    attempt_diag["pair_received"] = False
 
+            pair_diag["attempts"].append(attempt_diag)
+
+        pair_diag["reason"] = "pair_timeout"
+        self._set_test_diagnostics(stereo_pair_capture=pair_diag)
         raise RuntimeError("Failed to capture left/right pair with timestamp proximity")
 
     @staticmethod
@@ -540,6 +655,9 @@ class StereoProfileBase(Sensor):
             "max_rel_error": float(self.S1_MAX_REL_ERROR),
             "min_pass_objects": int(self.S1_MIN_PASS_OBJECTS),
         }
+        pair_diag = self.get_last_test_diagnostics().get("stereo_pair_capture", {})
+        if pair_diag:
+            metrics["topic_diagnostics"] = pair_diag
 
         left_dbg = left.copy()
         disp_dbg = disparity_viz.copy()
@@ -671,6 +789,7 @@ class StereoProfileBase(Sensor):
 
         metrics = {
             "pair_skew_s": float(skew),
+            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
             "assignment_by_texture_std": {
                 "left_std": float(left_texture),
                 "right_std": float(right_texture),

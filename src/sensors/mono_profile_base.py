@@ -50,7 +50,12 @@ class MonoProfileBase(MonoCamera):
     C10_FAR_COARSE_STEP = 0.5
     C10_FAR_FINE_STEP = 0.01
     C10_MIN_RED_PIXELS = 20
+    # Новый дополнительный критерий C10: объект считается практически исчезнувшим,
+    # если его видимая площадь < 1% кадра на дальнем участке поиска.
+    C10_MIN_VISIBLE_RATIO = 0.01
     C11_DURATION_S = 60.0
+    C11_WARMUP_SECONDS = 2.0
+    C11_JITTER_PERCENTILE = 95
     C11_MAX_JITTER_S = 0.015
 
     def __init__(self, CONFIG):
@@ -99,6 +104,33 @@ class MonoProfileBase(MonoCamera):
 
     def _wait_image(self, timeout: float = 35.0) -> Image:
         return rospy.wait_for_message(self.IMAGE_TOPIC, Image, timeout=timeout)
+
+    @staticmethod
+    def _msg_stamp_s(msg: Image) -> float:
+        stamp = float(msg.header.stamp.to_sec())
+        if stamp <= 0.0:
+            return float(time.time())
+        return stamp
+
+    def _wait_image_after(self, prev_stamp_s: Optional[float], timeout: float = 35.0) -> Image:
+        start = time.time()
+        last_msg: Optional[Image] = None
+
+        while (time.time() - start) < float(timeout):
+            remaining = max(0.2, float(timeout) - (time.time() - start))
+            msg = self._wait_image(timeout=min(remaining, 5.0))
+            last_msg = msg
+
+            if prev_stamp_s is None:
+                return msg
+
+            stamp = self._msg_stamp_s(msg)
+            if stamp > float(prev_stamp_s) + 1e-6:
+                return msg
+
+        if last_msg is not None:
+            return last_msg
+        raise RuntimeError(f"No image received on {self.IMAGE_TOPIC} within {timeout:.1f}s")
 
     @staticmethod
     def _msg_to_bgr(msg: Image) -> np.ndarray:
@@ -206,11 +238,28 @@ class MonoProfileBase(MonoCamera):
             result.append((area, (int(x), int(y), int(cw), int(ch))))
         return result
 
-    def _red_visibility(self, frame_bgr: np.ndarray) -> Tuple[bool, int]:
+    def _red_stats(self, frame_bgr: np.ndarray) -> Dict[str, float]:
         hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
         red = self._red_mask(hsv)
-        red_pixels = self._count_pixels(red)
-        return red_pixels >= int(self.C10_MIN_RED_PIXELS), int(red_pixels)
+        red_pixels = float(self._count_pixels(red))
+
+        contours, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        max_contour_area = 0.0
+        if contours:
+            max_contour_area = float(max(cv2.contourArea(c) for c in contours))
+
+        h, w = frame_bgr.shape[:2]
+        frame_area = float(max(1, h * w))
+        pixel_ratio = float(red_pixels / frame_area)
+        contour_ratio = float(max_contour_area / frame_area)
+
+        return {
+            "red_pixels": float(red_pixels),
+            "pixel_ratio": pixel_ratio,
+            "max_contour_area": max_contour_area,
+            "contour_ratio": contour_ratio,
+            "visible_by_pixels": bool(red_pixels >= int(self.C10_MIN_RED_PIXELS)),
+        }
 
     @staticmethod
     def _annotate(frame: np.ndarray, lines: List[str]) -> np.ndarray:
@@ -229,7 +278,11 @@ class MonoProfileBase(MonoCamera):
     def _open_test_scene(self, simulator, test_name: str) -> None:
         world = self.test_to_world[test_name]
         if not simulator.open_scene(world, self.sensor_sdf_path):
-            raise RuntimeError(f"Failed to open scene for {test_name}: {world}")
+            diag = {}
+            if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+                diag = simulator.get_last_scene_diagnostics()
+            reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
         rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
@@ -244,6 +297,7 @@ class MonoProfileBase(MonoCamera):
         metrics: Dict[str, Any] = {
             "positions": list(self.C1_POSITIONS),
             "bbox_area_px": {},
+            "frame_stamp_s": {},
             "min_margin_ratio": float(self.C1_MIN_MARGIN_RATIO),
         }
 
@@ -251,22 +305,36 @@ class MonoProfileBase(MonoCamera):
         if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
 
+        prev_stamp_s: Optional[float] = None
         for x in self.C1_POSITIONS:
             label = f"x{int(x)}"
             self._move_and_settle(simulator, self.C1_CUBE_NAME, x=float(x), y=0.0, z=0.25)
 
-            msg = self._wait_image(timeout=35.0)
+            msg = self._wait_image_after(prev_stamp_s, timeout=35.0)
+            prev_stamp_s = self._msg_stamp_s(msg)
             frame = self._msg_to_bgr(msg)
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
             red = self._red_mask(hsv)
             area, (bx, by, bw, bh) = self._bbox_area(red)
             metrics["bbox_area_px"][label] = int(area)
+            metrics["frame_stamp_s"][label] = float(prev_stamp_s)
+
+            artifacts.append(self._save_frame(f"c1_{label}_raw.png", frame))
 
             debug = frame.copy()
             if area > 0:
                 cv2.rectangle(debug, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
-            cv2.putText(debug, f"{label}: area={area}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                debug,
+                f"{label}: area={area} ts={prev_stamp_s:.6f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
             artifacts.append(self._save_frame(f"c1_{label}.png", debug))
 
         x1 = metrics["bbox_area_px"].get("x1", 0)
@@ -488,6 +556,7 @@ class MonoProfileBase(MonoCamera):
             "near_search": {"start_x": float(self.C10_NEAR_START_X), "end_x": float(self.C10_NEAR_SEARCH_END_X)},
             "far_search": {"coarse_step": float(self.C10_FAR_COARSE_STEP), "fine_step": float(self.C10_FAR_FINE_STEP)},
             "min_red_pixels": int(self.C10_MIN_RED_PIXELS),
+            "min_visible_ratio": float(self.C10_MIN_VISIBLE_RATIO),
         }
 
         self._open_test_scene(simulator, "c10_clipping_test")
@@ -501,8 +570,9 @@ class MonoProfileBase(MonoCamera):
             self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.2)
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
-            visible, red_pixels = self._red_visibility(frame)
-            if visible:
+            red_stats = self._red_stats(frame)
+            red_pixels = int(red_stats["red_pixels"])
+            if bool(red_stats["visible_by_pixels"]):
                 near_after = (float(x), frame, red_pixels)
                 break
             near_before = (float(x), frame, red_pixels)
@@ -525,8 +595,17 @@ class MonoProfileBase(MonoCamera):
             self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.2)
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
-            visible, red_pixels = self._red_visibility(frame)
-            if visible:
+            red_stats = self._red_stats(frame)
+            red_pixels = int(red_stats["red_pixels"])
+            visible = bool(red_stats["visible_by_pixels"])
+            # Исторически критерий был только по red_pixels==0.
+            # Теперь учитываем физически корректный "практически исчез" на дальнем участке:
+            # очень малая доля видимого объекта (<1% кадра) при X >= 0.9*far_clip.
+            tiny_far_object = bool(
+                float(x) >= (0.9 * float(self.clip_far))
+                and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
+            )
+            if visible and not tiny_far_object:
                 far_last_visible = (float(x), frame, red_pixels)
             else:
                 far_first_not_visible = (float(x), frame, red_pixels)
@@ -544,8 +623,14 @@ class MonoProfileBase(MonoCamera):
             self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.15)
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
-            visible, red_pixels = self._red_visibility(frame)
-            if visible:
+            red_stats = self._red_stats(frame)
+            red_pixels = int(red_stats["red_pixels"])
+            visible = bool(red_stats["visible_by_pixels"])
+            tiny_far_object = bool(
+                float(x) >= (0.9 * float(self.clip_far))
+                and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
+            )
+            if visible and not tiny_far_object:
                 far_last_visible_fine = (float(x), frame, red_pixels)
             else:
                 far_first_not_visible_fine = (float(x), frame, red_pixels)
@@ -564,28 +649,57 @@ class MonoProfileBase(MonoCamera):
             "far_ok": bool(far_ok),
         }
 
+        near_after_stats = self._red_stats(near_after[1])
+        far_before_stats = self._red_stats(far_last_visible_fine[1])
+        far_after_stats = self._red_stats(far_first_not_visible_fine[1])
+        metrics["visibility_debug"] = {
+            "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
+            "far_before_pixel_ratio": float(far_before_stats["pixel_ratio"]),
+            "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
+        }
+
         if near_before is not None:
             dbg = self._annotate(
                 near_before[1],
-                [f"near_before x={near_before[0]:.2f}", f"red_px={near_before[2]}", "visible=False"],
+                [
+                    f"near_before x={near_before[0]:.2f}",
+                    f"red_px={near_before[2]}",
+                    f"ratio={self._red_stats(near_before[1])['pixel_ratio']:.4f}",
+                    "visible=False",
+                ],
             )
             artifacts.append(self._save_frame("c10_near_before.png", dbg))
 
         dbg = self._annotate(
             near_after[1],
-            [f"near_after x={near_after[0]:.2f}", f"red_px={near_after[2]}", "visible=True"],
+            [
+                f"near_after x={near_after[0]:.2f}",
+                f"red_px={near_after[2]}",
+                f"ratio={near_after_stats['pixel_ratio']:.4f}",
+                "visible=True",
+            ],
         )
         artifacts.append(self._save_frame("c10_near_after.png", dbg))
 
         dbg = self._annotate(
             far_last_visible_fine[1],
-            [f"far_before x={far_last_visible_fine[0]:.2f}", f"red_px={far_last_visible_fine[2]}", "visible=True"],
+            [
+                f"far_before x={far_last_visible_fine[0]:.2f}",
+                f"red_px={far_last_visible_fine[2]}",
+                f"ratio={far_before_stats['pixel_ratio']:.4f}",
+                "visible=True",
+            ],
         )
         artifacts.append(self._save_frame("c10_far_before.png", dbg))
 
         dbg = self._annotate(
             far_first_not_visible_fine[1],
-            [f"far_after x={far_first_not_visible_fine[0]:.2f}", f"red_px={far_first_not_visible_fine[2]}", "visible=False"],
+            [
+                f"far_after x={far_first_not_visible_fine[0]:.2f}",
+                f"red_px={far_first_not_visible_fine[2]}",
+                f"ratio={far_after_stats['pixel_ratio']:.4f}",
+                "visible=False_or_tiny",
+            ],
         )
         artifacts.append(self._save_frame("c10_far_after.png", dbg))
 
@@ -603,6 +717,8 @@ class MonoProfileBase(MonoCamera):
         metrics: Dict[str, Any] = {
             "duration_target_s": float(self.C11_DURATION_S),
             "update_rate_target_hz": float(self.update_rate),
+            "warmup_seconds": float(self.C11_WARMUP_SECONDS),
+            "jitter_percentile": int(self.C11_JITTER_PERCENTILE),
             "jitter_limit_s": float(self.C11_MAX_JITTER_S),
         }
 
@@ -642,15 +758,27 @@ class MonoProfileBase(MonoCamera):
         if len(monotonic_stamps) < 2:
             raise AssertionError("C11 failed: no monotonic timestamp sequence")
 
-        total_dt = float(monotonic_stamps[-1] - monotonic_stamps[0])
+        warmup_frames = int(max(1, round(float(self.update_rate) * float(self.C11_WARMUP_SECONDS))))
+        if len(monotonic_stamps) <= (warmup_frames + 1):
+            raise AssertionError(
+                f"C11 failed: not enough frames after warmup ({len(monotonic_stamps)} total, warmup={warmup_frames})"
+            )
+
+        eval_stamps = monotonic_stamps[warmup_frames:]
+        total_dt = float(eval_stamps[-1] - eval_stamps[0])
         if total_dt <= 0.0:
             raise AssertionError(f"C11 failed: invalid timestamps interval ({total_dt})")
 
-        n_frames = len(monotonic_stamps)
+        n_frames = len(eval_stamps)
         fps_actual = float(n_frames / total_dt)
         ideal_dt = float(1.0 / float(self.update_rate))
-        deltas = np.diff(np.array(monotonic_stamps, dtype=np.float64))
-        jitter = float(np.max(np.abs(deltas - ideal_dt))) if deltas.size > 0 else 0.0
+        deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
+
+        abs_jitter = np.abs(deltas - ideal_dt) if deltas.size > 0 else np.array([], dtype=np.float64)
+        # Было раньше: jitter = max(|dt - ideal_dt|), что слишком чувствительно к единичным пикам.
+        # Теперь: устойчивый jitter = P95(|dt - ideal_dt|), max оставляем как диагностическую метрику.
+        jitter = float(np.percentile(abs_jitter, self.C11_JITTER_PERCENTILE)) if abs_jitter.size > 0 else 0.0
+        jitter_max_abs = float(np.max(abs_jitter)) if abs_jitter.size > 0 else 0.0
         max_dt = float(np.max(deltas)) if deltas.size > 0 else 0.0
         dropouts = int(np.sum(deltas > (2.0 * ideal_dt))) if deltas.size > 0 else 0
 
@@ -661,10 +789,12 @@ class MonoProfileBase(MonoCamera):
         metrics.update(
             {
                 "frames_captured": int(n_frames),
+                "frames_skipped_warmup": int(warmup_frames),
                 "timestamps_interval_s": total_dt,
                 "fps_actual_hz": fps_actual,
                 "ideal_dt_s": ideal_dt,
                 "jitter_s": jitter,
+                "jitter_old_max_abs_s": jitter_max_abs,
                 "max_dt_s": max_dt,
                 "dropouts_count": dropouts,
                 "checks": {

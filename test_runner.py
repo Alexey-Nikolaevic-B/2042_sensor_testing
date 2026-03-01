@@ -69,6 +69,16 @@ def _shutdown_core(core: Core) -> None:
                 pass
 
 
+def _safe_json(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, dict):
+        return {str(k): _safe_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_safe_json(v) for v in value]
+    return str(value)
+
+
 def main() -> int:
     args = _parse_args()
 
@@ -109,7 +119,30 @@ def main() -> int:
                 result = test_fn(core.simulator)
                 test_results.append({"name": test_name, "status": "PASS", "result": result})
             except Exception as exc:  # noqa: BLE001
-                test_results.append({"name": test_name, "status": "FAIL", "error": str(exc)})
+                entry: Dict[str, Any] = {"name": test_name, "status": "FAIL", "error": str(exc)}
+
+                details: Dict[str, Any] = {}
+                sim = core.simulator
+                if hasattr(sim, "get_last_scene_diagnostics") and callable(sim.get_last_scene_diagnostics):
+                    try:
+                        diag = sim.get_last_scene_diagnostics()
+                        if diag:
+                            details["scene"] = diag
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                sensor_diag_getter = getattr(sensor, "get_last_test_diagnostics", None)
+                if callable(sensor_diag_getter):
+                    try:
+                        sensor_diag = sensor_diag_getter()
+                        if sensor_diag:
+                            details["sensor"] = sensor_diag
+                    except Exception:  # noqa: BLE001
+                        pass
+
+                if details:
+                    entry["error_details"] = _safe_json(details)
+                test_results.append(entry)
 
         overall = "PASS" if all(t["status"] == "PASS" for t in test_results) else "FAIL"
         payload = {
