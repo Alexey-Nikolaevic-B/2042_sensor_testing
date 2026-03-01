@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 from gazebo_msgs.srv import SetModelState, GetWorldProperties
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Pose, Point, Quaternion
+from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist
 from gazebo_msgs.msg import ModelState, ModelStates
 
 import logging
@@ -24,7 +24,7 @@ class Simulator():
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
-        
+
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
         self.LAUNCH_FILE = CONFIG['LAUNCH_FILE']
@@ -70,7 +70,7 @@ class Simulator():
 
 
     def receive_sensor_data(self, topic):
-        try: 
+        try:
             msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
             logger.info(f'Received sensor data from topic: {topic}')
             return msg
@@ -80,7 +80,7 @@ class Simulator():
     def is_gazebo_running(self):
         try:
             from gazebo_msgs.srv import GetWorldProperties
-            
+
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
             get_world_properties = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
             response = get_world_properties()
@@ -101,9 +101,9 @@ class Simulator():
             logger.error('Failed to start Gazebo: Node is not running')
             return False
 
-        self._generate_world(world_path, camera_model_path)     
+        self._generate_world(world_path, camera_model_path)
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
-        
+
         try:
             self.gazebo_process = subprocess.Popen(
                 ["bash", "-c", roslaunch_cmd],
@@ -119,7 +119,7 @@ class Simulator():
             )
             stdout_thread.daemon = True
             stdout_thread.start()
-            
+
             stderr_thread = threading.Thread(
                 target=self._log_stderr_output,
                 args=(self.gazebo_process.stderr,)
@@ -142,7 +142,7 @@ class Simulator():
             else:
                 logger.error('Failed to start Gazebo')
                 return False
-                
+
         except Exception as e:
             logger.error(f'Failed to start Gazebo: {str(e)}')
             return False
@@ -184,16 +184,16 @@ class Simulator():
             tree = ET.parse(world_path)
             root = tree.getroot()
             world = root.find('world')
-            
+
             camera_tree = ET.parse(camera_model_path)
             camera_root = camera_tree.getroot()
-            
+
             camera_models = camera_root.findall('model')
-            
+
             for i, camera_model in enumerate(camera_models):
                 model_name = camera_model.get('name', f'unknown_{i}')
                 world.append(camera_model)
-            
+
             tree.write(self.BASE_WORLD_PATH, encoding='utf-8', xml_declaration=True)
             logger.info('Base .world file generated')
         except Exception as e:
@@ -204,8 +204,8 @@ class Simulator():
             return
         try:
             result = subprocess.run(
-                ["bash", "-c", "pkill -f ros"], 
-                capture_output=True, 
+                ["bash", "-c", "pkill -f ros"],
+                capture_output=True,
                 timeout=10
             )
             logger.info('ROS processes killed')
@@ -236,13 +236,25 @@ class Simulator():
         return False
 
 
-    def set_pose(self, model, x = 0, y = 0, z = 0):
+    def set_pose(
+        self, model : str,
+        x : int = 0, y : int = 0, z : int = 0,
+        quaternion : Quaternion = None,
+        linear_velocity : Vector3 = None,
+        angular_velocity : Vector3 = None,
+    ):
         """Метод для перемещения моделей в симуляции"""
         set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
         state = ModelState()
         state.model_name = model
         state.reference_frame = "world"
-        state.pose = Pose(Point(x, y, z), Quaternion(0, 0, 0, 1))
+        quaternion = quaternion if quaternion else Quaternion(0, 0, 0, 1)
+        state.pose = Pose(Point(x, y, z), quaternion)
+        if linear_velocity or angular_velocity:
+            state.twist = Twist(
+                linear=linear_velocity if linear_velocity else Vector3(0, 0, 0),
+                angular=angular_velocity if angular_velocity else Vector3(0, 0, 0),
+            )
         response = set_state(state)
         if not response.success:
             raise RuntimeError(response.status_message)
@@ -260,7 +272,7 @@ class Simulator():
 
     def kill(self) -> bool:
         self.kill_gazebo()
-        self._kill_node()    
+        self._kill_node()
         self._kill_ros()
 
         self.ros_is_running = False

@@ -79,7 +79,7 @@
           <!-- Параметры зоны видимости -->
           <azimuth_beamwidth>1</azimuth_beamwidth>
           <elevation_beamwidth>1</elevation_beamwidth>
-          <rzero>10</rzero>
+          <rzero>3</rzero>
 
           <tag_yellow_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_3/model.sdf</tag_yellow_sdf_path>
           <tag_red_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_2/model.sdf</tag_red_sdf_path>
