@@ -68,6 +68,8 @@ class DepthProfileBase(DepthCamera):
         self.update_rate = int(self.UPDATE_RATE)
 
         worlds_root = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_root.is_absolute():
+            worlds_root = Path(CONFIG["ROOT_PATH"]) / worlds_root
 
         self.test_to_world = {
             "depth_perception_test": str(worlds_root / "camera_depth_perception.world"),
@@ -271,6 +273,42 @@ class DepthProfileBase(DepthCamera):
             stats["finite_max_m"] = float(np.max(finite))
         return stats
 
+    @staticmethod
+    def _depth_preview(depth_m: np.ndarray) -> np.ndarray:
+        finite = depth_m[np.isfinite(depth_m) & (depth_m > 0.0)]
+        if finite.size == 0:
+            return np.zeros((depth_m.shape[0], depth_m.shape[1], 3), dtype=np.uint8)
+        dmin = float(np.percentile(finite, 5))
+        dmax = float(np.percentile(finite, 95))
+        if dmax <= dmin:
+            dmax = dmin + 1e-3
+        norm = np.clip((depth_m - dmin) / (dmax - dmin), 0.0, 1.0)
+        u8 = (norm * 255.0).astype(np.uint8)
+        return cv2.applyColorMap(u8, cv2.COLORMAP_TURBO)
+
+    @staticmethod
+    def _roi_depth_stats(depth_m: np.ndarray, roi_xyxy: List[int]) -> Dict[str, Any]:
+        if not roi_xyxy or len(roi_xyxy) != 4:
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+        x0, y0, x1, y1 = [int(v) for v in roi_xyxy]
+        h, w = depth_m.shape[:2]
+        x0 = max(0, min(w, x0))
+        x1 = max(0, min(w, x1))
+        y0 = max(0, min(h, y0))
+        y1 = max(0, min(h, y1))
+        if x1 <= x0 or y1 <= y0:
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+        roi = depth_m[y0:y1, x0:x1]
+        valid = roi[np.isfinite(roi) & (roi > 0.0)]
+        if valid.size == 0:
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+        return {
+            "valid_count": int(valid.size),
+            "min_m": float(np.min(valid)),
+            "max_m": float(np.max(valid)),
+            "mean_m": float(np.mean(valid)),
+        }
+
     def _measure_depth_with_meta(
         self,
         depth_m: np.ndarray,
@@ -441,6 +479,8 @@ class DepthProfileBase(DepthCamera):
                 first_frame_diagnostics["measurement_roi"] = roi_meta
                 self._set_test_diagnostics(depth_perception_first_frame=first_frame_diagnostics)
 
+            roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
+
             if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
                 raise AssertionError(f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})")
 
@@ -459,9 +499,45 @@ class DepthProfileBase(DepthCamera):
                     "abs_error": float(abs_err),
                     "rel_error": float(rel_err),
                     "measurement_roi": roi_meta,
+                    "roi_depth_stats": roi_stats,
                 }
             )
             measured_values.append(float(z))
+
+            x0, y0, x1, y1 = [int(v) for v in roi_meta.get("roi_xyxy", [0, 0, 0, 0])]
+            if bgr is not None:
+                rgb_dbg = bgr.copy()
+            else:
+                rgb_dbg = self._depth_preview(depth_m)
+            cv2.rectangle(rgb_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+            cv2.circle(rgb_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+            cv2.putText(
+                rgb_dbg,
+                f"d={float(d):.2f} z={float(z):.3f}m",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            self._save_frame(f"depth_perception_rgb_d_{str(d).replace('.', '_')}.png", rgb_dbg)
+
+            depth_dbg = self._depth_preview(depth_m)
+            cv2.rectangle(depth_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+            cv2.circle(depth_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+            cv2.putText(
+                depth_dbg,
+                f"roi_min={roi_stats['min_m'] if roi_stats['min_m'] is not None else float('nan'):.3f} "
+                f"roi_max={roi_stats['max_m'] if roi_stats['max_m'] is not None else float('nan'):.3f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            self._save_frame(f"depth_perception_depth_d_{str(d).replace('.', '_')}.png", depth_dbg)
 
         monotonic_ok = all(measured_values[i] < measured_values[i + 1] for i in range(len(measured_values) - 1))
         if not monotonic_ok:
@@ -605,6 +681,8 @@ class DepthProfileBase(DepthCamera):
                 first_frame_diagnostics["measurement_roi"] = roi_meta
                 self._set_test_diagnostics(c5_first_frame=first_frame_diagnostics)
 
+            roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
+
             finite_ok = bool(z is not None and np.isfinite(z))
             abs_err = float(abs(float(z) - float(x))) if finite_ok else float("inf")
             sample_ok = bool(finite_ok and abs_err <= self.C5_DEPTH_TOLERANCE_M)
@@ -614,11 +692,47 @@ class DepthProfileBase(DepthCamera):
                     "x_m": float(x),
                     "depth_m": None if z is None else float(z),
                     "measurement_roi": roi_meta,
+                    "roi_depth_stats": roi_stats,
                     "finite_ok": finite_ok,
                     "abs_error_m": abs_err if np.isfinite(abs_err) else None,
                     "ok": sample_ok,
                 }
             )
+
+            x0, y0, x1, y1 = [int(v) for v in roi_meta.get("roi_xyxy", [0, 0, 0, 0])]
+            if bgr is not None:
+                rgb_dbg = bgr.copy()
+            else:
+                rgb_dbg = self._depth_preview(depth_m)
+            cv2.rectangle(rgb_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+            cv2.circle(rgb_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+            cv2.putText(
+                rgb_dbg,
+                f"x={float(x):.2f} z={float(z) if z is not None else float('nan'):.3f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            artifacts.append(self._save_frame(f"c5_rgb_x_{str(x).replace('.', '_')}.png", rgb_dbg))
+
+            depth_dbg = self._depth_preview(depth_m)
+            cv2.rectangle(depth_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+            cv2.circle(depth_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+            cv2.putText(
+                depth_dbg,
+                f"roi_min={roi_stats['min_m'] if roi_stats['min_m'] is not None else float('nan'):.3f} "
+                f"roi_max={roi_stats['max_m'] if roi_stats['max_m'] is not None else float('nan'):.3f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            artifacts.append(self._save_frame(f"c5_depth_x_{str(x).replace('.', '_')}.png", depth_dbg))
 
             if abs(float(x) - 0.5) < 1e-9 or abs(float(x) - 5.0) < 1e-9 or abs(float(x) - 10.0) < 1e-9:
                 dbg = self._draw_debug(

@@ -74,8 +74,9 @@
     </model>
 
     <model name="back_cube">
-      <!-- Базовое смещение; тест переключает Y=0.10 (25%) и Y=0.20 (50%) -->
-      <pose>3.0 0.10 0.25 0 0 0</pose>
+      <!-- Back cube расположен дальше по X, чтобы фронтальный куб реально его перекрывал.
+           Y-смещения выставляются тестом через /gazebo/set_model_state. -->
+      <pose>3.6 0.10 0.25 0 0 0</pose>
       <static>false</static>
       <link name="link">
         <gravity>false</gravity>

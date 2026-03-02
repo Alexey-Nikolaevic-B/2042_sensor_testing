@@ -11,6 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 import rospy
+from gazebo_msgs.msg import ModelState
+from gazebo_msgs.srv import GetModelState, SetModelState
+from geometry_msgs.msg import Point, Pose, Quaternion
 from sensor_msgs.msg import Image
 
 from .sensor import Sensor
@@ -34,7 +37,9 @@ class StereoProfileBase(Sensor):
     C7_BACK_CUBE_NAME = "back_cube"
 
     C4_MIN_PIXELS = 1500
-    C7_CASES = {"occ_25": 0.10, "occ_50": 0.20}
+    # Смещения подобраны так, чтобы occ_25 имел меньшую окклюзию (больше blue-пикселей),
+    # а occ_50 — большую окклюзию (меньше blue-пикселей).
+    C7_CASES = {"occ_25": 0.20, "occ_50": 0.10}
     C7_MIN_PIXELS = 800
     MIN_DISPARITY_PX = 2
     C8_OBJECTS = ("obj_near_cube", "obj_near_sphere", "obj_far_cube", "obj_far_sphere", "wall_left", "wall_right")
@@ -489,6 +494,42 @@ class StereoProfileBase(Sensor):
         simulator.set_pose(model_name, x=x, y=y, z=z)
         time.sleep(settle_s)
 
+    @staticmethod
+    def _set_model_pose_and_readback(model_name: str, x: float, y: float, z: float, settle_s: float = 0.5) -> Dict[str, Any]:
+        set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
+        get_state = rospy.ServiceProxy("/gazebo/get_model_state", GetModelState)
+
+        state = ModelState()
+        state.model_name = model_name
+        state.reference_frame = "world"
+        state.pose = Pose(Point(float(x), float(y), float(z)), Quaternion(0.0, 0.0, 0.0, 1.0))
+
+        set_resp = set_state(state)
+        time.sleep(float(settle_s))
+
+        pose_diag: Dict[str, Any] = {
+            "request_pose": {"x": float(x), "y": float(y), "z": float(z)},
+            "set_model_state": {
+                "success": bool(set_resp.success),
+                "status_message": str(set_resp.status_message),
+            },
+        }
+
+        try:
+            get_resp = get_state(model_name, "world")
+            pose_diag["get_model_state"] = {
+                "success": bool(get_resp.success),
+                "status_message": str(get_resp.status_message),
+                "pose": {
+                    "x": float(get_resp.pose.position.x),
+                    "y": float(get_resp.pose.position.y),
+                    "z": float(get_resp.pose.position.z),
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            pose_diag["get_model_state_error"] = str(exc)
+        return pose_diag
+
     def capture_data(
         self,
         simulator,
@@ -624,6 +665,13 @@ class StereoProfileBase(Sensor):
             raise RuntimeError(f"Model not spawned: {self.C7_BACK_CUBE_NAME}")
 
         self._move_and_settle(simulator, self.C7_FRONT_CUBE_NAME, x=3.0, y=0.0, z=0.25)
+        rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+        rospy.wait_for_service("/gazebo/get_model_state", timeout=30.0)
+
+        back_x = 3.6
+        move_before = self._set_model_pose_and_readback(self.C7_BACK_CUBE_NAME, x=back_x, y=0.0, z=0.25, settle_s=0.45)
+        if not move_before.get("set_model_state", {}).get("success", False):
+            raise RuntimeError(f"Failed to position back cube before occlusion cases: {move_before}")
 
         metrics: Dict[str, Any] = {
             "left": {"blue_pixels": {}},
@@ -631,10 +679,42 @@ class StereoProfileBase(Sensor):
             "cases": dict(self.C7_CASES),
             "threshold": int(self.C7_MIN_PIXELS),
             "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
+            "occluder_motion": {"before": move_before, "cases": {}},
         }
 
+        # Базовый кадр до окклюзии
+        base_data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
+        if base_data is None:
+            raise RuntimeError("No stereo frames for baseline before occlusion")
+        for side, frame in (("left", base_data["left_cv"]), ("right", base_data["right_cv"])):
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            blue = self._color_mask(hsv, "blue")
+            blue_count = self._count_pixels(blue)
+            metrics[side]["blue_pixels"]["before"] = int(blue_count)
+
+            contours, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            overlay = frame.copy()
+            if contours:
+                contour = max(contours, key=cv2.contourArea)
+                x, y, w, h = cv2.boundingRect(contour)
+                cv2.rectangle(overlay, (x, y), (x + w, y + h), (255, 255, 255), 2)
+            cv2.putText(overlay, f"before: blue={blue_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
+            self._save_frame(f"stereo_c7_{side}_before_raw.png", frame)
+            self._save_frame(f"stereo_c7_{side}_before_blue_mask.png", blue)
+            self._save_frame(f"stereo_c7_{side}_before_overlay.png", overlay)
+
         for case_name, y in self.C7_CASES.items():
-            self._move_and_settle(simulator, self.C7_BACK_CUBE_NAME, x=3.0, y=float(y), z=0.25)
+            move_diag = self._set_model_pose_and_readback(
+                self.C7_BACK_CUBE_NAME,
+                x=back_x,
+                y=float(y),
+                z=0.25,
+                settle_s=0.45,
+            )
+            metrics["occluder_motion"]["cases"][case_name] = move_diag
+            if not move_diag.get("set_model_state", {}).get("success", False):
+                raise RuntimeError(f"set_model_state failed for {case_name}: {move_diag}")
 
             data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
             if data is None:
@@ -646,9 +726,17 @@ class StereoProfileBase(Sensor):
                 blue_count = self._count_pixels(blue)
                 metrics[side]["blue_pixels"][case_name] = int(blue_count)
 
+                contours, _ = cv2.findContours(blue, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 dbg = frame.copy()
+                if contours:
+                    contour = max(contours, key=cv2.contourArea)
+                    x, yb, w, h = cv2.boundingRect(contour)
+                    cv2.rectangle(dbg, (x, yb), (x + w, yb + h), (255, 255, 255), 2)
                 cv2.putText(dbg, f"{case_name}: blue={blue_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
-                self._save_frame(f"stereo_c7_{side}_{case_name}.png", dbg)
+
+                self._save_frame(f"stereo_c7_{side}_{case_name}_raw.png", frame)
+                self._save_frame(f"stereo_c7_{side}_{case_name}_blue_mask.png", blue)
+                self._save_frame(f"stereo_c7_{side}_{case_name}_overlay.png", dbg)
 
         for side in ("left", "right"):
             blue_25 = metrics[side]["blue_pixels"].get("occ_25", 0)

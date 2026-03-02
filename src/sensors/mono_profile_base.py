@@ -39,7 +39,9 @@ class MonoProfileBase(MonoCamera):
     C2_MIN_CONTOUR_AREA = 80
     C1_MIN_MARGIN_RATIO = 1.10
     C4_MIN_PIXELS = 1500
-    C7_CASES = {"occ_25": 0.10, "occ_50": 0.20}
+    # Смещения подобраны так, чтобы occ_25 имел меньшую окклюзию (больше blue-пикселей),
+    # а occ_50 — большую окклюзию (меньше blue-пикселей).
+    C7_CASES = {"occ_25": 0.20, "occ_50": 0.10}
     C7_MIN_PIXELS = 800
     C9_STEP = 0.05
     C9_MAX_Y = 4.0
@@ -70,6 +72,8 @@ class MonoProfileBase(MonoCamera):
         self.update_rate = int(self.UPDATE_RATE)
 
         worlds_root = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_root.is_absolute():
+            worlds_root = Path(CONFIG["ROOT_PATH"]) / worlds_root
 
         self.test_to_world = {
             "c1_size_order_test": str(worlds_root / "camera_c1_single_cube.world"),
@@ -586,7 +590,10 @@ class MonoProfileBase(MonoCamera):
         far_last_visible = near_after
         far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
 
-        far_search_stop = float(self.clip_far) + 5.0
+        # Ищем дальше реального far_clip с запасом, чтобы надежно пройти границу отсечения
+        # даже на камерах с большим far и низкой дискретизацией шага.
+        far_search_stop = max(float(self.clip_far) + 5.0, float(self.clip_far) * 1.5)
+        metrics["far_search_stop_m"] = float(far_search_stop)
         for x in self._iter_float_range(
             near_x + float(self.C10_FAR_COARSE_STEP),
             far_search_stop,
