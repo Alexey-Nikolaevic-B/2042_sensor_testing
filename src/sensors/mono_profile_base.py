@@ -86,6 +86,14 @@ class MonoProfileBase(MonoCamera):
             "c10_clipping_test": str(worlds_root / "camera_c10_clipping.world"),
             "c11_fps_stability_test": str(worlds_root / "camera_c11_fps_static_load.world"),
         }
+        self._last_test_diagnostics: Dict[str, Any] = {}
+
+    def _set_test_diagnostics(self, **kwargs) -> None:
+        self._last_test_diagnostics.update(kwargs)
+
+    def get_last_test_diagnostics(self) -> Dict[str, Any]:
+        # test_runner expects JSON-serializable payload, shallow-copy is enough here.
+        return dict(self._last_test_diagnostics)
 
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
@@ -362,29 +370,113 @@ class MonoProfileBase(MonoCamera):
             }
 
     @staticmethod
-    def _c4_read_latest_gzserver_log_tail(max_lines: int = 200) -> Dict[str, Any]:
-        latest_dir = Path.home() / ".ros" / "log" / "latest"
+    def _c4_extract_log_path_from_lines(lines: List[str]) -> str:
+        # Typical token inside pgrep/command line: __log:=/abs/path/gazebo-1.log
+        for line in lines:
+            s = str(line)
+            marker = "__log:="
+            idx = s.find(marker)
+            if idx < 0:
+                continue
+            tail = s[idx + len(marker):].strip()
+            if not tail:
+                continue
+            token = tail.split()[0].strip().strip("'").strip('"')
+            if token.endswith(".log"):
+                return token
+            if ".log" in token:
+                return token.split(".log", 1)[0] + ".log"
+        return ""
+
+    @staticmethod
+    def _c4_collect_log_candidates_from_dir(base: Path, recursive: bool = False) -> List[Path]:
+        if not base.exists() or not base.is_dir():
+            return []
+        patterns = ("gazebo-*.log", "gzserver-*.log")
+        found: List[Path] = []
+        for pattern in patterns:
+            found.extend(base.rglob(pattern) if recursive else base.glob(pattern))
+        return found
+
+    @classmethod
+    def _c4_read_latest_gzserver_log_tail(
+        cls,
+        log_path_hint: Optional[str] = None,
+        ros_log_dir_hint: Optional[str] = None,
+        max_lines: int = 200,
+    ) -> Dict[str, Any]:
+        searched_paths: List[str] = []
+
+        def _read_tail(path: Path) -> Dict[str, Any]:
+            try:
+                with path.open("r", encoding="utf-8", errors="replace") as f_in:
+                    lines = f_in.read().splitlines()
+                return {
+                    "path": str(path),
+                    "tail": lines[-int(max_lines):],
+                    "searched_paths": searched_paths,
+                }
+            except Exception as exc:
+                return {
+                    "path": str(path),
+                    "tail": [f"<gazebo-log-read-error> {exc}"],
+                    "searched_paths": searched_paths,
+                }
+
+        if log_path_hint:
+            hint = Path(log_path_hint).expanduser()
+            searched_paths.append(str(hint))
+            if hint.exists() and hint.is_file():
+                return _read_tail(hint)
+
         candidates: List[Path] = []
-        if latest_dir.exists():
-            candidates.extend(sorted(latest_dir.glob("gzserver-*.log")))
-            candidates.extend(sorted(latest_dir.glob("gazebo-*.log")))
-        if not candidates:
-            ros_log_root = Path.home() / ".ros" / "log"
-            if ros_log_root.exists():
-                candidates.extend(sorted(ros_log_root.rglob("gzserver-*.log")))
-                candidates.extend(sorted(ros_log_root.rglob("gazebo-*.log")))
-        if not candidates:
-            return {"path": "", "tail": ["<gazebo-log-not-found>"]}
 
-        path = sorted(candidates, key=lambda p: p.stat().st_mtime if p.exists() else 0.0)[-1]
-        try:
-            with path.open("r", encoding="utf-8", errors="replace") as f_in:
-                lines = f_in.read().splitlines()
-            return {"path": str(path), "tail": lines[-int(max_lines):]}
-        except Exception as exc:
-            return {"path": str(path), "tail": [f"<gazebo-log-read-error> {exc}"]}
+        if ros_log_dir_hint:
+            ros_dir = Path(str(ros_log_dir_hint)).expanduser()
+            searched_paths.append(str(ros_dir))
+            candidates.extend(cls._c4_collect_log_candidates_from_dir(ros_dir, recursive=True))
 
-    def _c4_collect_scene_open_diagnostics(self) -> Dict[str, Any]:
+        env_ros_log_dir = os.environ.get("ROS_LOG_DIR", "")
+        if env_ros_log_dir:
+            env_dir = Path(env_ros_log_dir).expanduser()
+            searched_paths.append(str(env_dir))
+            candidates.extend(cls._c4_collect_log_candidates_from_dir(env_dir, recursive=True))
+
+        latest_dir = Path.home() / ".ros" / "log" / "latest"
+        searched_paths.append(str(latest_dir))
+        candidates.extend(cls._c4_collect_log_candidates_from_dir(latest_dir, recursive=False))
+
+        ros_log_root = Path.home() / ".ros" / "log"
+        searched_paths.append(str(ros_log_root))
+        candidates.extend(cls._c4_collect_log_candidates_from_dir(ros_log_root, recursive=True))
+
+        unique_existing: List[Path] = []
+        for path in candidates:
+            try:
+                if path.exists() and path.is_file() and path not in unique_existing:
+                    unique_existing.append(path)
+            except Exception:
+                continue
+
+        if not unique_existing:
+            return {
+                "path": "",
+                "tail": ["<gazebo-log-not-found>"],
+                "searched_paths": searched_paths,
+            }
+
+        chosen = sorted(unique_existing, key=lambda p: p.stat().st_mtime)[-1]
+        return _read_tail(chosen)
+
+    def _c4_collect_scene_open_diagnostics(self, simulator, scene_diag: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if scene_diag is None and hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+            try:
+                scene_diag = simulator.get_last_scene_diagnostics()
+            except Exception:
+                scene_diag = {}
+        if not isinstance(scene_diag, dict):
+            scene_diag = {}
+
         rosservice_full = self._c4_run_shell_capture(
             "rosservice list | grep '^/gazebo/' || true",
             timeout_s=6.0,
@@ -425,12 +517,34 @@ class MonoProfileBase(MonoCamera):
                 "stderr_tail": ["gzserver pid not found"],
             }
 
+        gz_log_hint = ""
+        gz_state = scene_diag.get("gzserver_state", {})
+        if isinstance(gz_state, dict):
+            pgrep_tail = gz_state.get("pgrep_tail", [])
+            if isinstance(pgrep_tail, list):
+                gz_log_hint = self._c4_extract_log_path_from_lines([str(x) for x in pgrep_tail])
+
+        ros_log_dir_hint = ""
+        launch_env = scene_diag.get("launch_env", {})
+        if isinstance(launch_env, dict):
+            ros_log_dir_hint = str(launch_env.get("ROS_LOG_DIR", "") or "")
+
+        launch_stdout_tail = scene_diag.get("launch_stdout_tail", [])
+        launch_stderr_tail = scene_diag.get("launch_stderr_tail", [])
+
         return {
             "rosservice_gazebo_full": rosservice_full,
             "rosnode_info_gazebo": rosnode_info,
             "rostopic_gazebo_clock": rostopic_gazebo_clock,
             "gzserver_ps": gzserver_ps,
-            "gazebo_log_tail": self._c4_read_latest_gzserver_log_tail(max_lines=200),
+            "roslaunch_stdout_tail": list(launch_stdout_tail)[-50:] if isinstance(launch_stdout_tail, list) else [],
+            "roslaunch_stderr_tail": list(launch_stderr_tail)[-50:] if isinstance(launch_stderr_tail, list) else [],
+            "gazebo_log_path_hint": str(gz_log_hint),
+            "gazebo_log_tail": self._c4_read_latest_gzserver_log_tail(
+                log_path_hint=gz_log_hint,
+                ros_log_dir_hint=ros_log_dir_hint,
+                max_lines=200,
+            ),
         }
 
     @staticmethod
@@ -443,13 +557,16 @@ class MonoProfileBase(MonoCamera):
             if str(line).strip().startswith("/gazebo/")
         ]
         service_set = set(services)
-        only_logger_services = service_set == {"/gazebo/get_loggers", "/gazebo/set_logger_level"}
+        logger_services = {"/gazebo/get_loggers", "/gazebo/set_logger_level"}
+        only_logger_services = bool(service_set) and service_set.issubset(logger_services)
         if only_logger_services:
             return (
                 "gazebo_only_logger_services",
                 "gazebo_ros_api_plugin likely not initialized (only logger services present)",
             )
-        if reason in ("gzserver_died", "roslaunch_exited"):
+        gz_ps = diagnostics.get("gzserver_ps", {})
+        gz_alive = bool(gz_ps.get("stdout_tail"))
+        if reason in ("gzserver_died", "roslaunch_exited") or not gz_alive:
             return ("gzserver_died_early", "gzserver died before Gazebo API services became available")
         return ("gazebo_api_timeout", "Gazebo API services timeout; see diagnostics: rosservice_gazebo_full / gazebo_log_tail")
 
@@ -467,8 +584,24 @@ class MonoProfileBase(MonoCamera):
                     time.sleep(1.0)
                 simulator.GAZEBO_SERVICES_TIMEOUT_S = float(extended_timeout)
 
-                opened = simulator.open_scene(world, self.sensor_sdf_path)
-                scene_diag = simulator.get_last_scene_diagnostics() if hasattr(simulator, "get_last_scene_diagnostics") else {}
+                scene_diag: Dict[str, Any] = {}
+                try:
+                    opened = simulator.open_scene(world, self.sensor_sdf_path)
+                except Exception as exc:
+                    opened = None
+                    if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+                        try:
+                            scene_diag = simulator.get_last_scene_diagnostics()
+                        except Exception:
+                            scene_diag = {}
+                    if not isinstance(scene_diag, dict):
+                        scene_diag = {}
+                    scene_diag.setdefault("open_scene_exception", str(exc))
+                if not scene_diag and hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+                    try:
+                        scene_diag = simulator.get_last_scene_diagnostics()
+                    except Exception:
+                        scene_diag = {}
                 last_reason = str(scene_diag.get("reason", "unknown")) if isinstance(scene_diag, dict) else "unknown"
                 attempts.append({"attempt": int(attempt), "opened": bool(opened), "reason": last_reason})
                 if opened:
@@ -482,8 +615,24 @@ class MonoProfileBase(MonoCamera):
         finally:
             simulator.GAZEBO_SERVICES_TIMEOUT_S = float(original_timeout)
 
-        extra_diag = self._c4_collect_scene_open_diagnostics()
+        last_scene_diag = {}
+        if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+            try:
+                last_scene_diag = simulator.get_last_scene_diagnostics()
+            except Exception:
+                last_scene_diag = {}
+
+        extra_diag = self._c4_collect_scene_open_diagnostics(simulator, scene_diag=last_scene_diag)
         classified_reason, classified_msg = self._c4_classify_scene_reason(last_reason, extra_diag)
+        self._set_test_diagnostics(
+            c4_scene_open={
+                "reason": classified_reason,
+                "message": classified_msg,
+                "extended_timeout_s": float(extended_timeout),
+                "attempts": attempts,
+                "diagnostics": extra_diag,
+            }
+        )
         if hasattr(simulator, "_set_scene_diag") and callable(simulator._set_scene_diag):
             simulator._set_scene_diag(
                 reason=classified_reason,
