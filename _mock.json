@@ -8,7 +8,7 @@
       "image_path": "./img/sensor.png",
       "params": [], 
       "tests": [
-        {"name": "1 Test","description": " 1", "image": "./img/description1.png",  "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "1 Test","description": " 1", "image": "./img/description1.png",  "date": "1", "status": "Passed", "result": "3840x2160"},
         {"name": "Focus Calibration","description": " 2",  "image": "./img/description2.png",   "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
         {"name": "Night Vision Test","description": " 3",  "image": "./img/description3.png",   "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
         {"name": "Color Accuracy","description": " 4",  "image": "./img/description4.png",   "date": "2023-12-20", "status": "Passed", "result": "98%"}
@@ -21,7 +21,7 @@
       "description": "Industrial RFID reader with anti-collision technology",
       "image_path": "./img/image.png",
       "tests": [
-        {"name": "2 Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "2 Test", "date": "2", "status": "Passed", "result": "3840x2160"},
         {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
         {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
         {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}
@@ -203,7 +203,7 @@
       "description": "Multi-axis torque sensor for robotic joints",
       "image_path": "./img/multiaxisimage.png",
       "tests": [
-        {"name": "Resolution Test", "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Resolution Test", "date": "10", "status": "Passed", "result": "3840x2160"},
         {"name": "Focus Calibration", "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
         {"name": "Night Vision Test", "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
         {"name": "Color Accuracy", "date": "2023-12-20", "status": "Passed", "result": "98%"}

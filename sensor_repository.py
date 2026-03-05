@@ -17,6 +17,7 @@ class Sensor:
             if field not in data:
                 raise ValueError(f"Sensor data missing required field: '{field}'")
         self._data = copy.deepcopy(data)
+        # Normalise tests list
         if "tests" not in self._data:
             self._data["tests"] = []
 
@@ -64,13 +65,17 @@ class Sensor:
     def last_update(self):
         return self._data.get("last_update", datetime.min)
 
+
     def to_dict(self) -> dict:
+        """Return a deep copy of the underlying dict (safe to pass to UI)."""
         return copy.deepcopy(self._data)
 
     def update_fields(self, fields: dict):
+        """Merge *fields* into this sensor.  'id' cannot be changed."""
         fields = copy.deepcopy(fields)
-        fields.pop("id", None)
+        fields.pop("id", None)          # id is immutable
         self._data.update(fields)
+
 
     def get_test(self, test_name: str) -> dict | None:
         for t in self._data["tests"]:
@@ -89,8 +94,8 @@ class Sensor:
         return f"<Sensor id={self.id!r} name={self.name!r}>"
 
 
-class SensorRepository(QObject):
 
+class SensorRepository(QObject):
     sensor_added   = pyqtSignal(dict)
     sensor_updated = pyqtSignal(dict)
     sensor_deleted = pyqtSignal(str)
@@ -101,6 +106,7 @@ class SensorRepository(QObject):
 
     @classmethod
     def instance(cls) -> "SensorRepository":
+        """Return the application-wide singleton, creating it if necessary."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -108,12 +114,12 @@ class SensorRepository(QObject):
     def __init__(self, data_path: str = "_mock.json", parent=None):
         super().__init__(parent)
         self._data_path = data_path
-        self._sensors: dict[str, Sensor] = {}
+        self._sensors: dict[str, Sensor] = {}   # id → Sensor
         self._types: list[str] = []
-
         SensorRepository._instance = self
 
         self.load()
+
 
     def load(self, path: str | None = None):
         if path:
@@ -129,7 +135,7 @@ class SensorRepository(QObject):
             except (TypeError, ValueError) as exc:
                 print(f"[SensorRepository] Skipping invalid sensor: {exc}")
 
-        self._types = raw_types
+        self._types = raw_types or self._derive_types()
         self.sensors_loaded.emit()
 
     def save(self, path: str | None = None):
@@ -156,6 +162,7 @@ class SensorRepository(QObject):
 
     def count(self) -> int:
         return len(self._sensors)
+
 
     def add_sensor(self, data: dict) -> dict:
         sensor_id = data.get("id")
@@ -211,3 +218,7 @@ class SensorRepository(QObject):
         except (json.JSONDecodeError, OSError) as exc:
             print(f"[SensorRepository] Failed to read {path!r}: {exc}")
             return [], []
+
+    def _derive_types(self) -> list[str]:
+        seen = sorted({s.sensor_type for s in self._sensors.values() if s.sensor_type})
+        return seen
