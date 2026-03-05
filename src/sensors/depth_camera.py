@@ -1,5 +1,6 @@
 import time
 import numpy as np
+from pathlib import Path
 
 import rospy
 from typing import Optional, Dict, Any, List
@@ -19,13 +20,18 @@ class DepthCamera(MonoCamera):
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
 
-        WORLDS_PATH = CONFIG["WORLDS_PATH"]
-        SENSORS_PATH = CONFIG["SENSORS_PATH"]
+        root = Path(CONFIG.get("ROOT_PATH", "") or "")
+        worlds_root = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_root.is_absolute():
+            worlds_root = root / worlds_root
+        sensors_root = Path(CONFIG["SENSORS_PATH"])
+        if not sensors_root.is_absolute():
+            sensors_root = root / sensors_root
 
-        self.sensor_sdf_path = f'{SENSORS_PATH}{self.sensor_type}/{self.sensor_name}.sdf'
+        self.sensor_sdf_path = str((sensors_root / self.sensor_type / f"{self.sensor_name}.sdf").resolve())
 
         self.test_to_world = {
-            'depth_perception_test': f'{WORLDS_PATH}depth_camera/depth_perception_test.world'
+            'depth_perception_test': str(worlds_root / "depth_camera" / "depth_perception_test.world"),
         }
 
 

@@ -92,7 +92,7 @@ class MonoProfileBase(MonoCamera):
         self._last_test_diagnostics.update(kwargs)
 
     def get_last_test_diagnostics(self) -> Dict[str, Any]:
-        # test_runner expects JSON-serializable payload, shallow-copy is enough here.
+        # JSON-serializable payload, shallow-copy is enough here.
         return dict(self._last_test_diagnostics)
 
     def get_expected_topics(self) -> List[str]:

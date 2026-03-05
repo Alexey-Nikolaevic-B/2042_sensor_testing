@@ -60,8 +60,8 @@ class SimulationManager:
         self.ROS_LOG_PATH = self._resolve_path(self.CONFIG.get("ROS_LOG_PATH", "ros_log"))
 
         self.ROS_MASTER_READY_TIMEOUT_S = 30.0
-        self.GAZEBO_SERVICES_TIMEOUT_S = 45.0
-        self.TOPIC_READY_TIMEOUT_S = 30.0
+        self.GAZEBO_SERVICES_TIMEOUT_S = 90.0
+        self.TOPIC_READY_TIMEOUT_S = 60.0
         self.TOPIC_MSG_WINDOW_S = 2.0
         self.MIN_TOPIC_MESSAGES = 1
         self.REQUIRED_GAZEBO_SERVICES = (

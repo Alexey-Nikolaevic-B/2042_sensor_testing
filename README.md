@@ -2,9 +2,9 @@
 
 Тестовый стенд сенсоров на ROS Noetic + Gazebo.
 
-Текущий фокус: стабильный пайплайн камер через единый runner:
+Единый пайплайн для камер и RFID:
 - подъем `roscore`/`roslaunch`,
-- ожидание ROS master и image topics,
+- ожидание ROS master и sensor topics,
 - запуск `*_test`,
 - сбор `report.json` + диагностик,
 - корректное завершение только своих процессов.
@@ -22,48 +22,61 @@
 ## Подготовка catkin_ws
 
 ```bash
-cd /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws
+cd catkin_ws
 catkin_make
 source devel/setup.bash
 ```
 
-## Быстрый запуск камерных тестов
+## Запуск тестов (единый CLI)
 
-Запуск возможен из любого `cwd`, если путь к `test_runner.py` указан абсолютный.
-
-### 1) Полный suite по всем камерам
+Запуск из **любого каталога** — все пути вычисляются через `ROOT_PATH`.
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
-python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --all-sensors --suite
+source <repo>/catkin_ws/devel/setup.bash
+```
+
+### 1) Suite по всем камерам
+
+```bash
+python3 <repo>/__main__.py --sensor-type camera --all-sensors --suite
 ```
 
 ### 2) Suite для одной камеры
 
 ```bash
-source /opt/ros/noetic/setup.bash
-source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
-python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --sensor d435_like --suite
+python3 <repo>/__main__.py --sensor-type camera --sensor-name d435_like --suite
 ```
 
-### 3) Один тест для одной камеры
+### 3) Один тест одной камеры
 
 ```bash
-source /opt/ros/noetic/setup.bash
-source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
-python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --sensor d435_like --test c5_working_range_test
+python3 <repo>/__main__.py --sensor-type camera --sensor-name d435_like --test c5_working_range_test
 ```
 
-## Интерактивный CLI
-
-Старый консольный интерфейс:
+### 4) RFID — точно так же
 
 ```bash
-source /opt/ros/noetic/setup.bash
-source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
-python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/__main__.py
+python3 <repo>/__main__.py --sensor-type rfid --sensor-name rfid --suite
 ```
+
+### 5) Интерактивное консольное меню
+
+```bash
+python3 <repo>/__main__.py
+```
+
+> Без аргументов открывается старое интерактивное меню.
+
+## CLI-Аргументы
+
+| Аргумент | Описание |
+|---|---|
+| `--sensor-type` | Тип сенсора (`camera`, `rfid`) |
+| `--sensor-name` / `--sensor` | Имя сенсора (например `d435_like`) |
+| `--all-sensors` | Прогнать для **всех** сенсоров типа |
+| `--test <name>` | Один тест (например `c1_size_order_test`) |
+| `--suite` | Полный набор `*_test` методов |
 
 ## Отчеты и диагностика
 

@@ -1,5 +1,6 @@
 import re
 import rospy
+from pathlib import Path
 
 from sensor_msgs.msg import Image
 
@@ -15,10 +16,12 @@ class MonoCamera(Sensor):
     def __init__(self, CONFIG):
         super().__init__()
 
-        WORLDS_PATH = CONFIG["WORLDS_PATH"]
-        SENSORS_PATH = CONFIG["SENSORS_PATH"]
+        root = Path(CONFIG.get("ROOT_PATH", "") or "")
+        sensors_root = Path(CONFIG["SENSORS_PATH"])
+        if not sensors_root.is_absolute():
+            sensors_root = root / sensors_root
 
-        self.sensor_sdf_path = f'{SENSORS_PATH}{self.sensor_type}/{self.sensor_name}.sdf'
+        self.sensor_sdf_path = str((sensors_root / self.sensor_type / f"{self.sensor_name}.sdf").resolve())
 
         self.test_to_world = {}
 
