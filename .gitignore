@@ -1,7 +1,7 @@
 /shelf/
 /workspace.xml
 __pycache__/
-
+.vscode/
 
 /ros_log
 
