@@ -114,7 +114,12 @@ class StereoProfileBase(Sensor):
     def _open_test_scene(self, simulator, test_name: str) -> None:
         self._last_test_diagnostics = {}
         world = self.test_to_world[test_name]
-        if not simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+        if not simulator.open_scene(
+            world,
+            self.sensor_sdf_path,
+            expected_topics=self.get_expected_topics(),
+            sensor_name=self.sensor_name,
+        ):
             diag = {}
             if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
                 diag = simulator.get_last_scene_diagnostics()
@@ -554,12 +559,17 @@ class StereoProfileBase(Sensor):
     def capture_data(
         self,
         simulator,
-        world_path: str | None = None,
+        world_path: Optional[str] = None,
         timeout: float = 1.0,
         convert2cv: bool = False,
-    ) -> Dict[str, Any] | None:
+    ) -> Optional[Dict[str, Any]]:
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+            if not simulator.open_scene(
+                world_path,
+                self.sensor_sdf_path,
+                expected_topics=self.get_expected_topics(),
+                sensor_name=self.sensor_name,
+            ):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
             rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)

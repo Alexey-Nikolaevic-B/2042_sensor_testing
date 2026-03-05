@@ -125,7 +125,12 @@ class DepthProfileBase(DepthCamera):
         self._last_test_diagnostics = {}
         self._resolved_depth_topic = ""
         world = self.test_to_world[test_name]
-        if not simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+        if not simulator.open_scene(
+            world,
+            self.sensor_sdf_path,
+            expected_topics=self.get_expected_topics(),
+            sensor_name=self.sensor_name,
+        ):
             diag = {}
             if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
                 diag = simulator.get_last_scene_diagnostics()

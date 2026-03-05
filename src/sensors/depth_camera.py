@@ -112,7 +112,12 @@ class DepthCamera(MonoCamera):
           - если focused_image=True: dof_cv (картинка с DOF)
         """
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+            if not simulator.open_scene(
+                world_path,
+                self.sensor_sdf_path,
+                expected_topics=self.get_expected_topics(),
+                sensor_name=self.sensor_name,
+            ):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 
@@ -164,7 +169,12 @@ class DepthCamera(MonoCamera):
         reset_x = 50.0
         distances = [1.0, 3.0, 5.0]
 
-        if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+        if not simulator.open_scene(
+            world_path,
+            self.sensor_sdf_path,
+            expected_topics=self.get_expected_topics(),
+            sensor_name=self.sensor_name,
+        ):
             return None
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)

@@ -36,7 +36,12 @@ class MonoCamera(Sensor):
         convert2cv = False
     ) -> Optional[Dict[str, Any]]:
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
+            if not simulator.open_scene(
+                world_path,
+                self.sensor_sdf_path,
+                expected_topics=self.get_expected_topics(),
+                sensor_name=self.sensor_name,
+            ):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 

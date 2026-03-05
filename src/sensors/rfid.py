@@ -348,7 +348,7 @@ class Rfid(Sensor):
     ) -> Dict[str, Any]:
         """Считать все метки"""
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(world_path, self.sensor_sdf_path, sensor_name=self.sensor_name):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
             rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
@@ -373,7 +373,11 @@ class Rfid(Sensor):
         # плагин читает файл map.txt и по нему создает метки в gazebo
         self._write_test_map()
 
-        if not simulator.open_scene(self.test_to_world['max_stable_read_distance_test'], self.sensor_sdf_path):
+        if not simulator.open_scene(
+            self.test_to_world['max_stable_read_distance_test'],
+            self.sensor_sdf_path,
+            sensor_name=self.sensor_name,
+        ):
             scene_diag = simulator.get_last_scene_diagnostics() if hasattr(simulator, "get_last_scene_diagnostics") else {}
             reason = scene_diag.get("reason", "unknown") if isinstance(scene_diag, dict) else "unknown"
             raise RuntimeError(f"failed to open RFID scene (reason={reason})")
@@ -425,7 +429,11 @@ class Rfid(Sensor):
 
         self._write_test_map()
 
-        if not simulator.open_scene(self.test_to_world['min_stable_read_distance_test'], self.sensor_sdf_path):
+        if not simulator.open_scene(
+            self.test_to_world['min_stable_read_distance_test'],
+            self.sensor_sdf_path,
+            sensor_name=self.sensor_name,
+        ):
             scene_diag = simulator.get_last_scene_diagnostics() if hasattr(simulator, "get_last_scene_diagnostics") else {}
             reason = scene_diag.get("reason", "unknown") if isinstance(scene_diag, dict) else "unknown"
             raise RuntimeError(f"failed to open RFID scene (reason={reason})")

@@ -14,12 +14,13 @@ import time
 import xml.etree.ElementTree as ET
 from collections import deque
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import rospy
 from gazebo_msgs.msg import ModelState, ModelStates
-from gazebo_msgs.srv import GetWorldProperties, SetModelState
+from gazebo_msgs.srv import DeleteModel, GetWorldProperties, SetModelState, SpawnModel
 from geometry_msgs.msg import Point, Pose, Quaternion
+from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image
 
 _MODULE_DIR = Path(__file__).resolve().parent
@@ -45,7 +46,7 @@ class SimulationManager:
     - собирает диагностику запуска сцены и readiness топиков.
     """
 
-    def __init__(self, CONFIG: dict | None = None):
+    def __init__(self, CONFIG: Optional[dict] = None):
         self.CONFIG = CONFIG or {}
         self.REPO_ROOT = self._discover_repo_root(self.CONFIG)
 
@@ -57,16 +58,19 @@ class SimulationManager:
         self.BASE_WORLD_PATH = self._resolve_path(
             self.CONFIG.get("BASE_WORLD_PATH", "catkin_ws/src/scenario_test_pkg/worlds/base_world.world")
         )
-        self.ROS_LOG_PATH = self._resolve_path(self.CONFIG.get("ROS_LOG_PATH", "ros_log"))
+        self.ROS_LOG_PATH = os.path.abspath(self._resolve_path(self.CONFIG.get("ROS_LOG_PATH", "ros_log")))
 
-        self.ROS_MASTER_READY_TIMEOUT_S = 30.0
-        self.GAZEBO_SERVICES_TIMEOUT_S = 90.0
-        self.TOPIC_READY_TIMEOUT_S = 60.0
+        self.ROS_MASTER_READY_TIMEOUT_S = float(self.CONFIG.get("ROS_MASTER_READY_TIMEOUT_S", 30.0))
+        self.GAZEBO_SERVICES_TIMEOUT_S = float(self.CONFIG.get("GAZEBO_LAUNCH_READY_TIMEOUT_S", 30.0))
+        self.CLOCK_READY_TIMEOUT_S = float(self.CONFIG.get("GAZEBO_CLOCK_READY_TIMEOUT_S", 30.0))
+        self.TOPIC_READY_TIMEOUT_S = float(self.CONFIG.get("GAZEBO_TOPIC_READY_TIMEOUT_S", 30.0))
         self.TOPIC_MSG_WINDOW_S = 2.0
         self.MIN_TOPIC_MESSAGES = 1
         self.REQUIRED_GAZEBO_SERVICES = (
             "/gazebo/get_world_properties",
+            "/gazebo/get_model_state",
             "/gazebo/set_model_state",
+            "/gazebo/spawn_sdf_model",
         )
 
         self.ros_is_running = False
@@ -93,7 +97,7 @@ class SimulationManager:
             return os.path.abspath(root)
         return os.path.abspath(_REPO_ROOT)
 
-    def _resolve_path(self, path_like: str | os.PathLike | None) -> str:
+    def _resolve_path(self, path_like: Optional[Union[str, os.PathLike]]) -> str:
         if path_like is None:
             return ""
         raw = str(path_like).strip()
@@ -151,6 +155,80 @@ class SimulationManager:
             if item not in unique:
                 unique.append(item)
         return unique
+
+    @staticmethod
+    def _split_env_paths(raw_value: str) -> List[str]:
+        return [item for item in str(raw_value or "").split(os.pathsep) if item]
+
+    @classmethod
+    def _merge_env_paths(cls, extras: List[str], existing_raw: str) -> str:
+        merged: List[str] = []
+        for entry in list(extras) + cls._split_env_paths(existing_raw):
+            val = str(entry or "").strip()
+            if not val:
+                continue
+            if val not in merged:
+                merged.append(val)
+        return os.pathsep.join(merged)
+
+    @staticmethod
+    def _existing_dirs(paths: List[Path]) -> List[str]:
+        existing: List[str] = []
+        for path in paths:
+            try:
+                if path.exists() and path.is_dir():
+                    resolved = str(path.resolve())
+                    if resolved not in existing:
+                        existing.append(resolved)
+            except Exception:
+                continue
+        return existing
+
+    @staticmethod
+    def _env_diag_subset(env: Dict[str, str]) -> Dict[str, str]:
+        keys = ("ROS_LOG_DIR", "GAZEBO_MODEL_PATH", "GAZEBO_PLUGIN_PATH", "GAZEBO_RESOURCE_PATH")
+        return {key: str(env.get(key, "")) for key in keys}
+
+    def _build_gazebo_launch_env(self) -> Dict[str, str]:
+        env = os.environ.copy()
+        env["ROS_LOG_DIR"] = os.path.abspath(self.ROS_LOG_PATH)
+
+        resources_root = Path(self.REPO_ROOT) / "resources"
+        models_root = resources_root / "models"
+        sensors_root = resources_root / "sensors"
+        camera_sensors_root = sensors_root / "camera"
+        catkin_plugin_root = Path(self.REPO_ROOT) / "catkin_ws" / "devel" / "lib"
+        ros_plugin_root = Path("/opt/ros/noetic/lib")
+        system_model_roots = [
+            Path("/usr/share/gazebo-11/models"),
+            Path("/usr/share/gazebo/models"),
+            Path.home() / ".gazebo" / "models",
+        ]
+        system_plugin_roots = [
+            Path("/usr/lib/x86_64-linux-gnu/gazebo-11/plugins"),
+            Path("/usr/lib/x86_64-linux-gnu/gazebo/plugins"),
+        ]
+        system_resource_roots = [
+            Path("/usr/share/gazebo-11"),
+            Path("/usr/share/gazebo"),
+            Path.home() / ".gazebo",
+        ]
+
+        model_extras = self._existing_dirs([resources_root, models_root, sensors_root, camera_sensors_root] + system_model_roots)
+        plugin_extras = self._existing_dirs([catkin_plugin_root, ros_plugin_root] + system_plugin_roots)
+        resource_extras = self._existing_dirs([resources_root] + system_resource_roots)
+
+        merged_model_path = self._merge_env_paths(model_extras, env.get("GAZEBO_MODEL_PATH", ""))
+        merged_plugin_path = self._merge_env_paths(plugin_extras, env.get("GAZEBO_PLUGIN_PATH", ""))
+        merged_resource_path = self._merge_env_paths(resource_extras, env.get("GAZEBO_RESOURCE_PATH", ""))
+
+        if merged_model_path:
+            env["GAZEBO_MODEL_PATH"] = merged_model_path
+        if merged_plugin_path:
+            env["GAZEBO_PLUGIN_PATH"] = merged_plugin_path
+        if merged_resource_path:
+            env["GAZEBO_RESOURCE_PATH"] = merged_resource_path
+        return env
 
     @staticmethod
     def _is_process_alive(proc: Optional[subprocess.Popen]) -> bool:
@@ -347,9 +425,9 @@ class SimulationManager:
     def wait_for_topics(
         self,
         expected_topics: List[str],
-        timeout_s: float | None = None,
-        msg_window_s: float | None = None,
-        min_messages: int | None = None,
+        timeout_s: Optional[float] = None,
+        msg_window_s: Optional[float] = None,
+        min_messages: Optional[int] = None,
     ) -> Tuple[bool, Dict[str, object]]:
         timeout_s = float(timeout_s or self.TOPIC_READY_TIMEOUT_S)
         msg_window_s = float(msg_window_s or self.TOPIC_MSG_WINDOW_S)
@@ -375,6 +453,7 @@ class SimulationManager:
 
         resolved: Dict[str, str] = {}
         deadline = time.time() + timeout_s
+        last_topics_without_messages: List[str] = []
 
         while time.time() < deadline:
             if self._is_process_alive(self.gazebo_process) is False and self.gazebo_process is not None:
@@ -399,10 +478,10 @@ class SimulationManager:
                 diag["msg_hz"] = dict(msg_hz)
                 missing_messages = [topic for topic, count in msg_counters.items() if int(count) < int(min_messages)]
                 if missing_messages:
-                    diag["reason"] = "topics_no_messages"
+                    last_topics_without_messages = list(missing_messages)
                     diag["topics_without_messages"] = missing_messages
-                    self._last_topic_diag = dict(diag)
-                    return False, diag
+                    time.sleep(0.2)
+                    continue
 
                 diag["reason"] = "ok"
                 self._last_topic_diag = dict(diag)
@@ -411,13 +490,17 @@ class SimulationManager:
             time.sleep(0.2)
 
         if not diag.get("reason"):
-            diag["reason"] = "topics_not_found"
+            if last_topics_without_messages and len(resolved) == len(expected):
+                diag["reason"] = "topics_no_messages_timeout"
+                diag["topics_without_messages"] = list(last_topics_without_messages)
+            else:
+                diag["reason"] = "topics_not_found"
         diag["resolved_topics"] = dict(resolved)
         diag["missing_expected_topics"] = [topic for topic in expected if topic not in resolved]
         self._last_topic_diag = dict(diag)
         return False, diag
 
-    def _wait_ros_master_ready(self, timeout_s: float | None = None) -> Tuple[bool, str]:
+    def _wait_ros_master_ready(self, timeout_s: Optional[float] = None) -> Tuple[bool, str]:
         timeout_s = float(timeout_s or self.ROS_MASTER_READY_TIMEOUT_S)
         deadline = time.time() + timeout_s
         last_error = ""
@@ -439,7 +522,7 @@ class SimulationManager:
             last_error = f"ROS master did not become ready within {timeout_s:.1f}s"
         return False, last_error
 
-    def wait_for_master(self, timeout_s: float | None = None) -> Tuple[bool, str]:
+    def wait_for_master(self, timeout_s: Optional[float] = None) -> Tuple[bool, str]:
         return self._wait_ros_master_ready(timeout_s=timeout_s)
 
     def _wait_for_services(self, services: Tuple[str, ...], timeout_s: float) -> Tuple[bool, Dict[str, str], str]:
@@ -466,10 +549,84 @@ class SimulationManager:
             return False, {name: last_errors.get(name, "timeout") for name in pending}, "gazebo_services_timeout"
         return True, {}, "ok"
 
+    def _wait_for_clock(self, timeout_s: Optional[float] = None) -> Tuple[bool, Dict[str, object]]:
+        timeout_s = float(timeout_s or self.CLOCK_READY_TIMEOUT_S)
+        diag: Dict[str, object] = {
+            "timeout_s": float(timeout_s),
+            "use_sim_time": True,
+            "reason": "",
+            "error": "",
+        }
+        try:
+            use_sim_time = bool(rospy.get_param("/use_sim_time", True))
+        except Exception:
+            use_sim_time = True
+
+        diag["use_sim_time"] = bool(use_sim_time)
+        if not use_sim_time:
+            diag["reason"] = "use_sim_time_disabled"
+            return True, diag
+
+        try:
+            rospy.wait_for_message("/clock", Clock, timeout=float(timeout_s))
+            diag["reason"] = "ok"
+            return True, diag
+        except Exception as exc:
+            diag["reason"] = "clock_timeout"
+            diag["error"] = str(exc)
+            return False, diag
+
+    @staticmethod
+    def _read_file_tail(path: Path, max_lines: int = 200) -> List[str]:
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f_in:
+                return f_in.read().splitlines()[-int(max_lines):]
+        except Exception as exc:
+            return [f"<failed_to_read_log> {exc}"]
+
+    def _collect_latest_gazebo_log_tail(self, max_lines: int = 200) -> Dict[str, object]:
+        search_roots = [
+            Path(self.ROS_LOG_PATH),
+            Path.home() / ".ros" / "log" / "latest",
+            Path.home() / ".ros" / "log",
+        ]
+        patterns = ("gazebo-*.log", "gzserver-*.log")
+        searched_paths: List[str] = []
+        candidates: List[Path] = []
+
+        for root in search_roots:
+            searched_paths.append(str(root))
+            if not root.exists() or not root.is_dir():
+                continue
+            for pattern in patterns:
+                try:
+                    for match in root.rglob(pattern):
+                        if match.is_file() and match not in candidates:
+                            candidates.append(match)
+                except Exception:
+                    continue
+
+        if not candidates:
+            return {
+                "path": "",
+                "tail": ["<gazebo-log-not-found>"],
+                "searched_paths": searched_paths,
+            }
+
+        chosen = sorted(candidates, key=lambda p: p.stat().st_mtime)[-1]
+        return {
+            "path": str(chosen),
+            "tail": self._read_file_tail(chosen, max_lines=max_lines),
+            "searched_paths": searched_paths,
+        }
+
     def _collect_runtime_diag(self, expected_topics: Optional[List[str]] = None) -> Dict[str, object]:
         snapshot = self._launch_output_snapshot(max_lines=80)
         lines = list(snapshot["launch_stdout_tail"]) + list(snapshot["launch_stderr_tail"])
         scene = self.get_last_scene_diagnostics()
+        rostopic_dump = self._run_shell_capture("rostopic list || true", timeout_s=6.0, max_lines=400)
+        rosservice_dump = self._run_shell_capture("rosservice list || true", timeout_s=6.0, max_lines=400)
+        rosnode_dump = self._run_shell_capture("rosnode list || true", timeout_s=6.0, max_lines=400)
 
         diag: Dict[str, object] = {
             "cwd": os.path.abspath(os.getcwd()),
@@ -483,8 +640,15 @@ class SimulationManager:
             "msg_counters": self._last_topic_diag.get("msg_counters", {}),
             "msg_hz": self._last_topic_diag.get("msg_hz", {}),
             "published_topics_last": self._last_topic_diag.get("published_topics_last", []),
-            "rostopic_list": self._all_topics(),
+            "rostopic_list": [str(line).strip() for line in rostopic_dump.get("stdout_tail", []) if str(line).strip()],
+            "rosservice_list": [str(line).strip() for line in rosservice_dump.get("stdout_tail", []) if str(line).strip()],
+            "rosnode_list": [str(line).strip() for line in rosnode_dump.get("stdout_tail", []) if str(line).strip()],
+            "rostopic_list_cmd": rostopic_dump,
+            "rosservice_list_cmd": rosservice_dump,
+            "rosnode_list_cmd": rosnode_dump,
+            "gazebo_log_tail": self._collect_latest_gazebo_log_tail(max_lines=200),
             "scene_log_files": dict(self._scene_log_files),
+            "launch_env": scene.get("launch_env", {}),
         }
         return diag
 
@@ -495,7 +659,7 @@ class SimulationManager:
         self._kill_ros()
         self._prepare_ros_log_dir()
         env = os.environ.copy()
-        env["ROS_LOG_DIR"] = self.ROS_LOG_PATH
+        env["ROS_LOG_DIR"] = os.path.abspath(self.ROS_LOG_PATH)
 
         roscore_stdout = os.path.join(self.ROS_LOG_PATH, "roscore.out")
         roscore_stderr = os.path.join(self.ROS_LOG_PATH, "roscore.err")
@@ -558,45 +722,169 @@ class SimulationManager:
         except Exception:
             return False
 
-    def _scene_world_output_path(self, source_world_abs: str) -> str:
-        scene_dir = os.path.join(self.ROS_LOG_PATH, "generated_worlds")
-        os.makedirs(scene_dir, exist_ok=True)
-        stamp = int(time.time() * 1000)
-        base = os.path.basename(source_world_abs) or "scene.world"
-        root, ext = os.path.splitext(base)
-        if not ext:
-            ext = ".world"
-        return os.path.abspath(os.path.join(scene_dir, f"{root}_{stamp}{ext}"))
-
-    def _generate_world(self, world_path: str, camera_model_path: str, output_world_path: str) -> Tuple[bool, str]:
+    @staticmethod
+    def _extract_model_name_from_sdf(camera_model_path: str) -> str:
         try:
-            tree = ET.parse(world_path)
+            tree = ET.parse(camera_model_path)
             root = tree.getroot()
-            world = root.find("world")
-            if world is None:
-                return False, "No <world> node in world file"
-
-            camera_tree = ET.parse(camera_model_path)
-            camera_root = camera_tree.getroot()
-            camera_models = camera_root.findall("model")
-            if not camera_models:
-                return False, "No <model> in camera SDF"
-
-            for model in camera_models:
-                world.append(model)
-
-            os.makedirs(os.path.dirname(output_world_path), exist_ok=True)
-            tree.write(output_world_path, encoding="utf-8", xml_declaration=True)
-            ET.parse(output_world_path)  # validation
-            return True, ""
+            model = root.find(".//model")
+            if model is not None:
+                model_name = str(model.get("name", "") or "").strip()
+                if model_name:
+                    return model_name
         except Exception as exc:
-            return False, str(exc)
+            logger.warning(f"Failed to parse model name from SDF {camera_model_path}: {exc}")
+        stem = Path(camera_model_path).stem
+        return f"{stem}_model"
+
+    @staticmethod
+    def _sensor_name_from_topic(topic_name: str) -> str:
+        parts = [part for part in str(topic_name or "").strip("/").split("/") if part]
+        if not parts:
+            return ""
+        return str(parts[0]).strip()
+
+    def _resolve_sensor_name(
+        self,
+        sensor_name: Optional[str],
+        expected_topics: List[str],
+        camera_model_path: str,
+    ) -> Tuple[str, str]:
+        preferred = str(sensor_name or "").strip()
+        if preferred:
+            return preferred, "open_scene.sensor_name"
+
+        for topic in expected_topics:
+            candidate = self._sensor_name_from_topic(topic)
+            if candidate:
+                return candidate, "expected_topics"
+
+        fallback = self._extract_model_name_from_sdf(camera_model_path)
+        if fallback:
+            return fallback, "camera_sdf_fallback"
+        return "sensor_model", "hardcoded_fallback"
+
+    def _delete_model_best_effort(self, model_name: str) -> Dict[str, object]:
+        diag: Dict[str, object] = {
+            "model_name": str(model_name),
+            "attempted": False,
+            "success": False,
+            "status_message": "",
+            "exception": "",
+        }
+        if not str(model_name or "").strip():
+            diag["status_message"] = "model_name is empty"
+            return diag
+
+        try:
+            rospy.wait_for_service("/gazebo/delete_model", timeout=5.0)
+            delete_proxy = rospy.ServiceProxy("/gazebo/delete_model", DeleteModel)
+            diag["attempted"] = True
+            response = delete_proxy(str(model_name))
+            diag["success"] = bool(response.success)
+            diag["status_message"] = str(response.status_message or "")
+        except Exception as exc:
+            diag["exception"] = str(exc)
+        return diag
+
+    @staticmethod
+    def _spawn_status_contains_exists(status_message: str) -> bool:
+        msg = str(status_message or "").strip().lower()
+        if not msg:
+            return False
+        return ("already exists" in msg) or (" exists" in msg) or msg.endswith("exists")
+
+    def _spawn_sensor_model(self, camera_model_path: str, model_name: str) -> Tuple[bool, Dict[str, object]]:
+        robot_namespace = ""
+        reference_frame = "world"
+        diag: Dict[str, object] = {
+            "model_name": str(model_name),
+            "camera_model_path_abs": str(camera_model_path),
+            "robot_namespace": str(robot_namespace),
+            "reference_frame": str(reference_frame),
+            "delete_before_spawn": {},
+            "delete_before_spawn_retry": {},
+            "spawn_attempts": [],
+            "retry_on_exists_used": False,
+            "success": False,
+            "status_message": "",
+            "exception": "",
+        }
+        try:
+            with open(camera_model_path, "r", encoding="utf-8") as f_in:
+                model_xml = f_in.read()
+            if not model_xml.strip():
+                diag["status_message"] = "camera model SDF is empty"
+                return False, diag
+        except Exception as exc:
+            diag["exception"] = str(exc)
+            return False, diag
+
+        delete_diag = self._delete_model_best_effort(model_name)
+        diag["delete_before_spawn"] = delete_diag
+
+        def _do_spawn_once() -> Tuple[bool, Dict[str, object]]:
+            payload: Dict[str, object] = {
+                "success": False,
+                "status_message": "",
+                "exception": "",
+            }
+            try:
+                rospy.wait_for_service("/gazebo/spawn_sdf_model", timeout=8.0)
+                spawn_proxy = rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)
+                initial_pose = Pose(Point(0.0, 0.0, 0.0), Quaternion(0.0, 0.0, 0.0, 1.0))
+                response = spawn_proxy(
+                    str(model_name),
+                    model_xml,
+                    robot_namespace,
+                    initial_pose,
+                    reference_frame,
+                )
+                payload["success"] = bool(response.success)
+                payload["status_message"] = str(response.status_message or "")
+                return bool(response.success), payload
+            except Exception as exc:
+                payload["exception"] = str(exc)
+                return False, payload
+
+        try:
+            first_ok, first_payload = _do_spawn_once()
+            diag["spawn_attempts"].append({"attempt": 1, **first_payload})
+            if first_ok:
+                diag["success"] = True
+                diag["status_message"] = str(first_payload.get("status_message", ""))
+                return True, diag
+
+            first_status = str(first_payload.get("status_message", ""))
+            if self._spawn_status_contains_exists(first_status):
+                diag["retry_on_exists_used"] = True
+                retry_delete_diag = self._delete_model_best_effort(model_name)
+                diag["delete_before_spawn_retry"] = retry_delete_diag
+                time.sleep(0.3)
+
+                second_ok, second_payload = _do_spawn_once()
+                diag["spawn_attempts"].append({"attempt": 2, **second_payload})
+                diag["success"] = bool(second_ok)
+                diag["status_message"] = str(second_payload.get("status_message", ""))
+                if second_ok:
+                    return True, diag
+                diag["exception"] = str(second_payload.get("exception", "") or "")
+                return False, diag
+
+            diag["success"] = False
+            diag["status_message"] = first_status
+            diag["exception"] = str(first_payload.get("exception", "") or "")
+            return False, diag
+        except Exception as exc:
+            diag["exception"] = str(exc)
+            return False, diag
 
     def open_scene(
         self,
         world_path: str,
         camera_model_path: str,
         expected_topics: Optional[List[str]] = None,
+        sensor_name: Optional[str] = None,
     ) -> bool:
         self._clear_launch_buffers()
         self._last_topic_diag = {}
@@ -604,6 +892,11 @@ class SimulationManager:
         world_abs = self._resolve_path(world_path)
         sensor_abs = self._resolve_path(camera_model_path)
         expected_topics = [str(topic) for topic in (expected_topics or []) if str(topic).strip()]
+        resolved_sensor_name, resolved_sensor_name_source = self._resolve_sensor_name(
+            sensor_name=sensor_name,
+            expected_topics=expected_topics,
+            camera_model_path=sensor_abs,
+        )
 
         scene_diag = {
             "attempt_ts": time.time(),
@@ -615,9 +908,15 @@ class SimulationManager:
             "camera_model_path_input": str(camera_model_path),
             "camera_model_path_abs": sensor_abs,
             "camera_model_exists": os.path.exists(sensor_abs),
+            "sensor_name_input": str(sensor_name or ""),
+            "sensor_name": str(resolved_sensor_name),
+            "sensor_name_source": str(resolved_sensor_name_source),
             "catkin_setup_abs": self.CATKIN_SETUP_DIR,
             "catkin_setup_exists": os.path.exists(self.CATKIN_SETUP_DIR),
             "expected_topics": list(expected_topics),
+            "launch_ready_timeout_s": float(self.GAZEBO_SERVICES_TIMEOUT_S),
+            "clock_ready_timeout_s": float(self.CLOCK_READY_TIMEOUT_S),
+            "topic_ready_timeout_s": float(self.TOPIC_READY_TIMEOUT_S),
             "reason": "",
         }
         self._replace_scene_diag(scene_diag)
@@ -650,35 +949,26 @@ class SimulationManager:
                 return False
 
         self._prepare_ros_log_dir()
-        generated_world = self._scene_world_output_path(world_abs)
-        generated_ok, generated_error = self._generate_world(world_abs, sensor_abs, generated_world)
-        if not generated_ok:
-            runtime = self._collect_runtime_diag(expected_topics=expected_topics)
-            self._set_scene_diag(
-                reason="base_world_generation_failed",
-                generation_error=generated_error,
-                generated_world_path_abs=generated_world,
-                **runtime,
-            )
-            return False
-
+        launch_world_abs = world_abs
         log_files = self._scene_log_paths(attempt=1)
         self._scene_log_files = dict(log_files)
 
         roslaunch_cmd = (
             f"source {shlex.quote(self.CATKIN_SETUP_DIR)} && "
             f"roslaunch {shlex.quote(self.SENSOR_PKG)} {shlex.quote(self.LAUNCH_FILE)} "
-            f"world_path:={shlex.quote(generated_world)} "
+            f"world_path:={shlex.quote(launch_world_abs)} "
             "paused:=false gui:=false headless:=true"
         )
 
-        launch_env = os.environ.copy()
-        launch_env["ROS_LOG_DIR"] = self.ROS_LOG_PATH
+        launch_env = self._build_gazebo_launch_env()
+        launch_env_diag = self._env_diag_subset(launch_env)
 
         self._set_scene_diag(
-            generated_world_path_abs=generated_world,
+            generated_world_path_abs="",
+            launch_world_path_abs=launch_world_abs,
             roslaunch_cmd=roslaunch_cmd,
             launch_log_files=dict(log_files),
+            launch_env=launch_env_diag,
         )
 
         try:
@@ -707,19 +997,70 @@ class SimulationManager:
                 reason=service_reason,
                 services_expected=list(self.REQUIRED_GAZEBO_SERVICES),
                 services_errors=service_errors,
+                launch_ready_timeout_s=float(self.GAZEBO_SERVICES_TIMEOUT_S),
                 roslaunch_returncode=self.gazebo_process.poll() if self.gazebo_process else None,
                 **runtime,
             )
             self.kill_gazebo()
             return False
 
+        clock_ok, clock_diag = self._wait_for_clock(timeout_s=self.CLOCK_READY_TIMEOUT_S)
+        self._set_scene_diag(clock_wait=clock_diag)
+
+        sensor_model_name = str(resolved_sensor_name)
+        spawn_ok, spawn_diag = self._spawn_sensor_model(sensor_abs, sensor_model_name)
+        self._set_scene_diag(
+            sensor_model_name=sensor_model_name,
+            model_name_used_for_spawn=sensor_model_name,
+            spawn_model=spawn_diag,
+            clock_wait=clock_diag,
+            clock_ready=bool(clock_ok),
+        )
+        if not spawn_ok:
+            runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+            self._set_scene_diag(
+                reason="camera_model_spawn_failed",
+                sensor_model_name=sensor_model_name,
+                model_name_used_for_spawn=sensor_model_name,
+                spawn_model=spawn_diag,
+                clock_wait=clock_diag,
+                clock_ready=bool(clock_ok),
+                **runtime,
+            )
+            self.kill_gazebo()
+            return False
+
+        topics_after_spawn_cmd = self._run_shell_capture("rostopic list || true", timeout_s=6.0, max_lines=500)
+        topics_after_spawn = [
+            str(line).strip()
+            for line in topics_after_spawn_cmd.get("stdout_tail", [])
+            if str(line).strip()
+        ]
+        image_topic_candidates = [
+            topic
+            for topic in topics_after_spawn
+            if topic.endswith("/image_raw")
+            or topic == "/image_raw"
+            or topic.endswith("/image_raw/compressed")
+            or topic == "/image_raw/compressed"
+        ]
+        self._set_scene_diag(
+            topics_after_spawn=topics_after_spawn,
+            image_topic_candidates=image_topic_candidates,
+            topics_after_spawn_cmd=topics_after_spawn_cmd,
+        )
+
         if expected_topics:
-            topics_ok, topics_diag = self.wait_for_topics(expected_topics=expected_topics, timeout_s=self.TOPIC_READY_TIMEOUT_S)
+            topics_ok, topics_diag = self.wait_for_topics(
+                expected_topics=expected_topics,
+                timeout_s=self.TOPIC_READY_TIMEOUT_S,
+            )
             self._set_scene_diag(
                 expected_topics=list(expected_topics),
                 resolved_topics=topics_diag.get("resolved_topics", {}),
                 msg_counters=topics_diag.get("msg_counters", {}),
                 msg_hz=topics_diag.get("msg_hz", {}),
+                topic_ready_timeout_s=float(self.TOPIC_READY_TIMEOUT_S),
             )
             if not topics_ok:
                 runtime = self._collect_runtime_diag(expected_topics=expected_topics)
