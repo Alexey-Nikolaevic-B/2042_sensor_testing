@@ -6,11 +6,12 @@
       "type": "rfid",
       "description": "Ultra-high frequency RFID reader with 10-meter range",
       "image_path": "./img/sensor.png",
+      "params": [], 
       "tests": [
-        {"name": "1 Test","description": " 1",  "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
-        {"name": "Focus Calibration","description": " 2",   "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
-        {"name": "Night Vision Test","description": " 3",   "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
-        {"name": "Color Accuracy","description": " 4",   "date": "2023-12-20", "status": "Passed", "result": "98%"}
+        {"name": "1 Test","description": " 1", "image": "./img/description1.png",  "date": "2024-01-15", "status": "Passed", "result": "3840x2160"},
+        {"name": "Focus Calibration","description": " 2",  "image": "./img/description2.png",   "date": "2024-01-10", "status": "Passed", "result": "Optimal"},
+        {"name": "Night Vision Test","description": " 3",  "image": "./img/description3.png",   "date": "2024-01-05", "status": "Failed", "result": "IR issue"},
+        {"name": "Color Accuracy","description": " 4",  "image": "./img/description4.png",   "date": "2023-12-20", "status": "Passed", "result": "98%"}
       ]  
     },
     {
