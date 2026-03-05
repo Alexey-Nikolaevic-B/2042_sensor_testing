@@ -1,0 +1,847 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TestingWindow</class>
+ <widget class="QWidget" name="TestingWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1200</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Sensor Testing</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout_main">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>10</number>
+   </property>
+   <property name="topMargin">
+    <number>10</number>
+   </property>
+   <property name="rightMargin">
+    <number>10</number>
+   </property>
+   <property name="bottomMargin">
+    <number>10</number>
+   </property>
+   
+   <!-- Верхняя панель с кнопками навигации -->
+   <layout class="QHBoxLayout" name="horizontalLayout_nav">
+    <item>
+     <widget class="QPushButton" name="btn_back">
+      <property name="text">
+       <string>← Back to Sensors</string>
+      </property>
+      <property name="icon">
+       <iconset theme="go-previous"/>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <spacer name="horizontalSpacer_nav">
+      <property name="orientation">
+       <enum>Qt::Horizontal</enum>
+      </property>
+      <property name="sizeHint" stdset="0">
+       <size>
+        <width>40</width>
+        <height>20</height>
+       </size>
+      </property>
+     </spacer>
+    </item>
+    <item>
+     <widget class="QLabel" name="sensor_name_label">
+      <property name="text">
+       <string>Testing: Unknown Sensor</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+   </layout>
+   
+   <!-- Основной контент - два столбца -->
+   <layout class="QHBoxLayout" name="horizontalLayout_content">
+    <property name="spacing">
+     <number>10</number>
+    </property>
+    
+    <!-- Левый столбец - список тестов -->
+    <item>
+     <widget class="QFrame" name="frame_tests_list">
+      <property name="frameShape">
+       <enum>QFrame::StyledPanel</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Raised</enum>
+      </property>
+      <property name="minimumWidth">
+       <number>400</number>
+      </property>
+      <property name="maximumWidth">
+       <number>450</number>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_tests_list">
+       <property name="spacing">
+        <number>10</number>
+       </property>
+       
+       <!-- Заголовок списка тестов -->
+       <layout class="QHBoxLayout" name="horizontalLayout_tests_header">
+        <item>
+         <widget class="QLabel" name="label_tests">
+          <property name="text">
+           <string>&lt;h3&gt;Available Tests&lt;/h3&gt;</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_tests_header">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_run_all">
+          <property name="text">
+           <string>Run All Tests</string>
+          </property>
+          <property name="icon">
+           <iconset theme="media-playback-start"/>
+          </property>
+         </widget>
+        </item>
+       </layout>
+       
+       <!-- Список тестов с прокруткой -->
+       <widget class="QScrollArea" name="scrollArea_tests">
+        <property name="widgetResizable">
+         <bool>true</bool>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::NoFrame</enum>
+        </property>
+        <widget class="QWidget" name="scrollAreaWidgetContents_tests">
+         <property name="geometry">
+          <rect>
+           <x>0</x>
+           <y>0</y>
+           <width>380</width>
+           <height>500</height>
+          </rect>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_tests_container">
+          <property name="spacing">
+           <number>5</number>
+          </property>
+          <property name="leftMargin">
+           <number>0</number>
+          </property>
+          <property name="topMargin">
+           <number>0</number>
+          </property>
+          <property name="rightMargin">
+           <number>0</number>
+          </property>
+          <property name="bottomMargin">
+           <number>0</number>
+          </property>
+          
+          <!-- Тест 1: Connectivity -->
+          <widget class="QFrame" name="frame_test_connectivity">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_connectivity">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_connectivity_name">
+              <property name="text">
+               <string>&lt;b&gt;Connectivity Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_connectivity">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_connectivity_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_connectivity">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 2: Calibration -->
+          <widget class="QFrame" name="frame_test_calibration">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_calibration">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_calibration_name">
+              <property name="text">
+               <string>&lt;b&gt;Calibration Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_calibration">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_calibration_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_calibration">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 3: Performance -->
+          <widget class="QFrame" name="frame_test_performance">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_performance">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_performance_name">
+              <property name="text">
+               <string>&lt;b&gt;Performance Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_performance">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_performance_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_performance">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 4: Resolution -->
+          <widget class="QFrame" name="frame_test_resolution">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_resolution">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_resolution_name">
+              <property name="text">
+               <string>&lt;b&gt;Resolution Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_resolution">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_resolution_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_resolution">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 5: Noise -->
+          <widget class="QFrame" name="frame_test_noise">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_noise">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_noise_name">
+              <property name="text">
+               <string>&lt;b&gt;Noise Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_noise">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_noise_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_noise">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 6: Latency -->
+          <widget class="QFrame" name="frame_test_latency">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_latency">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_latency_name">
+              <property name="text">
+               <string>&lt;b&gt;Latency Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_latency">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_latency_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_latency">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Тест 7: Stress -->
+          <widget class="QFrame" name="frame_test_stress">
+           <property name="frameShape">
+            <enum>QFrame::StyledPanel</enum>
+           </property>
+           <property name="frameShadow">
+            <enum>QFrame::Raised</enum>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_test_stress">
+            <property name="leftMargin">
+             <number>5</number>
+            </property>
+            <property name="topMargin">
+             <number>5</number>
+            </property>
+            <property name="rightMargin">
+             <number>5</number>
+            </property>
+            <property name="bottomMargin">
+             <number>5</number>
+            </property>
+            <item row="0" column="0" colspan="2">
+             <widget class="QLabel" name="label_test_stress_name">
+              <property name="text">
+               <string>&lt;b&gt;Stress Test&lt;/b&gt;</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QPushButton" name="btn_test_stress">
+              <property name="text">
+               <string>Run Test</string>
+              </property>
+              <property name="icon">
+               <iconset theme="media-playback-start"/>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="1">
+             <widget class="QLabel" name="label_test_stress_status">
+              <property name="text">
+               <string>Not Run</string>
+              </property>
+              <property name="alignment">
+               <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+              </property>
+             </widget>
+            </item>
+            <item row="2" column="0" colspan="2">
+             <widget class="QProgressBar" name="progress_test_stress">
+              <property name="value">
+               <number>0</number>
+              </property>
+              <property name="visible">
+               <bool>false</bool>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+          
+          <!-- Добавляем растяжку в конце -->
+          <spacer name="verticalSpacer_tests">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
+         </layout>
+        </widget>
+       </widget>
+       
+       <!-- Общий прогресс бар тестирования -->
+       <widget class="QLabel" name="label_current_test">
+        <property name="text">
+         <string>Current test: None</string>
+        </property>
+       </widget>
+       <widget class="QLabel" name="label_test_status">
+        <property name="text">
+         <string>Status: Idle</string>
+        </property>
+       </widget>
+       <widget class="QProgressBar" name="progress_bar">
+        <property name="value">
+         <number>0</number>
+        </property>
+       </widget>
+      </layout>
+     </widget>
+    </item>
+    
+    <!-- Правый столбец - просмотр и описание -->
+    <item>
+     <widget class="QFrame" name="frame_right_panel">
+      <property name="frameShape">
+       <enum>QFrame::StyledPanel</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Raised</enum>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout_right_panel">
+       <property name="spacing">
+        <number>10</number>
+       </property>
+       
+       <!-- Панель просмотра сенсора -->
+       <widget class="QFrame" name="frame_sensor_view">
+        <property name="minimumHeight">
+         <number>400</number>
+        </property>
+        <property name="frameShape">
+         <enum>QFrame::StyledPanel</enum>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_sensor_view">
+         <item>
+          <widget class="QLabel" name="sensor_view_label">
+           <property name="text">
+            <string>Sensor view inactive</string>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignCenter</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       
+       <!-- Панель управления потоком сенсора -->
+       <layout class="QHBoxLayout" name="horizontalLayout_stream_controls">
+        <item>
+         <widget class="QPushButton" name="btn_start_stream">
+          <property name="text">
+           <string>Start Stream</string>
+          </property>
+          <property name="icon">
+           <iconset theme="media-playback-start"/>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_stop_stream">
+          <property name="text">
+           <string>Stop Stream</string>
+          </property>
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="icon">
+           <iconset theme="media-playback-stop"/>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="btn_capture_frame">
+          <property name="text">
+           <string>Capture Frame</string>
+          </property>
+          <property name="icon">
+           <iconset theme="camera-photo"/>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_stream">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_resolution">
+          <property name="text">
+           <string>Resolution:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="combo_resolution">
+          <item>
+           <property name="text">
+            <string>640x480</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>1280x720</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>1920x1080</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>3840x2160</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+       
+       <!-- Панель описания теста -->
+       <widget class="QGroupBox" name="groupBox_test_description">
+        <property name="title">
+         <string>Test Description</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_test_description">
+         <item>
+          <widget class="QLabel" name="label_test_description">
+           <property name="text">
+            <string>Select a test to see its description</string>
+           </property>
+           <property name="wordWrap">
+            <bool>true</bool>
+           </property>
+           <property name="alignment">
+            <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+       
+       <!-- Логи -->
+       <widget class="QGroupBox" name="groupBox_logs">
+        <property name="title">
+         <string>Logs</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_logs">
+         <item>
+          <widget class="QTextEdit" name="text_logs">
+           <property name="readOnly">
+            <bool>true</bool>
+           </property>
+           <property name="placeholderText">
+            <string>Test logs will appear here...</string>
+           </property>
+          </widget>
+         </item>
+         <layout class="QHBoxLayout" name="horizontalLayout_log_controls">
+          <item>
+           <widget class="QCheckBox" name="check_autoscroll">
+            <property name="text">
+             <string>Auto-scroll</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_log_controls">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_clear_logs">
+            <property name="text">
+             <string>Clear</string>
+            </property>
+            <property name="icon">
+             <iconset theme="edit-clear"/>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_copy_logs">
+            <property name="text">
+             <string>Copy</string>
+            </property>
+            <property name="icon">
+             <iconset theme="edit-copy"/>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_save_logs">
+            <property name="text">
+             <string>Save</string>
+            </property>
+            <property name="icon">
+             <iconset theme="document-save"/>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </layout>
+       </widget>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

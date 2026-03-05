@@ -37,18 +37,19 @@ class Simulator():
         try:
             env = os.environ.copy()
             env['ROS_LOG_DIR'] = self.ROS_LOG_PATH
-
             os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
 
+            roscore_cmd = f"source {self.CATKIN_SETUP_DIR} && roscore"
+
             self.ros_process = subprocess.Popen(
-                ["bash", "-c", "roscore"],
+                ["bash", "-c", roscore_cmd],
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True
             )
             self.ros_is_running = True
-            logger.info('ROS score started')
+            logger.info('ROS core started')
         except Exception as e:
             logger.error(f'Failed to start ROS core: {str(e)}')
 

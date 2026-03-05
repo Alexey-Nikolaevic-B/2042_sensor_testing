@@ -1,0 +1,237 @@
+"""
+sensor_repository.py
+
+Single source of truth for sensor data in the UI layer.
+Reads from and writes to SQLite via sensor_storage.py.
+Emits Qt signals whenever data changes so every widget stays in sync.
+
+Signals
+-------
+sensor_added   (dict)      – a new sensor was registered
+sensor_updated (dict)      – an existing sensor's data changed
+sensor_deleted (str)       – sensor was removed (emits sensor id string)
+sensors_loaded ()          – full dataset was (re)loaded from DB
+test_updated   (str, dict) – a test result changed (sensor id, test dict)
+"""
+
+import copy
+from datetime import datetime
+
+from PyQt5.QtCore import QObject, pyqtSignal
+
+import src.database.sensor_storage as db
+
+
+# ── Sensor value object ───────────────────────────────────────────────────────
+
+class Sensor:
+    """
+    Thin wrapper around a plain dict.
+    Supports both attribute access (sensor.name) and dict access (sensor['name'])
+    so all existing UI code works without changes.
+    """
+
+    REQUIRED_FIELDS = ("id", "name", "type")
+
+    def __init__(self, data: dict):
+        if not isinstance(data, dict):
+            raise TypeError("Sensor data must be a dict")
+        for field in self.REQUIRED_FIELDS:
+            if field not in data:
+                raise ValueError(f"Sensor data missing required field: '{field}'")
+        self._data = copy.deepcopy(data)
+        self._data.setdefault("tests", [])
+
+    def __getitem__(self, key):        return self._data[key]
+    def __setitem__(self, key, value): self._data[key] = value
+    def __contains__(self, key):       return key in self._data
+    def get(self, key, default=None):  return self._data.get(key, default)
+
+    @property
+    def id(self)          -> str:  return self._data["id"]
+    @property
+    def name(self)        -> str:  return self._data["name"]
+    @property
+    def sensor_type(self) -> str:  return self._data["type"]
+    @property
+    def description(self) -> str:  return self._data.get("description", "")
+    @property
+    def image_path(self)  -> str:  return self._data.get("image_path", "")
+    @property
+    def params(self)      -> dict: return self._data.get("params", {})
+    @property
+    def tests(self)       -> list: return self._data["tests"]
+    @property
+    def last_update(self):
+        return self._data.get("last_update", datetime.min)
+
+    def to_dict(self) -> dict:
+        return copy.deepcopy(self._data)
+
+    def update_fields(self, fields: dict):
+        fields = copy.deepcopy(fields)
+        fields.pop("id", None)
+        self._data.update(fields)
+
+    def get_test(self, test_name: str) -> dict | None:
+        for t in self._data["tests"]:
+            if t.get("name") == test_name:
+                return t
+        return None
+
+    def update_test(self, test_name: str, fields: dict) -> bool:
+        for t in self._data["tests"]:
+            if t.get("name") == test_name:
+                t.update(fields)
+                return True
+        new_test = {"name": test_name}
+        new_test.update(fields)
+        self._data["tests"].append(new_test)
+        return True
+
+    def __repr__(self):
+        return f"<Sensor id={self.id!r} name={self.name!r}>"
+
+
+# ── Repository ────────────────────────────────────────────────────────────────
+
+class SensorRepository(QObject):
+    """
+    Observable store backed by SQLite through sensor_storage.
+    Construct once in __main__ then call SensorRepository.instance() anywhere.
+    """
+
+    sensor_added   = pyqtSignal(dict)
+    sensor_updated = pyqtSignal(dict)
+    sensor_deleted = pyqtSignal(str)
+    sensors_loaded = pyqtSignal()
+    test_updated   = pyqtSignal(str, dict)
+
+    _instance: "SensorRepository | None" = None
+
+    @classmethod
+    def instance(cls) -> "SensorRepository":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sensors: dict[str, Sensor] = {}
+        SensorRepository._instance = self
+        db.init_db()
+        self.load()
+
+    # ── Loading ───────────────────────────────────────────────────────────────
+
+    def load(self):
+        """Reload everything from the database."""
+        self._sensors.clear()
+        for raw in db.get_all_sensors():
+            try:
+                s = Sensor(raw)
+                self._sensors[s.id] = s
+            except (TypeError, ValueError) as exc:
+                print(f"[SensorRepository] Skipping invalid sensor: {exc}")
+        print(f"[SensorRepository] Loaded {len(self._sensors)} sensors from DB")
+        self.sensors_loaded.emit()
+
+    # ── Read ──────────────────────────────────────────────────────────────────
+
+    def all_sensors(self) -> list[dict]:
+        return [s.to_dict() for s in self._sensors.values()]
+
+    def get_sensor(self, sensor_id: str) -> dict | None:
+        s = self._sensors.get(sensor_id)
+        return s.to_dict() if s else None
+
+    def get_sensor_by_name(self, name: str) -> dict | None:
+        for s in self._sensors.values():
+            if s.name == name:
+                return s.to_dict()
+        return None
+
+    def get_types(self) -> list[str]:
+        return db.get_sensor_types()
+
+    def count(self) -> int:
+        return len(self._sensors)
+
+    # ── Write ─────────────────────────────────────────────────────────────────
+
+    def add_sensor(self, data: dict) -> dict:
+        """Register a new sensor in the DB and notify the UI."""
+        db.add_sensor(
+            sensor_name = data["name"],
+            sensor_type = data["type"],
+            sdf_path    = data.get("sdf_path", ""),
+            description = data.get("description", ""),
+            image_path  = data.get("image_path", ""),
+            params      = data.get("params", {}),
+        )
+        fresh = db.get_sensor_by_name(data["name"])
+        s = Sensor(fresh)
+        self._sensors[s.id] = s
+        self.sensor_added.emit(s.to_dict())
+        return s.to_dict()
+
+    def update_sensor(self, sensor_id: str, fields: dict) -> dict:
+        s = self._sensors.get(sensor_id)
+        if s is None:
+            raise KeyError(f"No sensor with id {sensor_id!r}")
+        db.update_sensor(
+            sensor_name = s.name,
+            description = fields.get("description"),
+            image_path  = fields.get("image_path"),
+            params      = fields.get("params"),
+            sdf_path    = fields.get("sdf_path"),
+        )
+        s.update_fields(fields)
+        self.sensor_updated.emit(s.to_dict())
+        return s.to_dict()
+
+    def delete_sensor(self, sensor_id: str):
+        s = self._sensors.get(sensor_id)
+        if s is None:
+            raise KeyError(f"No sensor with id {sensor_id!r}")
+        db.delete_sensor(s.name)
+        del self._sensors[sensor_id]
+        self.sensor_deleted.emit(sensor_id)
+
+    def save_test_result(
+        self,
+        sensor_id: str,
+        test_name: str,
+        status: str,
+        result,
+        description: str = "",
+        duration: float = 0.0,
+    ) -> dict:
+        """Persist a test result, update in-memory state, emit test_updated."""
+        s = self._sensors.get(sensor_id)
+        if s is None:
+            raise KeyError(f"No sensor with id {sensor_id!r}")
+
+        db.save_test_result(
+            sensor_name = s.name,
+            test_name   = test_name,
+            status      = status,
+            result      = result,
+            description = description,
+            duration    = duration,
+        )
+
+        from datetime import datetime as _dt
+        today = _dt.now().strftime("%Y-%m-%d")
+
+        result_str = str(result) if not isinstance(result, str) else result
+        s.update_test(test_name, {
+            "status":   status,
+            "result":   result_str,
+            "duration": duration,
+            "date":     today,
+        })
+
+        updated_test = s.get_test(test_name)
+        self.test_updated.emit(sensor_id, copy.deepcopy(updated_test))
+        return copy.deepcopy(updated_test)
