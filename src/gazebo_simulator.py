@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import json
 import logging
@@ -5,13 +7,13 @@ import logging.config
 import os
 import re
 import shlex
-import shutil
 import signal
 import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import deque
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import rospy
@@ -20,75 +22,104 @@ from gazebo_msgs.srv import GetWorldProperties, SetModelState
 from geometry_msgs.msg import Point, Pose, Quaternion
 from sensor_msgs.msg import Image
 
-with open('log_config.json') as f_in:
-    log_config = json.load(f_in)
-logging.config.dictConfig(log_config)
+_MODULE_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _MODULE_DIR.parent
+_LOG_CONFIG_PATH = _REPO_ROOT / "log_config.json"
+
+if _LOG_CONFIG_PATH.exists():
+    with open(_LOG_CONFIG_PATH, "r", encoding="utf-8") as f_in:
+        log_config = json.load(f_in)
+    logging.config.dictConfig(log_config)
+else:
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(name)s - %(message)s")
 
 logger = logging.getLogger(__name__)
 
 
-class Simulator():
-    def __init__(self, CONFIG: dict = None):
+class SimulationManager:
+    """Единый lifecycle-менеджер ROS/Gazebo для test runner.
+
+    Особенности:
+    - поднимает только свои процессы (roscore/roslaunch) через process groups;
+    - завершает только процессы, которые сам запускал;
+    - собирает диагностику запуска сцены и readiness топиков.
+    """
+
+    def __init__(self, CONFIG: dict | None = None):
+        self.CONFIG = CONFIG or {}
+        self.REPO_ROOT = self._discover_repo_root(self.CONFIG)
+
+        self.CATKIN_SETUP_DIR = self._resolve_path(self.CONFIG.get("CATKIN_SETUP_DIR", "catkin_ws/devel/setup.bash"))
+        self.SENSOR_PKG = str(self.CONFIG.get("SENSOR_PKG", "scenario_test_pkg"))
+        self.LAUNCH_FILE = str(self.CONFIG.get("LAUNCH_FILE", "scenario.launch"))
+        self.TIMEOUT = float(self.CONFIG.get("MESSAGE_TIMEOUT", 10))
+
+        self.BASE_WORLD_PATH = self._resolve_path(
+            self.CONFIG.get("BASE_WORLD_PATH", "catkin_ws/src/scenario_test_pkg/worlds/base_world.world")
+        )
+        self.ROS_LOG_PATH = self._resolve_path(self.CONFIG.get("ROS_LOG_PATH", "ros_log"))
+
+        self.ROS_MASTER_READY_TIMEOUT_S = 30.0
+        self.GAZEBO_SERVICES_TIMEOUT_S = 45.0
+        self.TOPIC_READY_TIMEOUT_S = 30.0
+        self.TOPIC_MSG_WINDOW_S = 2.0
+        self.MIN_TOPIC_MESSAGES = 1
+        self.REQUIRED_GAZEBO_SERVICES = (
+            "/gazebo/get_world_properties",
+            "/gazebo/set_model_state",
+        )
+
         self.ros_is_running = False
         self.node_is_running = False
         self.gazebo_is_running = False
 
-        self.CONFIG = CONFIG
-        self.REPO_ROOT = self._discover_repo_root(CONFIG)
+        self.ros_process: Optional[subprocess.Popen] = None
+        self.gazebo_process: Optional[subprocess.Popen] = None
 
-        self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
-        self.SENSOR_PKG = CONFIG['SENSOR_PKG']
-        self.LAUNCH_FILE = CONFIG['LAUNCH_FILE']
-        self.TIMEOUT = CONFIG['MESSAGE_TIMEOUT']
-
-        base_world = CONFIG['BASE_WORLD_PATH']
-        if not os.path.isabs(base_world):
-            base_world = os.path.join(self.REPO_ROOT, base_world)
-        self.BASE_WORLD_PATH = os.path.abspath(base_world)
-
-        ros_log_path = CONFIG['ROS_LOG_PATH']
-        if not os.path.isabs(ros_log_path):
-            ros_log_path = os.path.join(self.REPO_ROOT, ros_log_path)
-        self.ROS_LOG_PATH = os.path.abspath(ros_log_path)
+        self._scene_stdout_thread: Optional[threading.Thread] = None
+        self._scene_stderr_thread: Optional[threading.Thread] = None
 
         self._diag_lock = threading.Lock()
-        self._launch_stdout_lines = deque(maxlen=1200)
-        self._launch_stderr_lines = deque(maxlen=1200)
-        self._last_scene_diagnostics = {}
-        self._last_ros_launch_error = ""
-
-        self.ROS_MASTER_READY_TIMEOUT_S = 30.0
-        self.GAZEBO_SERVICES_TIMEOUT_S = 45.0
-        self.GAZEBO_REQUIRED_SERVICES = (
-            "/gazebo/get_world_properties",
-            "/gazebo/spawn_sdf_model",
-            "/gazebo/set_model_state",
-        )
+        self._launch_stdout_lines = deque(maxlen=2000)
+        self._launch_stderr_lines = deque(maxlen=2000)
+        self._last_scene_diagnostics: Dict[str, object] = {}
+        self._last_topic_diag: Dict[str, object] = {}
+        self._scene_log_files: Dict[str, str] = {}
 
     @staticmethod
-    def _discover_repo_root(CONFIG: dict) -> str:
-        root = CONFIG.get("ROOT_PATH", "") if CONFIG else ""
+    def _discover_repo_root(config: dict) -> str:
+        root = str(config.get("ROOT_PATH", "") or "").strip()
         if root:
-            root_abs = os.path.abspath(root)
-            if os.path.isfile(os.path.join(root_abs, "test_runner.py")):
-                return root_abs
+            return os.path.abspath(root)
+        return os.path.abspath(_REPO_ROOT)
 
+    def _resolve_path(self, path_like: str | os.PathLike | None) -> str:
+        if path_like is None:
+            return ""
+        raw = str(path_like).strip()
+        if not raw:
+            return ""
+        p = Path(raw)
+        if p.is_absolute():
+            return str(p.resolve())
+        return str((Path(self.REPO_ROOT) / p).resolve())
+
+    def _prepare_ros_log_dir(self) -> None:
+        os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
+        probe = os.path.join(self.ROS_LOG_PATH, ".write_probe")
+        with open(probe, "w", encoding="utf-8") as f_out:
+            f_out.write("ok\n")
         try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--show-toplevel"],
-                capture_output=True,
-                text=True,
-                timeout=2,
-                check=False,
-            )
-            if result.returncode == 0:
-                git_root = result.stdout.strip()
-                if git_root:
-                    return os.path.abspath(git_root)
+            os.remove(probe)
         except Exception:
             pass
 
-        return os.path.abspath(os.getcwd())
+    def _scene_log_paths(self, attempt: int) -> Dict[str, str]:
+        suffix = f"attempt{int(attempt)}"
+        return {
+            "roslaunch_stdout": os.path.join(self.ROS_LOG_PATH, f"roslaunch.{suffix}.out"),
+            "roslaunch_stderr": os.path.join(self.ROS_LOG_PATH, f"roslaunch.{suffix}.err"),
+        }
 
     def _clear_launch_buffers(self) -> None:
         with self._diag_lock:
@@ -96,14 +127,14 @@ class Simulator():
             self._launch_stderr_lines.clear()
 
     def _append_launch_line(self, stream_type: str, line: str) -> None:
-        formatted = f"[{stream_type}] {line}"
+        formatted = f"[{stream_type}] {line.rstrip()}"
         with self._diag_lock:
             if stream_type == "stderr":
                 self._launch_stderr_lines.append(formatted)
             else:
                 self._launch_stdout_lines.append(formatted)
 
-    def _launch_output_snapshot(self, max_lines: int = 50) -> dict:
+    def _launch_output_snapshot(self, max_lines: int = 80) -> Dict[str, List[str]]:
         max_lines = max(1, int(max_lines))
         with self._diag_lock:
             return {
@@ -112,80 +143,111 @@ class Simulator():
             }
 
     @staticmethod
-    def _extract_missing_model_uris(lines) -> list:
+    def _extract_missing_model_uris(lines: List[str]) -> List[str]:
         joined = "\n".join(lines)
-        # Gazebo обычно пишет: Unable to find uri[model://<name>]
-        uris = re.findall(r"model://([A-Za-z0-9_./-]+)", joined)
-        unique = []
-        for uri in uris:
-            if uri not in unique:
-                unique.append(uri)
+        matches = re.findall(r"model://([A-Za-z0-9_./-]+)", joined)
+        unique: List[str] = []
+        for item in matches:
+            if item not in unique:
+                unique.append(item)
         return unique
 
     @staticmethod
-    def _extract_gazebo_log_paths(lines) -> list:
-        joined = "\n".join(lines)
-        paths = []
-
-        patterns = [
-            r"__log:=([^\s\]\)]+\.log)",
-            r"(\/[^\s\]\)]*(?:gazebo|gzserver)[^\s\]\)]*\.log)",
-        ]
-
-        for pattern in patterns:
-            for match in re.findall(pattern, joined):
-                path = match.strip().strip('"').strip("'")
-                if path and path not in paths:
-                    paths.append(path)
-        return paths
+    def _is_process_alive(proc: Optional[subprocess.Popen]) -> bool:
+        return bool(proc is not None and proc.poll() is None)
 
     @staticmethod
-    def _read_file_tail(path: str, max_lines: int = 200) -> List[str]:
+    def _terminate_process_group(proc: Optional[subprocess.Popen], name: str, timeout_s: float = 12.0) -> bool:
+        if proc is None:
+            return True
+        if proc.poll() is not None:
+            return True
+
         try:
-            if not path or not os.path.exists(path):
-                return [f"<log-not-found> {path}"]
-            with open(path, "r", encoding="utf-8", errors="replace") as f_in:
-                return list(deque((line.rstrip("\n") for line in f_in), maxlen=max_lines))
-        except Exception as exc:
-            return [f"<log-read-error> {path}: {exc}"]
-
-    @staticmethod
-    def _discover_recent_gazebo_logs(search_dirs: List[str], max_files: int = 4) -> List[str]:
-        candidates: List[Tuple[float, str]] = []
-        for root in search_dirs:
-            if not root or not os.path.isdir(root):
-                continue
             try:
-                for dirpath, _, filenames in os.walk(root):
-                    for name in filenames:
-                        low = name.lower()
-                        if not low.endswith(".log"):
-                            continue
-                        is_gazebo_log = low.startswith("gazebo-")
-                        is_gzserver_log = low.startswith("gzserver-")
-                        has_gazebo_token = "gazebo" in low or "gzserver" in low
-                        if not (is_gazebo_log or is_gzserver_log or has_gazebo_token):
-                            continue
-                        path = os.path.join(dirpath, name)
-                        try:
-                            mtime = float(os.path.getmtime(path))
-                        except Exception:
-                            mtime = 0.0
-                        candidates.append((mtime, path))
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except Exception:
-                continue
+                proc.terminate()
 
-        candidates.sort(key=lambda item: item[0], reverse=True)
-        paths: List[str] = []
-        for _, path in candidates:
-            if path not in paths:
-                paths.append(path)
-            if len(paths) >= int(max_files):
-                break
-        return paths
+            proc.wait(timeout=float(timeout_s))
+            return True
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                proc.kill()
+            try:
+                proc.wait(timeout=3.0)
+            except Exception:
+                pass
+            return proc.poll() is not None
+        except Exception as exc:
+            logger.warning(f"Failed to terminate process {name}: {exc}")
+            return False
+
+    def _drain_stream(self, stream, stream_type: str, out_path: str) -> None:
+        f_out = None
+        try:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            f_out = open(out_path, "a", encoding="utf-8")
+        except Exception:
+            f_out = None
+
+        try:
+            for line in iter(stream.readline, ""):
+                if not line:
+                    break
+                clean = line.rstrip("\n")
+                self._append_launch_line(stream_type, clean)
+                if f_out is not None:
+                    try:
+                        f_out.write(clean + "\n")
+                        f_out.flush()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+            if f_out is not None:
+                try:
+                    f_out.close()
+                except Exception:
+                    pass
+
+    def _start_launch_readers(self, log_files: Dict[str, str]) -> None:
+        if self.gazebo_process is None:
+            return
+        self._scene_stdout_thread = threading.Thread(
+            target=self._drain_stream,
+            args=(self.gazebo_process.stdout, "stdout", log_files["roslaunch_stdout"]),
+            daemon=True,
+        )
+        self._scene_stderr_thread = threading.Thread(
+            target=self._drain_stream,
+            args=(self.gazebo_process.stderr, "stderr", log_files["roslaunch_stderr"]),
+            daemon=True,
+        )
+        self._scene_stdout_thread.start()
+        self._scene_stderr_thread.start()
+
+    def _set_scene_diag(self, **kwargs) -> None:
+        with self._diag_lock:
+            self._last_scene_diagnostics.update(kwargs)
+
+    def _replace_scene_diag(self, payload: Dict[str, object]) -> None:
+        with self._diag_lock:
+            self._last_scene_diagnostics = dict(payload)
+
+    def get_last_scene_diagnostics(self) -> Dict[str, object]:
+        with self._diag_lock:
+            return copy.deepcopy(self._last_scene_diagnostics)
 
     @staticmethod
-    def _run_shell_capture(cmd: str, timeout_s: float = 5.0, max_lines: int = 200) -> Dict[str, object]:
+    def _run_shell_capture(cmd: str, timeout_s: float = 4.0, max_lines: int = 200) -> Dict[str, object]:
         try:
             result = subprocess.run(
                 ["bash", "-lc", cmd],
@@ -194,13 +256,11 @@ class Simulator():
                 timeout=float(timeout_s),
                 check=False,
             )
-            out_lines = (result.stdout or "").splitlines()[-int(max_lines):]
-            err_lines = (result.stderr or "").splitlines()[-int(max_lines):]
             return {
                 "cmd": cmd,
                 "returncode": int(result.returncode),
-                "stdout_tail": out_lines,
-                "stderr_tail": err_lines,
+                "stdout_tail": (result.stdout or "").splitlines()[-int(max_lines):],
+                "stderr_tail": (result.stderr or "").splitlines()[-int(max_lines):],
             }
         except Exception as exc:
             return {
@@ -210,205 +270,164 @@ class Simulator():
                 "stderr_tail": [str(exc)],
             }
 
-    @staticmethod
-    def _filtered_env_snapshot(env: Dict[str, str]) -> Dict[str, str]:
-        tracked = (
-            "ROS_LOG_DIR",
-            "ROS_PACKAGE_PATH",
-            "GAZEBO_MODEL_PATH",
-            "GAZEBO_RESOURCE_PATH",
-            "GAZEBO_PLUGIN_PATH",
-        )
-        snapshot: Dict[str, str] = {}
-        for key in tracked:
-            value = env.get(key, "")
-            if isinstance(value, str) and value:
-                snapshot[key] = value
-        return snapshot
-
-    def _prepare_ros_log_dir(self, reset: bool = False) -> None:
-        if reset and os.path.isdir(self.ROS_LOG_PATH):
-            shutil.rmtree(self.ROS_LOG_PATH, ignore_errors=True)
-        os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
-
-        probe = os.path.join(self.ROS_LOG_PATH, ".write_probe")
-        with open(probe, "w", encoding="utf-8") as f_out:
-            f_out.write("ok\n")
+    def _all_topics(self) -> List[str]:
         try:
-            os.remove(probe)
+            published = rospy.get_published_topics()
+            return sorted([name for name, _ in published])
         except Exception:
-            pass
+            snap = self._run_shell_capture("rostopic list || true", timeout_s=3.0, max_lines=300)
+            return [str(line).strip() for line in snap.get("stdout_tail", []) if str(line).strip()]
 
-    def _launch_log_files(self, attempt_num: int) -> Dict[str, str]:
-        suffix = f"attempt{int(attempt_num)}"
-        return {
-            "roslaunch_stdout": os.path.join(self.ROS_LOG_PATH, f"roslaunch.{suffix}.out"),
-            "roslaunch_stderr": os.path.join(self.ROS_LOG_PATH, f"roslaunch.{suffix}.err"),
-            "gzserver_stdout": os.path.join(self.ROS_LOG_PATH, f"gzserver.{suffix}.stdout.log"),
-            "gzserver_stderr": os.path.join(self.ROS_LOG_PATH, f"gzserver.{suffix}.stderr.log"),
-        }
+    def _image_topics(self) -> List[str]:
+        try:
+            published = rospy.get_published_topics()
+            return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
+        except Exception:
+            return sorted([name for name in self._all_topics() if "image" in name])
 
-    def _detect_only_logger_services(self) -> Dict[str, object]:
-        snap = self._run_shell_capture(
-            "rosservice list | grep '^/gazebo/' || true",
-            timeout_s=4.0,
-            max_lines=400,
-        )
-        node_snap = self._run_shell_capture(
-            "rosnode list | grep '^/gazebo$' || true",
-            timeout_s=4.0,
-            max_lines=50,
-        )
-        services = [str(line).strip() for line in snap.get("stdout_tail", []) if str(line).strip()]
-        gazebo_node_exists = any(str(line).strip() == "/gazebo" for line in node_snap.get("stdout_tail", []))
-        logger_services = {"/gazebo/get_loggers", "/gazebo/set_logger_level"}
-        only_logger = bool(services) and set(services).issubset(logger_services)
-        return {
-            "services": services,
-            "only_logger_services": bool(only_logger),
-            "gazebo_node_exists": bool(gazebo_node_exists),
-            "raw": snap,
-            "node_raw": node_snap,
-        }
-
-    def _process_state(self, pattern: str, ps_limit: int = 200) -> Dict[str, object]:
-        pgrep = self._run_shell_capture(
-            f"pgrep -af {shlex.quote(pattern)} || true",
-            timeout_s=3.0,
-            max_lines=ps_limit,
-        )
-        ps = self._run_shell_capture(
-            "ps -eo pid,ppid,pgid,stat,etime,cmd | "
-            f"grep -E {shlex.quote(pattern)} | grep -v grep || true",
-            timeout_s=3.0,
-            max_lines=ps_limit,
-        )
-
-        pids: List[int] = []
-        for line in pgrep.get("stdout_tail", []):
-            if not isinstance(line, str):
-                continue
-            head = line.strip().split(" ", 1)[0]
-            if head.isdigit():
-                pids.append(int(head))
-
-        return {
-            "pattern": str(pattern),
-            "alive": bool(pids),
-            "pids": pids,
-            "pgrep_tail": list(pgrep.get("stdout_tail", [])),
-            "ps_tail": list(ps.get("stdout_tail", [])),
-        }
-
-    def _gzserver_state(self) -> Dict[str, object]:
-        return self._process_state(r"(^|/)gzserver([[:space:]]|$)")
-
-    def _collect_ros_runtime_diagnostics(self, sensor_token: str = "") -> Dict[str, object]:
-        token = (sensor_token or "").strip()
-        topic_cmd = "rostopic list"
-        if token:
-            topic_cmd = f"rostopic list | grep {shlex.quote(token)} || true"
-        return {
-            "rosservice_gazebo": self._run_shell_capture("rosservice list | grep gazebo || true"),
-            "rosnode_list": self._run_shell_capture("rosnode list || true"),
-            "rostopic_sensor": self._run_shell_capture(topic_cmd),
-        }
-
-    def _collect_launch_failure_details(
-        self,
-        snapshot: Dict[str, List[str]],
-        launch_log_files: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, object]:
-        lines = list(snapshot.get("launch_stdout_tail", [])) + list(snapshot.get("launch_stderr_tail", []))
-
-        roslaunch_out_tail: List[str] = []
-        roslaunch_err_tail: List[str] = []
-        gzserver_out_tail: List[str] = []
-        gzserver_err_tail: List[str] = []
-        if launch_log_files:
-            roslaunch_out_tail = self._read_file_tail(launch_log_files.get("roslaunch_stdout", ""), max_lines=50)
-            roslaunch_err_tail = self._read_file_tail(launch_log_files.get("roslaunch_stderr", ""), max_lines=50)
-            gzserver_out_tail = self._read_file_tail(launch_log_files.get("gzserver_stdout", ""), max_lines=200)
-            gzserver_err_tail = self._read_file_tail(launch_log_files.get("gzserver_stderr", ""), max_lines=200)
-            if not gzserver_out_tail and roslaunch_out_tail:
-                gzserver_out_tail = list(roslaunch_out_tail)
-            if not gzserver_err_tail and roslaunch_err_tail:
-                gzserver_err_tail = list(roslaunch_err_tail)
-            lines.extend(roslaunch_out_tail)
-            lines.extend(roslaunch_err_tail)
-            lines.extend(gzserver_out_tail)
-            lines.extend(gzserver_err_tail)
-
-        missing_model_uris = self._extract_missing_model_uris(lines)
-        launch_log_paths = self._extract_gazebo_log_paths(lines)
-
-        fallback_roots = [
-            self.ROS_LOG_PATH,
-            os.path.expanduser("~/.ros/log"),
-        ]
-        discovered = self._discover_recent_gazebo_logs(fallback_roots, max_files=4)
-
-        gazebo_logs: List[str] = []
-        for path in launch_log_paths + discovered:
-            if path not in gazebo_logs:
-                gazebo_logs.append(path)
-
-        gazebo_log_tails = {path: self._read_file_tail(path) for path in gazebo_logs}
-        only_logger = self._detect_only_logger_services()
-        return {
-            "missing_model_uris": missing_model_uris,
-            "gazebo_log_paths": gazebo_logs,
-            "gazebo_log_tails": gazebo_log_tails,
-            "gzserver_state": self._gzserver_state(),
-            "ros_log_dir": str(self.ROS_LOG_PATH),
-            "roslaunch_log_files": dict(launch_log_files or {}),
-            "roslaunch_stdout_file_tail": roslaunch_out_tail,
-            "roslaunch_stderr_file_tail": roslaunch_err_tail,
-            "gzserver_stdout_file_tail": gzserver_out_tail,
-            "gzserver_stderr_file_tail": gzserver_err_tail,
-            "gazebo_services_snapshot": only_logger,
-        }
-
-    def _set_scene_diag(self, **kwargs) -> None:
-        with self._diag_lock:
-            self._last_scene_diagnostics.update(kwargs)
-
-    def _replace_scene_diag(self, payload: dict) -> None:
-        with self._diag_lock:
-            self._last_scene_diagnostics = dict(payload)
-
-    def get_last_scene_diagnostics(self) -> dict:
-        with self._diag_lock:
-            return copy.deepcopy(self._last_scene_diagnostics)
-
-    def _resolve_input_path(self, path_like: str) -> str:
-        if not path_like:
+    @staticmethod
+    def _match_expected_topic(expected: str, published_topics: List[str]) -> str:
+        if not expected:
             return ""
+        if expected in published_topics:
+            return expected
 
-        if os.path.isabs(path_like):
-            return os.path.abspath(path_like)
+        parts = [p for p in expected.strip("/").split("/") if p]
+        token = parts[0] if parts else ""
+        tail2 = "/" + "/".join(parts[-2:]) if len(parts) >= 2 else expected
+        tail1 = "/" + parts[-1] if parts else expected
 
-        from_cwd = os.path.abspath(path_like)
-        if os.path.exists(from_cwd):
-            return from_cwd
+        candidates = [t for t in published_topics if t.endswith(tail2)]
+        if token and len(candidates) > 1:
+            token_candidates = [t for t in candidates if token in t]
+            if token_candidates:
+                candidates = token_candidates
+        if candidates:
+            return sorted(candidates, key=lambda s: (len(s), s))[0]
 
-        from_repo = os.path.abspath(os.path.join(self.REPO_ROOT, path_like))
-        if os.path.exists(from_repo):
-            return from_repo
+        candidates = [t for t in published_topics if t.endswith(tail1)]
+        if token and len(candidates) > 1:
+            token_candidates = [t for t in candidates if token in t]
+            if token_candidates:
+                candidates = token_candidates
+        if candidates:
+            return sorted(candidates, key=lambda s: (len(s), s))[0]
 
-        # Возвращаем наиболее ожидаемую форму для диагностики.
-        return from_repo
+        return ""
 
-    def _wait_ros_master_ready(self, timeout_s: float = None) -> Tuple[bool, str]:
+    def _count_topic_messages(self, topics: List[str], window_s: float = 2.0) -> Tuple[Dict[str, int], Dict[str, float]]:
+        counters: Dict[str, int] = {topic: 0 for topic in topics}
+        lock = threading.Lock()
+        subscribers = []
+
+        def _cb_factory(topic_name: str):
+            def _cb(_msg: Image) -> None:
+                with lock:
+                    counters[topic_name] = counters.get(topic_name, 0) + 1
+            return _cb
+
+        for topic in topics:
+            subscribers.append(rospy.Subscriber(topic, Image, _cb_factory(topic), queue_size=100))
+
+        started = time.time()
+        try:
+            while time.time() - started < float(window_s):
+                time.sleep(0.05)
+        finally:
+            for sub in subscribers:
+                try:
+                    sub.unregister()
+                except Exception:
+                    pass
+
+        elapsed = max(1e-6, time.time() - started)
+        hz = {topic: float(counters.get(topic, 0) / elapsed) for topic in topics}
+        return counters, hz
+
+    def wait_for_topics(
+        self,
+        expected_topics: List[str],
+        timeout_s: float | None = None,
+        msg_window_s: float | None = None,
+        min_messages: int | None = None,
+    ) -> Tuple[bool, Dict[str, object]]:
+        timeout_s = float(timeout_s or self.TOPIC_READY_TIMEOUT_S)
+        msg_window_s = float(msg_window_s or self.TOPIC_MSG_WINDOW_S)
+        min_messages = int(min_messages or self.MIN_TOPIC_MESSAGES)
+
+        expected = [str(topic) for topic in expected_topics if str(topic).strip()]
+        diag: Dict[str, object] = {
+            "expected_topics": list(expected),
+            "resolved_topics": {},
+            "msg_counters": {},
+            "msg_hz": {},
+            "published_topics_last": [],
+            "timeout_s": float(timeout_s),
+            "msg_window_s": float(msg_window_s),
+            "min_messages": int(min_messages),
+            "reason": "",
+        }
+
+        if not expected:
+            diag["reason"] = "no_expected_topics"
+            self._last_topic_diag = dict(diag)
+            return True, diag
+
+        resolved: Dict[str, str] = {}
+        deadline = time.time() + timeout_s
+
+        while time.time() < deadline:
+            if self._is_process_alive(self.gazebo_process) is False and self.gazebo_process is not None:
+                diag["reason"] = "roslaunch_exited_while_waiting_topics"
+                break
+
+            published = self._image_topics()
+            diag["published_topics_last"] = list(published)
+
+            for expected_topic in expected:
+                if expected_topic in resolved:
+                    continue
+                selected = self._match_expected_topic(expected_topic, published)
+                if selected:
+                    resolved[expected_topic] = selected
+
+            if len(resolved) == len(expected):
+                unique_topics = sorted(set(resolved.values()))
+                msg_counters, msg_hz = self._count_topic_messages(unique_topics, window_s=msg_window_s)
+                diag["resolved_topics"] = dict(resolved)
+                diag["msg_counters"] = dict(msg_counters)
+                diag["msg_hz"] = dict(msg_hz)
+                missing_messages = [topic for topic, count in msg_counters.items() if int(count) < int(min_messages)]
+                if missing_messages:
+                    diag["reason"] = "topics_no_messages"
+                    diag["topics_without_messages"] = missing_messages
+                    self._last_topic_diag = dict(diag)
+                    return False, diag
+
+                diag["reason"] = "ok"
+                self._last_topic_diag = dict(diag)
+                return True, diag
+
+            time.sleep(0.2)
+
+        if not diag.get("reason"):
+            diag["reason"] = "topics_not_found"
+        diag["resolved_topics"] = dict(resolved)
+        diag["missing_expected_topics"] = [topic for topic in expected if topic not in resolved]
+        self._last_topic_diag = dict(diag)
+        return False, diag
+
+    def _wait_ros_master_ready(self, timeout_s: float | None = None) -> Tuple[bool, str]:
         timeout_s = float(timeout_s or self.ROS_MASTER_READY_TIMEOUT_S)
         deadline = time.time() + timeout_s
         last_error = ""
 
         while time.time() < deadline:
-            if hasattr(self, "ros_process") and self.ros_process and self.ros_process.poll() is not None:
+            if self.ros_process is not None and self.ros_process.poll() is not None:
                 return False, f"roscore exited early with code {self.ros_process.poll()}"
             try:
                 import rosgraph
+
                 master = rosgraph.Master("/sensor_data_receiver")
                 _ = master.getPid()
                 return True, ""
@@ -420,695 +439,406 @@ class Simulator():
             last_error = f"ROS master did not become ready within {timeout_s:.1f}s"
         return False, last_error
 
-    def _scene_world_output_path(self, source_world_abs: str) -> str:
-        scene_dir = os.path.join(self.ROS_LOG_PATH, "generated_worlds")
-        os.makedirs(scene_dir, exist_ok=True)
-        stamp = int(time.time() * 1000)
-        base_name = os.path.basename(source_world_abs) or "scene.world"
-        root, ext = os.path.splitext(base_name)
-        if not ext:
-            ext = ".world"
-        return os.path.abspath(os.path.join(scene_dir, f"{root}_{stamp}{ext}"))
+    def wait_for_master(self, timeout_s: float | None = None) -> Tuple[bool, str]:
+        return self._wait_ros_master_ready(timeout_s=timeout_s)
 
-    @staticmethod
-    def _terminate_process(proc: subprocess.Popen, name: str, timeout_s: float = 12.0) -> bool:
-        if proc is None:
-            return True
-        try:
-            if proc.poll() is not None:
-                return True
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
-            except Exception:
-                proc.terminate()
-
-            deadline = time.time() + float(timeout_s)
-            while time.time() < deadline:
-                if proc.poll() is not None:
-                    return True
-                time.sleep(0.2)
-
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGKILL)
-            except Exception:
-                proc.kill()
-            time.sleep(0.3)
-            return proc.poll() is not None
-        except Exception as exc:
-            logger.warning(f"Failed to terminate process {name}: {exc}")
-            return False
-
-    @staticmethod
-    def _kill_pattern(pattern: str, sig: str = "TERM") -> None:
-        try:
-            subprocess.run(
-                ["bash", "-lc", f"pkill -{sig} -f {shlex.quote(pattern)} || true"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except Exception:
-            pass
-
-    @staticmethod
-    def _wait_pattern_gone(pattern: str, timeout_s: float = 8.0) -> bool:
+    def _wait_for_services(self, services: Tuple[str, ...], timeout_s: float) -> Tuple[bool, Dict[str, str], str]:
         deadline = time.time() + float(timeout_s)
-        while time.time() < deadline:
-            try:
-                res = subprocess.run(
-                    ["bash", "-lc", f"pgrep -af {shlex.quote(pattern)} || true"],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=3,
-                )
-                lines = [line for line in (res.stdout or "").splitlines() if line.strip()]
-                if not lines:
-                    return True
-            except Exception:
-                pass
-            time.sleep(0.2)
-        return False
-
-    def _wait_for_services_with_health(
-        self,
-        services: Tuple[str, ...],
-        timeout_s: float,
-        gzserver_grace_s: float = 12.0,
-        base_service: str = "/gazebo/get_world_properties",
-        only_logger_grace_s: float = 8.0,
-        second_chance_s: float = 8.0,
-    ) -> Tuple[bool, Dict[str, str], List[Dict[str, object]], str, Dict[str, object]]:
-        start_ts = time.time()
-        deadline = time.time() + timeout_s
-        pending = list(dict.fromkeys(list(services) + [base_service]))
+        pending = list(dict.fromkeys(services))
         last_errors: Dict[str, str] = {}
-        attempts: List[Dict[str, object]] = []
-        attempt_num = 0
-        fail_reason = "gazebo_services_not_available"
-        gzserver_seen_alive = False
-        gzserver_grace_deadline = time.time() + float(gzserver_grace_s)
-        only_logger_snapshot: Dict[str, object] = {}
-        optional_services = [srv for srv in pending if srv != base_service]
 
-        while time.time() < deadline:
-            attempt_num += 1
-            roslaunch_returncode = None
-            if hasattr(self, "gazebo_process") and self.gazebo_process is not None:
-                roslaunch_returncode = self.gazebo_process.poll()
-            if roslaunch_returncode is not None:
-                fail_reason = "roslaunch_exited"
-                attempts.append(
-                    {
-                        "attempt": int(attempt_num),
-                        "event": "roslaunch_exited",
-                        "roslaunch_returncode": int(roslaunch_returncode),
-                    }
-                )
-                return False, dict(last_errors), attempts, fail_reason, only_logger_snapshot
+        while pending and time.time() < deadline:
+            if self.gazebo_process is not None and self.gazebo_process.poll() is not None:
+                return False, dict(last_errors), "roslaunch_exited"
 
-            gz_state = self._gzserver_state()
-            if bool(gz_state.get("alive", False)):
-                gzserver_seen_alive = True
-            elif gzserver_seen_alive or time.time() >= gzserver_grace_deadline:
-                fail_reason = "gzserver_died"
-                attempts.append(
-                    {
-                        "attempt": int(attempt_num),
-                        "event": "gzserver_died",
-                        "gzserver": gz_state,
-                    }
-                )
-                return False, dict(last_errors), attempts, fail_reason, only_logger_snapshot
-
-            base_service_ready = False
             still_pending = []
-            try:
-                rospy.wait_for_service(base_service, timeout=0.5)
-                base_service_ready = True
-            except Exception as exc:
-                last_errors[base_service] = str(exc)
-                still_pending.append(base_service)
-                fail_reason = "gazebo_services_not_available"
-
-            for srv in optional_services:
+            for service_name in pending:
                 try:
-                    rospy.wait_for_service(srv, timeout=0.1 if base_service_ready else 0.05)
+                    rospy.wait_for_service(service_name, timeout=0.25)
                 except Exception as exc:
-                    last_errors[srv] = str(exc)
-                    still_pending.append(srv)
-                    if not base_service_ready:
-                        fail_reason = "gazebo_services_not_available"
-            attempts.append(
-                {
-                    "attempt": int(attempt_num),
-                    "base_service": base_service,
-                    "base_service_ready": bool(base_service_ready),
-                    "pending_services": list(still_pending),
-                    "elapsed_s": float(timeout_s - max(0.0, deadline - time.time())),
-                    "roslaunch_returncode": roslaunch_returncode,
-                    "gzserver_alive": bool(gz_state.get("alive", False)),
-                }
-            )
-
-            if base_service_ready:
-                return True, {}, attempts, "ok", only_logger_snapshot
-
-            if time.time() - start_ts >= float(only_logger_grace_s):
-                detector = self._detect_only_logger_services()
-                only_logger_snapshot = detector
-                if bool(detector.get("only_logger_services", False)) and bool(detector.get("gazebo_node_exists", False)):
-                    fail_reason = "gazebo_ros_api_plugin_failed"
-                    attempts.append(
-                        {
-                            "attempt": int(attempt_num),
-                            "event": "gazebo_ros_api_plugin_failed",
-                            "services": detector.get("services", []),
-                            "gazebo_node_exists": detector.get("gazebo_node_exists", False),
-                        }
-                    )
-                    return False, dict(last_errors), attempts, fail_reason, only_logger_snapshot
-
-            if still_pending:
-                logger.info(f"Waiting Gazebo services (attempt {attempt_num}): pending={still_pending}")
+                    last_errors[service_name] = str(exc)
+                    still_pending.append(service_name)
             pending = still_pending
-            time.sleep(0.1)
+            if pending:
+                time.sleep(0.15)
 
-        try:
-            rospy.wait_for_service(base_service, timeout=float(second_chance_s))
-            attempts.append(
-                {
-                    "attempt": int(attempt_num + 1),
-                    "event": "second_chance_base_service_ready",
-                    "base_service": base_service,
-                    "second_chance_s": float(second_chance_s),
-                }
-            )
-            return True, {}, attempts, "ok_second_chance", only_logger_snapshot
-        except Exception as exc:
-            last_errors[base_service] = str(exc)
+        if pending:
+            return False, {name: last_errors.get(name, "timeout") for name in pending}, "gazebo_services_timeout"
+        return True, {}, "ok"
 
-        detector = self._detect_only_logger_services()
-        only_logger_snapshot = detector
-        if bool(detector.get("only_logger_services", False)) and bool(detector.get("gazebo_node_exists", False)):
-            fail_reason = "gazebo_ros_api_plugin_failed"
+    def _collect_runtime_diag(self, expected_topics: Optional[List[str]] = None) -> Dict[str, object]:
+        snapshot = self._launch_output_snapshot(max_lines=80)
+        lines = list(snapshot["launch_stdout_tail"]) + list(snapshot["launch_stderr_tail"])
+        scene = self.get_last_scene_diagnostics()
 
-        return False, {srv: last_errors.get(srv, "timeout") for srv in pending}, attempts, fail_reason, only_logger_snapshot
+        diag: Dict[str, object] = {
+            "cwd": os.path.abspath(os.getcwd()),
+            "world_path_abs": scene.get("world_path_abs"),
+            "generated_world_path_abs": scene.get("generated_world_path_abs"),
+            "launch_stdout_tail": snapshot["launch_stdout_tail"],
+            "launch_stderr_tail": snapshot["launch_stderr_tail"],
+            "missing_model_uris": self._extract_missing_model_uris(lines),
+            "expected_topics": list(expected_topics or []),
+            "resolved_topics": self._last_topic_diag.get("resolved_topics", {}),
+            "msg_counters": self._last_topic_diag.get("msg_counters", {}),
+            "msg_hz": self._last_topic_diag.get("msg_hz", {}),
+            "published_topics_last": self._last_topic_diag.get("published_topics_last", []),
+            "rostopic_list": self._all_topics(),
+            "scene_log_files": dict(self._scene_log_files),
+        }
+        return diag
 
-    def launch_ros(self):
+    def collect_failure_diagnostics(self, expected_topics: Optional[List[str]] = None) -> Dict[str, object]:
+        return self._collect_runtime_diag(expected_topics=expected_topics)
+
+    def launch_ros(self) -> None:
         self._kill_ros()
-        try:
-            env = os.environ.copy()
-            env['ROS_LOG_DIR'] = self.ROS_LOG_PATH
+        self._prepare_ros_log_dir()
+        env = os.environ.copy()
+        env["ROS_LOG_DIR"] = self.ROS_LOG_PATH
 
-            os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
+        roscore_stdout = os.path.join(self.ROS_LOG_PATH, "roscore.out")
+        roscore_stderr = os.path.join(self.ROS_LOG_PATH, "roscore.err")
+        cmd = "roscore"
 
+        with open(roscore_stdout, "a", encoding="utf-8") as out, open(roscore_stderr, "a", encoding="utf-8") as err:
             self.ros_process = subprocess.Popen(
-                ["bash", "-c", "roscore"],
+                ["bash", "-lc", cmd],
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True
+                stdout=out,
+                stderr=err,
+                text=True,
+                start_new_session=True,
             )
-            ready, reason = self._wait_ros_master_ready(timeout_s=self.ROS_MASTER_READY_TIMEOUT_S)
-            if not ready:
-                self.ros_is_running = False
-                self._last_ros_launch_error = reason
-                logger.error(f"ROS master is not ready: {reason}")
-                self._kill_ros()
-                return
 
-            self._last_ros_launch_error = ""
-            self.ros_is_running = True
-            logger.info('ROS core started and master is ready')
-        except Exception as e:
+        ready, reason = self._wait_ros_master_ready()
+        if not ready:
             self.ros_is_running = False
-            self._last_ros_launch_error = str(e)
-            logger.error(f'Failed to start ROS core: {str(e)}')
+            self._set_scene_diag(reason="ros_master_not_ready", ros_master_error=reason)
+            self._kill_ros()
+            return
 
-    def launch_node(self):
+        self.ros_is_running = True
+        self._set_scene_diag(ros_master_ready=True)
+        logger.info("ROS core started and master is ready")
+
+    def launch_node(self) -> None:
         if threading.current_thread() is not threading.main_thread():
             logger.error("ROS node must be initialized in main thread")
             return
 
         try:
-            rospy.init_node('sensor_data_receiver', anonymous=True)
+            if not rospy.core.is_initialized():
+                rospy.init_node("sensor_data_receiver", anonymous=True)
             self.node_is_running = True
-            logger.info('ROS node initialized successfully')
-        except Exception as e:
-            logger.error(f'Failed to initialize ROS node: {str(e)}')
+            logger.info("ROS node initialized successfully")
+        except Exception as exc:
+            self.node_is_running = False
+            logger.error(f"Failed to initialize ROS node: {exc}")
 
-    def launch(self) -> str:
+    def launch(self) -> None:
         self.launch_ros()
         if not self.ros_is_running:
-            logger.error("Skipping ROS node init because ROS master is not ready")
             return
         self.launch_node()
 
-    def receive_sensor_data(self, topic):
+    def receive_sensor_data(self, topic: str):
         try:
-            msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
-            logger.info(f'Received sensor data from topic: {topic}')
-            return msg
-        except Exception as e:
-            logger.error(f'Failed to receive sensor data from topic: {str(e)}')
+            return rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
+        except Exception as exc:
+            logger.error(f"Failed to receive sensor data from topic {topic}: {exc}")
+            return None
 
-    def is_gazebo_running(self):
+    def is_gazebo_running(self) -> bool:
         try:
-            rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
-            get_world_properties = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
-            get_world_properties()
+            rospy.wait_for_service("/gazebo/get_world_properties", timeout=2.0)
+            proxy = rospy.ServiceProxy("/gazebo/get_world_properties", GetWorldProperties)
+            proxy()
             return True
         except Exception:
             return False
 
-    def open_scene(self, world_path, camera_model_path) -> bool:
+    def _scene_world_output_path(self, source_world_abs: str) -> str:
+        scene_dir = os.path.join(self.ROS_LOG_PATH, "generated_worlds")
+        os.makedirs(scene_dir, exist_ok=True)
+        stamp = int(time.time() * 1000)
+        base = os.path.basename(source_world_abs) or "scene.world"
+        root, ext = os.path.splitext(base)
+        if not ext:
+            ext = ".world"
+        return os.path.abspath(os.path.join(scene_dir, f"{root}_{stamp}{ext}"))
+
+    def _generate_world(self, world_path: str, camera_model_path: str, output_world_path: str) -> Tuple[bool, str]:
+        try:
+            tree = ET.parse(world_path)
+            root = tree.getroot()
+            world = root.find("world")
+            if world is None:
+                return False, "No <world> node in world file"
+
+            camera_tree = ET.parse(camera_model_path)
+            camera_root = camera_tree.getroot()
+            camera_models = camera_root.findall("model")
+            if not camera_models:
+                return False, "No <model> in camera SDF"
+
+            for model in camera_models:
+                world.append(model)
+
+            os.makedirs(os.path.dirname(output_world_path), exist_ok=True)
+            tree.write(output_world_path, encoding="utf-8", xml_declaration=True)
+            ET.parse(output_world_path)  # validation
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
+    def open_scene(
+        self,
+        world_path: str,
+        camera_model_path: str,
+        expected_topics: Optional[List[str]] = None,
+    ) -> bool:
         self._clear_launch_buffers()
+        self._last_topic_diag = {}
 
-        world_abs = self._resolve_input_path(world_path)
-        sensor_abs = self._resolve_input_path(camera_model_path)
-        catkin_setup_abs = self._resolve_input_path(self.CATKIN_SETUP_DIR)
-        sensor_token = os.path.splitext(os.path.basename(sensor_abs))[0] if sensor_abs else ""
-        launch_world_abs = ""
+        world_abs = self._resolve_path(world_path)
+        sensor_abs = self._resolve_path(camera_model_path)
+        expected_topics = [str(topic) for topic in (expected_topics or []) if str(topic).strip()]
 
-        diag = {
+        scene_diag = {
             "attempt_ts": time.time(),
             "cwd": os.path.abspath(os.getcwd()),
             "repo_root": self.REPO_ROOT,
             "world_path_input": str(world_path),
             "world_path_abs": world_abs,
-            "world_exists": bool(os.path.exists(world_abs)),
-            "world_size_bytes": int(os.path.getsize(world_abs)) if os.path.exists(world_abs) else None,
+            "world_exists": os.path.exists(world_abs),
             "camera_model_path_input": str(camera_model_path),
             "camera_model_path_abs": sensor_abs,
-            "camera_model_exists": bool(os.path.exists(sensor_abs)),
-            "camera_model_size_bytes": int(os.path.getsize(sensor_abs)) if os.path.exists(sensor_abs) else None,
-            "base_world_path_abs": self.BASE_WORLD_PATH,
-            "catkin_setup_input": str(self.CATKIN_SETUP_DIR),
-            "catkin_setup_abs": catkin_setup_abs,
-            "catkin_setup_exists": bool(os.path.exists(catkin_setup_abs)),
-            "launch_world_path_abs": launch_world_abs,
-            "env": self._filtered_env_snapshot(os.environ),
+            "camera_model_exists": os.path.exists(sensor_abs),
+            "catkin_setup_abs": self.CATKIN_SETUP_DIR,
+            "catkin_setup_exists": os.path.exists(self.CATKIN_SETUP_DIR),
+            "expected_topics": list(expected_topics),
             "reason": "",
         }
-        self._replace_scene_diag(diag)
-
-        # Перед запуском новой сцены закрываем процессы прошлого запуска
-        # и дожидаемся их завершения.
-        if hasattr(self, "gazebo_process") and self.gazebo_process:
-            self._terminate_process(self.gazebo_process, "roslaunch_gazebo", timeout_s=10.0)
-            self.gazebo_process = None
-        self.kill_gazebo()
-        time.sleep(0.3)
-
-        if not self.ros_is_running:
-            snapshot = self._launch_output_snapshot(max_lines=50)
-            failure_details = self._collect_launch_failure_details(snapshot)
-            logger.error('Failed to start Gazebo: Ros is not running')
-            self._set_scene_diag(
-                reason="ros_not_running",
-                ros_master_error=self._last_ros_launch_error,
-                ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                **failure_details,
-                **snapshot,
-            )
-            return False
-
-        if not self.node_is_running:
-            snapshot = self._launch_output_snapshot(max_lines=50)
-            failure_details = self._collect_launch_failure_details(snapshot)
-            logger.error('Failed to start Gazebo: Node is not running')
-            self._set_scene_diag(
-                reason="ros_node_not_running",
-                ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                **failure_details,
-                **snapshot,
-            )
-            return False
+        self._replace_scene_diag(scene_diag)
 
         if not os.path.exists(world_abs):
-            snapshot = self._launch_output_snapshot(max_lines=50)
-            failure_details = self._collect_launch_failure_details(snapshot)
-            self._set_scene_diag(
-                reason="world_path_not_found",
-                ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                **failure_details,
-                **snapshot,
-            )
-            logger.error(f"World path does not exist: {world_abs}")
+            self._set_scene_diag(reason="world_path_not_found")
             return False
-
         if not os.path.exists(sensor_abs):
-            snapshot = self._launch_output_snapshot(max_lines=50)
-            failure_details = self._collect_launch_failure_details(snapshot)
-            self._set_scene_diag(
-                reason="camera_model_path_not_found",
-                ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                **failure_details,
-                **snapshot,
-            )
-            logger.error(f"Camera model path does not exist: {sensor_abs}")
+            self._set_scene_diag(reason="camera_model_path_not_found")
+            return False
+        if not os.path.exists(self.CATKIN_SETUP_DIR):
+            self._set_scene_diag(reason="catkin_setup_not_found")
             return False
 
-        if not os.path.exists(catkin_setup_abs):
-            snapshot = self._launch_output_snapshot(max_lines=50)
-            failure_details = self._collect_launch_failure_details(snapshot)
-            self._set_scene_diag(
-                reason="catkin_setup_not_found",
-                ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                **failure_details,
-                **snapshot,
-            )
-            logger.error(f"catkin setup not found: {catkin_setup_abs}")
-            return False
+        # Для каждого теста гарантируем чистый lifecycle только своих процессов.
+        self.kill_gazebo()
 
-        max_launch_attempts = 2
-        for launch_attempt in range(1, max_launch_attempts + 1):
-            try:
-                if launch_attempt > 1:
-                    self.kill_gazebo()
-                    time.sleep(0.5)
-                self._prepare_ros_log_dir(reset=False)
-            except Exception as exc:
-                snapshot = self._launch_output_snapshot(max_lines=50)
-                failure_details = self._collect_launch_failure_details(snapshot)
-                self._set_scene_diag(
-                    reason="ros_log_dir_not_writable",
-                    message=f"ROS_LOG_DIR is not writable: {exc}",
-                    ros_log_dir=self.ROS_LOG_PATH,
-                    ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                    **failure_details,
-                    **snapshot,
-                )
+        if not self.ros_is_running or not self._is_process_alive(self.ros_process):
+            self.launch_ros()
+            if not self.ros_is_running:
+                runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+                self._set_scene_diag(reason="ros_not_running", **runtime)
                 return False
 
-            launch_world_abs = self._scene_world_output_path(world_abs)
-            generated_ok, generate_error, generate_meta = self._generate_world(world_abs, sensor_abs, launch_world_abs)
-            if not generated_ok:
-                snapshot = self._launch_output_snapshot(max_lines=50)
-                failure_details = self._collect_launch_failure_details(snapshot)
-                self._set_scene_diag(
-                    reason="base_world_generation_failed",
-                    generation_error=generate_error,
-                    launch_attempt=int(launch_attempt),
-                    generated_world_path_abs=os.path.abspath(launch_world_abs),
-                    generated_world_validation=generate_meta,
-                    ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                    **failure_details,
-                    **snapshot,
-                )
-                return False
-
-            launch_log_files = self._launch_log_files(launch_attempt)
-            for file_path in launch_log_files.values():
-                try:
-                    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                    with open(file_path, "a", encoding="utf-8"):
-                        pass
-                except Exception:
-                    pass
-
-            roslaunch_cmd = (
-                f"source {shlex.quote(catkin_setup_abs)} && "
-                f"roslaunch {shlex.quote(self.SENSOR_PKG)} {shlex.quote(self.LAUNCH_FILE)} "
-                f"world_path:={shlex.quote(launch_world_abs)} "
-                "paused:=false gui:=false headless:=true "
-                f">> {shlex.quote(launch_log_files['roslaunch_stdout'])} "
-                f"2>> {shlex.quote(launch_log_files['roslaunch_stderr'])}"
-            )
-
-            launch_env = os.environ.copy()
-            launch_env["ROS_LOG_DIR"] = self.ROS_LOG_PATH
-            self._set_scene_diag(
-                launch_attempt=int(launch_attempt),
-                roslaunch_cmd=roslaunch_cmd,
-                launch_env=self._filtered_env_snapshot(launch_env),
-                launch_log_files=launch_log_files,
-            )
-
-            try:
-                self.gazebo_process = subprocess.Popen(
-                    ["bash", "-lc", roslaunch_cmd],
-                    env=launch_env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    bufsize=1,
-                    preexec_fn=os.setsid,
-                )
-
-                services_ok, pending_errors, service_attempts, wait_reason, logger_snapshot = self._wait_for_services_with_health(
-                    self.GAZEBO_REQUIRED_SERVICES,
-                    timeout_s=self.GAZEBO_SERVICES_TIMEOUT_S,
-                )
-                if not services_ok:
-                    snapshot = self._launch_output_snapshot(max_lines=50)
-                    failure_details = self._collect_launch_failure_details(snapshot, launch_log_files=launch_log_files)
-                    reason = wait_reason
-                    message = ""
-                    if reason == "gazebo_ros_api_plugin_failed":
-                        message = "gazebo_ros_api_plugin did not register API services; see gzserver stderr/stdout tail"
-
-                    self._set_scene_diag(
-                        reason=reason,
-                        message=message,
-                        roslaunch_returncode=self.gazebo_process.poll(),
-                        services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
-                        services_base_required="/gazebo/get_world_properties",
-                        services_pending_errors=pending_errors,
-                        services_wait_attempts=service_attempts,
-                        launch_attempt=int(launch_attempt),
-                        gazebo_only_logger_services=logger_snapshot,
-                        generated_world_path_abs=os.path.abspath(launch_world_abs),
-                        ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                        **failure_details,
-                        **snapshot,
-                    )
-                    logger.error(f"Gazebo services did not appear (reason={reason}, attempt={launch_attempt})")
-
-                    if reason == "gazebo_ros_api_plugin_failed" and launch_attempt < max_launch_attempts:
-                        continue
-                    return False
-
-                self.gazebo_is_running = True
-                snapshot = self._launch_output_snapshot(max_lines=50)
-                failure_details = self._collect_launch_failure_details(snapshot, launch_log_files=launch_log_files)
-                self._set_scene_diag(
-                    reason="ok",
-                    roslaunch_returncode=self.gazebo_process.poll(),
-                    services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
-                    services_base_required="/gazebo/get_world_properties",
-                    services_wait_attempts=service_attempts,
-                    launch_attempt=int(launch_attempt),
-                    generated_world_path_abs=os.path.abspath(launch_world_abs),
-                    **failure_details,
-                    **snapshot,
-                )
-                logger.info('Gazebo started')
-                return True
-
-            except Exception as e:
-                snapshot = self._launch_output_snapshot(max_lines=50)
-                failure_details = self._collect_launch_failure_details(snapshot, launch_log_files=launch_log_files)
-                self._set_scene_diag(
-                    reason="open_scene_exception",
-                    exception=str(e),
-                    roslaunch_returncode=getattr(self, "gazebo_process", None).poll() if hasattr(self, "gazebo_process") else None,
-                    services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
-                    launch_attempt=int(launch_attempt),
-                    generated_world_path_abs=os.path.abspath(launch_world_abs),
-                    ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
-                    **failure_details,
-                    **snapshot,
-                )
-                logger.error(f'Failed to start Gazebo: {str(e)}')
-                return False
-
-        return False
-
-    def _log_stdout_output(self, stdout_stream):
-        try:
-            for line in iter(stdout_stream.readline, ''):
-                if line.strip():
-                    line_clean = line.strip()
-                    self._process_output_line(line_clean, "stdout")
-        except ValueError:
-            pass
-
-    def _log_stderr_output(self, stderr_stream):
-        try:
-            for line in iter(stderr_stream.readline, ''):
-                if line.strip():
-                    line_clean = line.strip()
-                    self._process_output_line(line_clean, "stderr")
-        except ValueError:
-            pass
-
-    def _process_output_line(self, line, stream_type):
-        self._append_launch_line(stream_type, line)
-
-        line_lower = line.lower()
-        if line.startswith('bash:') or 'command not found' in line_lower:
-            logger.warning(f"[Gazebo/bash] {line}")
-        elif any(word in line_lower for word in ['error', 'exception', 'fail', 'cannot', 'invalid']):
-            logger.error(f"[Gazebo] {line}")
-        elif 'warning' in line_lower:
-            logger.warning(f"[Gazebo] {line}")
-        else:
-            if any(keyword in line_lower for keyword in ['start', 'complete', 'ready', 'initializ']):
-                pass
-
-    def _generate_world(self, world_path, camera_model_path, output_world_path):
-        validation: Dict[str, object] = {
-            "generated_world_path_abs": os.path.abspath(output_world_path),
-            "valid": False,
-            "error": "",
-        }
-        try:
-            tree = ET.parse(world_path)
-            root = tree.getroot()
-            world = root.find('world')
-            if world is None:
-                validation["error"] = "No <world> node in world file"
-                return False, str(validation["error"]), validation
-
-            camera_tree = ET.parse(camera_model_path)
-            camera_root = camera_tree.getroot()
-
-            camera_models = camera_root.findall('model')
-            if not camera_models:
-                validation["error"] = "No <model> in camera SDF"
-                return False, str(validation["error"]), validation
-
-            for i, camera_model in enumerate(camera_models):
-                _ = camera_model.get('name', f'unknown_{i}')
-                world.append(camera_model)
-
-            os.makedirs(os.path.dirname(output_world_path), exist_ok=True)
-            tree.write(output_world_path, encoding='utf-8', xml_declaration=True)
-
-            try:
-                ET.parse(output_world_path)
-            except Exception as exc:
-                validation["error"] = f"Generated world XML validation failed: {exc}"
-                self._set_scene_diag(
-                    generated_world_path_abs=os.path.abspath(output_world_path),
-                    generated_world_validation=validation,
-                )
-                return False, str(validation["error"]), validation
-
-            validation["valid"] = True
-            self._set_scene_diag(generated_world_path_abs=os.path.abspath(output_world_path))
-            logger.info(f'Generated launch world: {output_world_path}')
-            return True, "", validation
-        except Exception as e:
-            msg = f'Failed to generate world file: {str(e)}'
-            validation["error"] = msg
-            logger.error(msg)
-            return False, str(e), validation
-
-    def _kill_ros(self):
-        ros_process_alive = bool(
-            hasattr(self, "ros_process")
-            and self.ros_process
-            and self.ros_process.poll() is None
-        )
-        if not self.ros_is_running and not ros_process_alive:
-            return
-        try:
-            if ros_process_alive:
-                self._terminate_process(self.ros_process, "roscore", timeout_s=8.0)
-
-            subprocess.run(
-                ["bash", "-c", "pkill -f ros"],
-                capture_output=True,
-                timeout=10,
-            )
-            self.ros_is_running = False
-            self.ros_process = None
-            logger.info('ROS processes killed')
-        except Exception as e:
-            logger.error(f'Failed to kill ROS processes: {str(e)}')
-
-    def _kill_node(self):
         if not self.node_is_running:
-            return
-        try:
-            rospy.signal_shutdown("Simulator shutdown")
-            self.node_is_running = False
-            logger.info('ROS node shut down')
-        except Exception as e:
-            logger.error(f'Failed to shut down ROS node: {str(e)}')
+            self.launch_node()
+            if not self.node_is_running:
+                runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+                self._set_scene_diag(reason="ros_node_not_running", **runtime)
+                return False
 
-    def wait_for_model_spawn(self, model_name: str, timeout=10) -> bool:
-        """Метод чтобы дождаться появления модели в симуляции"""
-        start_time = time.time()
-        while (time.time() - start_time < timeout):
+        self._prepare_ros_log_dir()
+        generated_world = self._scene_world_output_path(world_abs)
+        generated_ok, generated_error = self._generate_world(world_abs, sensor_abs, generated_world)
+        if not generated_ok:
+            runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+            self._set_scene_diag(
+                reason="base_world_generation_failed",
+                generation_error=generated_error,
+                generated_world_path_abs=generated_world,
+                **runtime,
+            )
+            return False
+
+        log_files = self._scene_log_paths(attempt=1)
+        self._scene_log_files = dict(log_files)
+
+        roslaunch_cmd = (
+            f"source {shlex.quote(self.CATKIN_SETUP_DIR)} && "
+            f"roslaunch {shlex.quote(self.SENSOR_PKG)} {shlex.quote(self.LAUNCH_FILE)} "
+            f"world_path:={shlex.quote(generated_world)} "
+            "paused:=false gui:=false headless:=true"
+        )
+
+        launch_env = os.environ.copy()
+        launch_env["ROS_LOG_DIR"] = self.ROS_LOG_PATH
+
+        self._set_scene_diag(
+            generated_world_path_abs=generated_world,
+            roslaunch_cmd=roslaunch_cmd,
+            launch_log_files=dict(log_files),
+        )
+
+        try:
+            self.gazebo_process = subprocess.Popen(
+                ["bash", "-lc", roslaunch_cmd],
+                env=launch_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+            )
+            self._start_launch_readers(log_files)
+        except Exception as exc:
+            runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+            self._set_scene_diag(reason="roslaunch_spawn_exception", exception=str(exc), **runtime)
+            return False
+
+        services_ok, service_errors, service_reason = self._wait_for_services(
+            self.REQUIRED_GAZEBO_SERVICES,
+            timeout_s=self.GAZEBO_SERVICES_TIMEOUT_S,
+        )
+        if not services_ok:
+            runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+            self._set_scene_diag(
+                reason=service_reason,
+                services_expected=list(self.REQUIRED_GAZEBO_SERVICES),
+                services_errors=service_errors,
+                roslaunch_returncode=self.gazebo_process.poll() if self.gazebo_process else None,
+                **runtime,
+            )
+            self.kill_gazebo()
+            return False
+
+        if expected_topics:
+            topics_ok, topics_diag = self.wait_for_topics(expected_topics=expected_topics, timeout_s=self.TOPIC_READY_TIMEOUT_S)
+            self._set_scene_diag(
+                expected_topics=list(expected_topics),
+                resolved_topics=topics_diag.get("resolved_topics", {}),
+                msg_counters=topics_diag.get("msg_counters", {}),
+                msg_hz=topics_diag.get("msg_hz", {}),
+            )
+            if not topics_ok:
+                runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+                self._set_scene_diag(reason="topics_not_ready", topics_wait=topics_diag, **runtime)
+                self.kill_gazebo()
+                return False
+
+        self.gazebo_is_running = True
+        runtime = self._collect_runtime_diag(expected_topics=expected_topics)
+        self._set_scene_diag(reason="ok", **runtime)
+        logger.info("Gazebo scene started")
+        return True
+
+    def wait_for_model_spawn(self, model_name: str, timeout: float = 10.0) -> bool:
+        started = time.time()
+        while (time.time() - started) < float(timeout):
             try:
-                msg = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=1.0)
+                msg = rospy.wait_for_message("/gazebo/model_states", ModelStates, timeout=1.0)
                 if model_name in msg.name:
                     return True
             except rospy.ROSException:
                 continue
         return False
 
-    def set_pose(self, model, x=0, y=0, z=0):
-        """Метод для перемещения моделей в симуляции"""
+    def set_pose(self, model: str, x: float = 0, y: float = 0, z: float = 0) -> None:
         set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
         state = ModelState()
         state.model_name = model
         state.reference_frame = "world"
-        state.pose = Pose(Point(x, y, z), Quaternion(0, 0, 0, 1))
+        state.pose = Pose(Point(float(x), float(y), float(z)), Quaternion(0, 0, 0, 1))
         response = set_state(state)
         if not response.success:
             raise RuntimeError(response.status_message)
 
-    def kill_gazebo(self) -> None:
+    @staticmethod
+    def _image_msg_to_bgr(msg: Image):
+        import cv2
+        import numpy as np
+
+        h, w = int(msg.height), int(msg.width)
+        enc = (msg.encoding or "").lower()
+
+        if enc in ("rgb8", "r8g8b8"):
+            rgb = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        if enc == "bgr8":
+            return np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+        if enc in ("mono8", "8uc1"):
+            gray = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w)
+            return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        raise ValueError(f"Unsupported image encoding for debug capture: {msg.encoding}")
+
+    def capture_debug_frame(self, topic: str, output_path: str, timeout_s: float = 3.0) -> Dict[str, object]:
+        resolved = topic
+        published = self._image_topics()
+        if topic not in published:
+            resolved_alt = self._match_expected_topic(topic, published)
+            if resolved_alt:
+                resolved = resolved_alt
+
+        payload: Dict[str, object] = {
+            "requested_topic": topic,
+            "resolved_topic": resolved,
+            "output_path": output_path,
+            "ok": False,
+            "error": "",
+        }
         try:
-            if hasattr(self, "gazebo_process") and self.gazebo_process:
-                self._terminate_process(self.gazebo_process, "roslaunch_gazebo", timeout_s=10.0)
-                self.gazebo_process = None
+            msg = rospy.wait_for_message(resolved, Image, timeout=float(timeout_s))
+            frame = self._image_msg_to_bgr(msg)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            import cv2
 
-            # Мягко завершаем процессы и ждём, затем добиваем SIGKILL только если нужно.
-            for pattern in (r"(^|/)roslaunch([[:space:]]|$)", r"(^|/)gzserver([[:space:]]|$)", r"(^|/)gzclient([[:space:]]|$)"):
-                self._kill_pattern(pattern, sig="TERM")
-            for pattern in (r"(^|/)roslaunch([[:space:]]|$)", r"(^|/)gzserver([[:space:]]|$)", r"(^|/)gzclient([[:space:]]|$)"):
-                self._wait_pattern_gone(pattern, timeout_s=3.0)
-            for pattern in (r"(^|/)roslaunch([[:space:]]|$)", r"(^|/)gzserver([[:space:]]|$)", r"(^|/)gzclient([[:space:]]|$)"):
-                if not self._wait_pattern_gone(pattern, timeout_s=0.1):
-                    self._kill_pattern(pattern, sig="KILL")
-            for pattern in (r"(^|/)roslaunch([[:space:]]|$)", r"(^|/)gzserver([[:space:]]|$)", r"(^|/)gzclient([[:space:]]|$)"):
-                self._wait_pattern_gone(pattern, timeout_s=2.5)
+            cv2.imwrite(output_path, frame)
+            payload["ok"] = True
+        except Exception as exc:
+            payload["error"] = str(exc)
+        return payload
 
-            deadline = time.time() + 8.0
-            while time.time() < deadline:
-                if not self.is_gazebo_running():
-                    break
-                time.sleep(0.2)
-            self.gazebo_is_running = False
-            logger.info('Gazebo processes killed')
-        except Exception as e:
-            logger.error(f'Failed to kill Gazebo processes: {str(e)}')
+    def kill_gazebo(self) -> None:
+        if self._is_process_alive(self.gazebo_process):
+            self._terminate_process_group(self.gazebo_process, "roslaunch_gazebo", timeout_s=10.0)
+        self.gazebo_process = None
+        self.gazebo_is_running = False
 
-    def kill(self) -> bool:
+    def _kill_node(self) -> None:
+        if not self.node_is_running:
+            return
+        try:
+            rospy.signal_shutdown("SimulationManager shutdown")
+        except Exception:
+            pass
+        self.node_is_running = False
+
+    def _kill_ros(self) -> None:
+        if self._is_process_alive(self.ros_process):
+            self._terminate_process_group(self.ros_process, "roscore", timeout_s=8.0)
+        self.ros_process = None
+        self.ros_is_running = False
+
+    def kill(self) -> None:
         self.kill_gazebo()
         self._kill_node()
         self._kill_ros()
-
-        self.ros_is_running = False
-        self.node_is_running = False
         self.gazebo_is_running = False
+        self.node_is_running = False
+        self.ros_is_running = False
 
-    def wait_gazebo_quiet(self, timeout=30.0):
-        deadline = time.time() + timeout
+    def wait_gazebo_quiet(self, timeout: float = 30.0) -> bool:
+        deadline = time.time() + float(timeout)
         while time.time() < deadline:
             try:
-                proxy = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
+                proxy = rospy.ServiceProxy("/gazebo/get_world_properties", GetWorldProperties)
                 proxy()
                 return True
             except Exception:
                 time.sleep(0.2)
         return False
+
+
+class Simulator(SimulationManager):
+    """Обратная совместимость со старым именем класса."""

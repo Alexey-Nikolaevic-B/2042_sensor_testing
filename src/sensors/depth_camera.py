@@ -2,7 +2,7 @@ import time
 import numpy as np
 
 import rospy
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from sensor_msgs.msg import Image
 
@@ -106,7 +106,7 @@ class DepthCamera(MonoCamera):
           - если focused_image=True: dof_cv (картинка с DOF)
         """
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 
@@ -158,7 +158,7 @@ class DepthCamera(MonoCamera):
         reset_x = 50.0
         distances = [1.0, 3.0, 5.0]
 
-        if not simulator.open_scene(world_path, self.sensor_sdf_path):
+        if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
             return None
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
@@ -201,3 +201,10 @@ class DepthCamera(MonoCamera):
             })
 
         return results
+
+    def get_expected_topics(self) -> List[str]:
+        topics: List[str] = [str(self.DEPTH_TOPIC)]
+        image_topic = str(self.IMAGE_TOPIC or "").strip()
+        if image_topic:
+            topics.append(image_topic)
+        return topics

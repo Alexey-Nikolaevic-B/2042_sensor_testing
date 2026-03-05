@@ -95,6 +95,9 @@ class MonoProfileBase(MonoCamera):
         # test_runner expects JSON-serializable payload, shallow-copy is enough here.
         return dict(self._last_test_diagnostics)
 
+    def get_expected_topics(self) -> List[str]:
+        return [str(self.IMAGE_TOPIC)]
+
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
         os.makedirs(path, exist_ok=True)
@@ -330,7 +333,7 @@ class MonoProfileBase(MonoCamera):
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
         world = self.test_to_world[test_name]
-        if not simulator.open_scene(world, self.sensor_sdf_path):
+        if not simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
             diag = {}
             if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
                 diag = simulator.get_last_scene_diagnostics()
@@ -585,6 +588,12 @@ class MonoProfileBase(MonoCamera):
     @staticmethod
     def _c4_classify_scene_reason(last_reason: str, diagnostics: Dict[str, Any]) -> Tuple[str, str]:
         reason = str(last_reason or "gazebo_api_timeout")
+        if reason in ("topics_not_ready", "roslaunch_exited_while_waiting_topics"):
+            return (
+                "camera_topics_not_ready",
+                "Expected camera topics were not resolved or did not publish messages in time",
+            )
+
         rosservice = diagnostics.get("rosservice_gazebo_full", {})
         services = [
             str(line).strip()
@@ -621,7 +630,7 @@ class MonoProfileBase(MonoCamera):
 
                 scene_diag: Dict[str, Any] = {}
                 try:
-                    opened = simulator.open_scene(world, self.sensor_sdf_path)
+                    opened = simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics())
                 except Exception as exc:
                     opened = None
                     if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
@@ -644,7 +653,14 @@ class MonoProfileBase(MonoCamera):
                     rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
                     return
 
-                if attempt == 1 and last_reason == "gazebo_services_not_available":
+                retryable_reasons = {
+                    "gazebo_services_not_available",
+                    "gazebo_services_timeout",
+                    "topics_not_ready",
+                    "roslaunch_exited",
+                    "roslaunch_exited_while_waiting_topics",
+                }
+                if attempt == 1 and last_reason in retryable_reasons:
                     continue
                 break
         finally:

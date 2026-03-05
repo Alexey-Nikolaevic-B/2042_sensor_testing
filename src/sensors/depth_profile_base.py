@@ -88,6 +88,13 @@ class DepthProfileBase(DepthCamera):
     def get_last_test_diagnostics(self) -> Dict[str, Any]:
         return copy.deepcopy(self._last_test_diagnostics)
 
+    def get_expected_topics(self) -> List[str]:
+        topics: List[str] = [str(self.DEPTH_TOPIC)]
+        image_topic = str(self.IMAGE_TOPIC or "").strip()
+        if image_topic:
+            topics.append(image_topic)
+        return topics
+
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
         os.makedirs(path, exist_ok=True)
@@ -118,7 +125,7 @@ class DepthProfileBase(DepthCamera):
         self._last_test_diagnostics = {}
         self._resolved_depth_topic = ""
         world = self.test_to_world[test_name]
-        if not simulator.open_scene(world, self.sensor_sdf_path):
+        if not simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
             diag = {}
             if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
                 diag = simulator.get_last_scene_diagnostics()

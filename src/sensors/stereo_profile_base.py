@@ -107,10 +107,14 @@ class StereoProfileBase(Sensor):
     def get_last_test_diagnostics(self) -> Dict[str, Any]:
         return copy.deepcopy(self._last_test_diagnostics)
 
+    def get_expected_topics(self) -> List[str]:
+        topics: List[str] = [str(self.LEFT_IMAGE_TOPIC), str(self.RIGHT_IMAGE_TOPIC)]
+        return [topic for topic in topics if topic.strip()]
+
     def _open_test_scene(self, simulator, test_name: str) -> None:
         self._last_test_diagnostics = {}
         world = self.test_to_world[test_name]
-        if not simulator.open_scene(world, self.sensor_sdf_path):
+        if not simulator.open_scene(world, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
             diag = {}
             if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
                 diag = simulator.get_last_scene_diagnostics()
@@ -555,7 +559,7 @@ class StereoProfileBase(Sensor):
         convert2cv: bool = False,
     ) -> Dict[str, Any] | None:
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
             rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)

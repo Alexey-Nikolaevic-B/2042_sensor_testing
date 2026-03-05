@@ -1,117 +1,81 @@
 # 2042_sensor_testing
 
-Для запуска на новом устройстве:
-0. Установите все зависимости
-1. Перед запуском перейти в папку catkin_ws. В командной строке ввести "catkin_make".
-2. Выйти обратно в корневую папку проекта и запустить ./main
+Тестовый стенд сенсоров на ROS Noetic + Gazebo.
 
-Добавление датчика:
-1. Добавить датчик в src/sensor_library.py {Имя датчика, название тестов и ожидаемые результаты}
-2. Добавить файл с датчиком в resources/{sensor_type}/
-3. Добавить мир в resources/worlds/{test name/}
-4. В src/test_manager создать функцию с тестом и добавить её в словарь test_functions
+Текущий фокус: стабильный пайплайн камер через единый runner:
+- подъем `roscore`/`roslaunch`,
+- ожидание ROS master и image topics,
+- запуск `*_test`,
+- сбор `report.json` + диагностик,
+- корректное завершение только своих процессов.
 
-Смотреть рабочий пример depth_perception_test в scr/sensor_library.py 
+## Требования
 
-TODO
-1. Сделать возможность запускать тесты не перезапуская gazebo
-2. Получение данных с тактильных датчиков и rfid
-3. Сохранение данных тестов
-4. Написать документацию
+- Ubuntu + ROS Noetic + Gazebo (classic, `gazebo_ros`).
+- Python 3.
+- Пакеты Python:
+  - `PyYAML`
+  - `numpy`
+  - `opencv-python`
+  - `rospy`, `sensor_msgs`, `gazebo_msgs` (из ROS окружения)
 
+## Подготовка catkin_ws
 
+```bash
+cd /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws
+catkin_make
+source devel/setup.bash
+```
 
-Тестовые прогоны камер:
-    python3 test_runner.py --sensor-type camera --sensor-name axis_wide_110deg --test c2_resolution_test
-    python3 test_runner.py --sensor-type camera --sensor-name d435_like --test c5_working_range_test
-    python3 test_runner.py --sensor-type camera --sensor-name zed2i_like --test s1_stereo_accuracy_test
+## Быстрый запуск камерных тестов
 
-Если Gazebo “подвисает” после первого теста сделать:
-    --test <один тест>
-    --test <тот же тест>
-    --suite
-    И если всё проходит то — lifecycle реализован и отработал корректно.
+Запуск возможен из любого `cwd`, если путь к `test_runner.py` указан абсолютный.
 
-Иииииииииииии.....
-Короче, я нормально перелопатил архитектуру тестов для камер и привёл её к одному вменяемому стандарту — такому же, как у RFID. Теперь это не разрозненный зоопарк скриптов, а нормальная система.
+### 1) Полный suite по всем камерам
 
----
+```bash
+source /opt/ros/noetic/setup.bash
+source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
+python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --all-sensors --suite
+```
 
-## 1. Я выровнял архитектуру под один runner
+### 2) Suite для одной камеры
 
-Теперь:
+```bash
+source /opt/ros/noetic/setup.bash
+source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
+python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --sensor d435_like --suite
+```
 
-- Единственная точка входа — `test_runner.py`
-- Все тесты — это методы `*_test`
-- PASS/FAIL — только через `raise`
-- Никаких внутренних suite-раннеров внутри сенсоров
-- Никаких самодельных report.json в сенсоре
+### 3) Один тест для одной камеры
 
-То есть структура теперь одинаковая для:
-- RFID
-- Mono-камер
-- Depth-камер
-- Stereo-камер
+```bash
+source /opt/ros/noetic/setup.bash
+source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
+python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/test_runner.py --sensor-type camera --sensor d435_like --test c5_working_range_test
+```
 
-Всё работает через discovery по `*_test`, как нормальный фреймворк.
+## Интерактивный CLI
 
----
+Старый консольный интерфейс:
 
-## 2. Я сделал единый источник истины для world
+```bash
+source /opt/ros/noetic/setup.bash
+source /Users/arturkuanyshev/Projects/2042_sensor_testing/catkin_ws/devel/setup.bash
+python3 /Users/arturkuanyshev/Projects/2042_sensor_testing/__main__.py
+```
 
-Раньше были дубли world-файлов (часть в catkin_ws, часть в resources).
+## Отчеты и диагностика
 
-Я это убрал из логики автотестов.
+- По сенсору: `results/<sensor_name>/report.json`
+- По запуску всех сенсоров типа: `results/<sensor_type>_suite/report.json`
+- Логи ROS/Gazebo: `ros_log/`
+- Артефакты падений: debug PNG рядом с `report.json`
 
-Теперь:
-
-- Все camera *_test берут миры только из  
-  `CONFIG["WORLDS_PATH"]`
-- Фактически это `resources/worlds/`
-- Никаких ссылок на `catkin_ws/.../worlds` больше нет
-
-То есть если мы меняем сцену — она меняется для всех камер сразу, и вроде как даже только по типу камеры, не будет такого что мы проводим замер для моно камеры на тесте от стереокамеры. 
-
-Один source of truth. Без бардака.
-
----
-
-## 3. Я разложил тесты по типам камер
-
-Чтобы не было каши, я развёл их по логике:
-
-### MONO (RGB)
-- C1 — size order
-- C2 — разрешающая способность
-- C4 — наличие геометрий
-- C7 — окклюзия
-- C9 — измерение FOV
-- C10 — near/far clipping
-- C11 — FPS + jitter
-
-### DEPTH
-- C3 — устойчивость к изменению ракурса
-- C5 — рабочий диапазон
-- C6 — чувствительность к малым смещениям
-- C10 — clipping (если depth-камера поддерживает)
-
-### STEREO
-- S1 — точность глубины (через disparity)
-- S2 — сравнение гладкой и текстурной поверхности
-
-Теперь это не просто “сняли картинку”, а реально измерения с метриками.
-
----
-
-## 4. Я сделал каждый тест автономным
-
-Это ВАЖНЫЙ момент.
-
-Можно запустить ОДИН конкретный тест, например: было ранее, но продублирую еще раз.
-
-    python3 test_runner.py --sensor-type camera --sensor-name axis_wide_110deg --test c2_resolution_test
-    python3 test_runner.py --sensor-type camera --sensor-name d435_like --test c5_working_range_test
-    python3 test_runner.py --sensor-type camera --sensor-name zed2i_like --test s1_stereo_accuracy_test
-
-
- Вообще это комментарии даже условно больше для меня самого, чтоб вернувшись через время я не искал что мне нужно сделать, а что нет. Но я думаю мне нужно еще подправить кое где naim_space, вдруг gazebo будет ругаться.
+При падении теста в `error_details` пишутся:
+- `world_path_abs`, `generated_world_path_abs`, `cwd`
+- `launch_stderr_tail`/`launch_stdout_tail`
+- `missing_model_uris`
+- `expected_topics`, `resolved_topics`
+- `msg_counters`, `msg_hz`
+- `rostopic_list`

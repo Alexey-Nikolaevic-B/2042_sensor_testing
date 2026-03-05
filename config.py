@@ -5,6 +5,8 @@ from pathlib import Path
 
 
 class Config:
+    BASE_DIR = Path(__file__).resolve().parent
+
     EXPECTED_TYPES = {
         'BASE_WORLD_PATH': str,
         'CATKIN_SETUP_DIR': str,
@@ -23,11 +25,11 @@ class Config:
         'ROOT_PATH': str
     }
 
-    config_file = "config.yaml"
+    config_file = BASE_DIR / "config.yaml"
     
     def __init__(self):
         self._data = self._load_defaults()
-        self._data['ROOT_PATH'] = os.path.dirname(os.path.abspath(__file__))
+        self._data['ROOT_PATH'] = str(self.BASE_DIR)
 
     def _load_defaults(self) -> Dict[str, Any]:
         if self.config_file and Path(self.config_file).exists():
@@ -37,7 +39,7 @@ class Config:
 
     def _load_from_yaml(self) -> Dict[str, Any]:
         try:
-            with open(self.config_file, 'r') as f:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
                 return yaml.safe_load(f)
         except Exception as e:
             print(f"Error loading YAML config {self.config_file}: {e}")
@@ -45,7 +47,7 @@ class Config:
 
     def _get_hardcoded_defaults(self) -> Dict[str, Any]:
         return {
-            'BASE_WORLD_PATH': 'catkin_ws/scenario_test_pkg/worlds/base_world.world',
+            'BASE_WORLD_PATH': 'catkin_ws/src/scenario_test_pkg/worlds/base_world.world',
             'CATKIN_SETUP_DIR': 'catkin_ws/devel/setup.bash',
             'SENSOR_PKG': 'scenario_test_pkg',
             'LAUNCH_FILE': 'scenario.launch',
@@ -64,7 +66,7 @@ class Config:
 
     def _save_to_yaml(self) -> None:
         try:
-            with open(self.config_file, 'w') as f:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
                 yaml.dump(self._data, f, default_flow_style=False)
         except Exception as e:
             print(f"Error saving config to {self.config_file}: {e}")

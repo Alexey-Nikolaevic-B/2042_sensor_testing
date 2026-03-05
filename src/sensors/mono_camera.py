@@ -3,7 +3,7 @@ import rospy
 
 from sensor_msgs.msg import Image
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from .sensor import Sensor, register_sensor
 
 
@@ -33,7 +33,7 @@ class MonoCamera(Sensor):
         convert2cv = False
     ) -> Optional[Dict[str, Any]]:
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(world_path, self.sensor_sdf_path, expected_topics=self.get_expected_topics()):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 
@@ -237,3 +237,6 @@ class MonoCamera(Sensor):
             self.set_noise_mean(float(params["noise_mean"]))
         if "noise_stddev" in params:
             self.set_noise_stddev(float(params["noise_stddev"]))
+
+    def get_expected_topics(self) -> List[str]:
+        return [str(self.IMAGE_TOPIC)]
