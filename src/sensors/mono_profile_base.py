@@ -406,6 +406,10 @@ class MonoProfileBase(MonoCamera):
         max_lines: int = 200,
     ) -> Dict[str, Any]:
         searched_paths: List[str] = []
+        hint_file_exists = False
+        hint_dir_exists = False
+        hint_file_size_bytes: Optional[int] = None
+        waited_ms = 0
 
         def _read_tail(path: Path) -> Dict[str, Any]:
             try:
@@ -415,19 +419,46 @@ class MonoProfileBase(MonoCamera):
                     "path": str(path),
                     "tail": lines[-int(max_lines):],
                     "searched_paths": searched_paths,
+                    "hint_file_exists": bool(hint_file_exists),
+                    "hint_dir_exists": bool(hint_dir_exists),
+                    "hint_file_size_bytes": hint_file_size_bytes,
+                    "waited_ms": int(waited_ms),
                 }
             except Exception as exc:
                 return {
                     "path": str(path),
                     "tail": [f"<gazebo-log-read-error> {exc}"],
                     "searched_paths": searched_paths,
+                    "hint_file_exists": bool(hint_file_exists),
+                    "hint_dir_exists": bool(hint_dir_exists),
+                    "hint_file_size_bytes": hint_file_size_bytes,
+                    "waited_ms": int(waited_ms),
                 }
 
         if log_path_hint:
             hint = Path(log_path_hint).expanduser()
             searched_paths.append(str(hint))
-            if hint.exists() and hint.is_file():
-                return _read_tail(hint)
+            hint_dir_exists = bool(hint.parent.exists() and hint.parent.is_dir())
+            t_start = time.perf_counter()
+            for _ in range(10):
+                exists_now = bool(hint.exists() and hint.is_file())
+                if exists_now:
+                    hint_file_exists = True
+                    try:
+                        hint_file_size_bytes = int(hint.stat().st_size)
+                    except Exception:
+                        hint_file_size_bytes = None
+                    if hint_file_size_bytes is None or hint_file_size_bytes > 0:
+                        waited_ms = int((time.perf_counter() - t_start) * 1000.0)
+                        return _read_tail(hint)
+                time.sleep(0.2)
+            waited_ms = int((time.perf_counter() - t_start) * 1000.0)
+            hint_file_exists = bool(hint.exists() and hint.is_file())
+            if hint_file_exists:
+                try:
+                    hint_file_size_bytes = int(hint.stat().st_size)
+                except Exception:
+                    hint_file_size_bytes = None
 
         candidates: List[Path] = []
 
@@ -463,6 +494,10 @@ class MonoProfileBase(MonoCamera):
                 "path": "",
                 "tail": ["<gazebo-log-not-found>"],
                 "searched_paths": searched_paths,
+                "hint_file_exists": bool(hint_file_exists),
+                "hint_dir_exists": bool(hint_dir_exists),
+                "hint_file_size_bytes": hint_file_size_bytes,
+                "waited_ms": int(waited_ms),
             }
 
         chosen = sorted(unique_existing, key=lambda p: p.stat().st_mtime)[-1]
