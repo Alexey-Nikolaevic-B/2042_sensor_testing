@@ -54,6 +54,8 @@ class DepthProfileBase(DepthCamera):
     C6_STEP = 0.01
     C6_DEPTH_CHANGE_EPS_M = 0.004
     C6_MIN_CHANGED_RATIO = 0.80
+    DEPTH_TOPIC_WARMUP_TIMEOUT_S = 20.0
+    DEPTH_WAIT_PER_CANDIDATE_S = 1.2
 
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
@@ -78,6 +80,7 @@ class DepthProfileBase(DepthCamera):
             "c6_small_displacement_sensitivity_test": str(worlds_root / "camera_c6_small_shifts.world"),
         }
         self.camera_model_name = self._read_camera_model_name()
+        self._resolved_depth_topic = ""
 
     def _set_test_diagnostics(self, **kwargs) -> None:
         self._last_test_diagnostics.update(kwargs)
@@ -113,6 +116,7 @@ class DepthProfileBase(DepthCamera):
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
         self._last_test_diagnostics = {}
+        self._resolved_depth_topic = ""
         world = self.test_to_world[test_name]
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = {}
@@ -289,7 +293,7 @@ class DepthProfileBase(DepthCamera):
     @staticmethod
     def _roi_depth_stats(depth_m: np.ndarray, roi_xyxy: List[int]) -> Dict[str, Any]:
         if not roi_xyxy or len(roi_xyxy) != 4:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
         x0, y0, x1, y1 = [int(v) for v in roi_xyxy]
         h, w = depth_m.shape[:2]
         x0 = max(0, min(w, x0))
@@ -297,17 +301,56 @@ class DepthProfileBase(DepthCamera):
         y0 = max(0, min(h, y0))
         y1 = max(0, min(h, y1))
         if x1 <= x0 or y1 <= y0:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
         roi = depth_m[y0:y1, x0:x1]
         valid = roi[np.isfinite(roi) & (roi > 0.0)]
         if valid.size == 0:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None}
+            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
         return {
             "valid_count": int(valid.size),
             "min_m": float(np.min(valid)),
             "max_m": float(np.max(valid)),
             "mean_m": float(np.mean(valid)),
+            "median_m": float(np.median(valid)),
         }
+
+    @staticmethod
+    def _fallback_point_from_finite_depth(depth_m: np.ndarray) -> Tuple[Optional[Tuple[int, int]], Dict[str, Any]]:
+        h, w = depth_m.shape[:2]
+        y0 = int(h * 0.2)
+        y1 = int(h * 0.8)
+        x0 = int(w * 0.2)
+        x1 = int(w * 0.8)
+        central = depth_m[y0:y1, x0:x1]
+        central_valid = np.isfinite(central) & (central > 0.0)
+
+        meta: Dict[str, Any] = {
+            "strategy": "finite_depth_min",
+            "central_window_xyxy": [int(x0), int(y0), int(x1), int(y1)],
+            "central_valid_count": int(np.count_nonzero(central_valid)),
+            "fallback_scope": "central",
+        }
+
+        if np.count_nonzero(central_valid) > 0:
+            central_depth = np.where(central_valid, central, np.inf)
+            idx = np.unravel_index(int(np.argmin(central_depth)), central_depth.shape)
+            py = int(y0 + idx[0])
+            px = int(x0 + idx[1])
+            meta["chosen_depth_m"] = float(depth_m[py, px])
+            return (px, py), meta
+
+        valid = np.isfinite(depth_m) & (depth_m > 0.0)
+        meta["fallback_scope"] = "global"
+        meta["global_valid_count"] = int(np.count_nonzero(valid))
+        if np.count_nonzero(valid) == 0:
+            return None, meta
+
+        masked = np.where(valid, depth_m, np.inf)
+        idx = np.unravel_index(int(np.argmin(masked)), masked.shape)
+        py = int(idx[0])
+        px = int(idx[1])
+        meta["chosen_depth_m"] = float(depth_m[py, px])
+        return (px, py), meta
 
     def _measure_depth_with_meta(
         self,
@@ -329,6 +372,20 @@ class DepthProfileBase(DepthCamera):
                     roi_meta["source"] = "color_centroid"
                     roi_meta["color_hint"] = str(color_hint)
                     return z, centroid, roi_meta
+
+        fallback_point, fallback_diag = self._fallback_point_from_finite_depth(depth_m)
+        if fallback_point is not None:
+            z_fallback, roi_meta = self._depth_at_pixel_with_meta(
+                depth_m,
+                fallback_point[0],
+                fallback_point[1],
+                half_window=int(self.DEPTH_ROI_HALF_WINDOW),
+            )
+            if z_fallback is not None:
+                roi_meta["source"] = "finite_depth_fallback"
+                roi_meta["color_hint"] = str(color_hint) if color_hint else None
+                roi_meta["fallback_meta"] = fallback_diag
+                return z_fallback, fallback_point, roi_meta
 
         cx, cy = w // 2, h // 2
         z_center, roi_meta = self._depth_at_pixel_with_meta(
@@ -379,6 +436,50 @@ class DepthProfileBase(DepthCamera):
             cv2.putText(debug, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
             y += 28
         return debug
+
+    def _save_failure_artifacts(
+        self,
+        prefix: str,
+        depth_m: np.ndarray,
+        bgr: Optional[np.ndarray],
+        point: Tuple[int, int],
+        roi_meta: Dict[str, Any],
+        extra_lines: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        x0, y0, x1, y1 = [int(v) for v in roi_meta.get("roi_xyxy", [0, 0, 0, 0])]
+        roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
+
+        if bgr is not None:
+            rgb_dbg = bgr.copy()
+        else:
+            rgb_dbg = self._depth_preview(depth_m)
+        cv2.rectangle(rgb_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+        cv2.circle(rgb_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+        lines = [
+            f"source={roi_meta.get('source', 'unknown')}",
+            f"valid={roi_stats.get('valid_count', 0)}",
+            f"mean={roi_stats.get('mean_m') if roi_stats.get('mean_m') is not None else float('nan'):.3f}",
+            f"median={roi_stats.get('median_m') if roi_stats.get('median_m') is not None else float('nan'):.3f}",
+        ]
+        for line in (extra_lines or []):
+            lines.append(str(line))
+        y = 30
+        for line in lines:
+            cv2.putText(rgb_dbg, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+            y += 24
+        rgb_path = self._save_frame(f"{prefix}_rgb.png", rgb_dbg)
+
+        depth_dbg = self._depth_preview(depth_m)
+        cv2.rectangle(depth_dbg, (x0, y0), (x1, y1), (255, 255, 255), 2)
+        cv2.circle(depth_dbg, (int(point[0]), int(point[1])), 4, (255, 255, 255), 2)
+        depth_path = self._save_frame(f"{prefix}_depth.png", depth_dbg)
+
+        return {
+            "rgb_artifact": rgb_path,
+            "depth_artifact": depth_path,
+            "roi_stats": roi_stats,
+            "roi_meta": roi_meta,
+        }
 
     @staticmethod
     def _read_model_name_from_sdf(path: str) -> str:
@@ -431,10 +532,99 @@ class DepthProfileBase(DepthCamera):
             raise RuntimeError(f"Failed to set model state for {model_name}: {response.status_message}")
         time.sleep(settle_s)
 
+    @staticmethod
+    def _list_image_topics() -> List[str]:
+        try:
+            published = rospy.get_published_topics()
+        except Exception:
+            return []
+        return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
+
+    @staticmethod
+    def _choose_depth_topic(candidates: List[str]) -> str:
+        if not candidates:
+            return ""
+        prioritized = sorted(
+            candidates,
+            key=lambda t: (0 if t.endswith("/depth/image_raw") else 1, len(t), t),
+        )
+        return prioritized[0]
+
+    def _resolve_depth_topic(self, warmup_timeout: float) -> Tuple[str, Dict[str, Any]]:
+        expected = str(self.DEPTH_TOPIC or "")
+        sensor_name = str(self.sensor_name)
+        preferred = [
+            (expected, "expected"),
+            (f"/{sensor_name}/depth/image_raw", "name_namespace"),
+            (f"/{sensor_name}_depth/image_raw", "name_underscore"),
+            (f"/{sensor_name}_depth/depth/image_raw", "name_underscore_nested"),
+            (f"/{sensor_name}/depth_image_raw", "name_alt"),
+        ]
+
+        deadline = time.time() + float(warmup_timeout)
+        last_topics: List[str] = []
+        while time.time() < deadline:
+            topics = self._list_image_topics()
+            last_topics = topics
+            for topic, source in preferred:
+                if topic and topic in topics:
+                    diag = {
+                        "expected_depth_topic": expected,
+                        "selected_depth_topic": topic,
+                        "selected_source": source,
+                        "topics_found": topics,
+                        "topic_mapping_changed": bool(topic != expected),
+                    }
+                    return topic, diag
+            time.sleep(0.2)
+
+        if expected and expected in last_topics:
+            diag = {
+                "expected_depth_topic": expected,
+                "selected_depth_topic": expected,
+                "selected_source": "expected_after_warmup",
+                "topics_found": last_topics,
+                "topic_mapping_changed": False,
+            }
+            return expected, diag
+
+        token = sensor_name
+        generic = [
+            t for t in last_topics
+            if ("depth" in t and ("image_raw" in t or t.endswith("/image")))
+        ]
+        in_namespace = [t for t in generic if token in t]
+        selected = self._choose_depth_topic(in_namespace) or self._choose_depth_topic(generic) or expected
+        diag = {
+            "expected_depth_topic": expected,
+            "selected_depth_topic": selected,
+            "selected_source": "heuristic_fallback",
+            "topics_found": last_topics,
+            "topic_mapping_changed": bool(selected != expected),
+        }
+        return selected, diag
+
     def _wait_depth(self, timeout: float = 3.0) -> Image:
         if not self.DEPTH_TOPIC:
             raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
-        return rospy.wait_for_message(self.DEPTH_TOPIC, Image, timeout=timeout)
+        if not self._resolved_depth_topic:
+            selected, diag = self._resolve_depth_topic(self.DEPTH_TOPIC_WARMUP_TIMEOUT_S)
+            self._resolved_depth_topic = selected or self.DEPTH_TOPIC
+            self._set_test_diagnostics(depth_topic_resolution=diag)
+
+        candidates = [self._resolved_depth_topic]
+        if self._resolved_depth_topic != self.DEPTH_TOPIC:
+            candidates.append(self.DEPTH_TOPIC)
+
+        errors: List[str] = []
+        for topic in candidates:
+            try:
+                wait_t = min(float(timeout), float(self.DEPTH_WAIT_PER_CANDIDATE_S))
+                return rospy.wait_for_message(topic, Image, timeout=wait_t)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{topic}: {exc}")
+                continue
+        raise RuntimeError(f"Failed to receive depth frame. candidates={candidates}, errors={errors}")
 
     def _try_wait_color(self, timeout: float = 1.0) -> Optional[Image]:
         if not self.IMAGE_TOPIC:
@@ -466,11 +656,21 @@ class DepthProfileBase(DepthCamera):
             time.sleep(0.6)
 
             depth_msg = self._wait_depth(timeout=1.5)
+            self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
             depth_m = self._depth_msg_to_meters(depth_msg)
             color_msg = self._try_wait_color(timeout=1.0)
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
             z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr=bgr, color_hint="green")
             if z is None or np.isnan(z) or z <= 0.0:
+                fail_artifacts = self._save_failure_artifacts(
+                    prefix=f"depth_perception_fail_d_{str(d).replace('.', '_')}",
+                    depth_m=depth_m,
+                    bgr=bgr,
+                    point=point,
+                    roi_meta=roi_meta,
+                    extra_lines=[f"distance={float(d):.2f}", "reason=invalid_measurement"],
+                )
+                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
                 raise RuntimeError(f"Invalid depth measurement at distance={d}: {z}")
 
             if first_frame_diagnostics is None:
@@ -482,12 +682,35 @@ class DepthProfileBase(DepthCamera):
             roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
 
             if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
+                fail_artifacts = self._save_failure_artifacts(
+                    prefix=f"depth_perception_fail_clip_d_{str(d).replace('.', '_')}",
+                    depth_m=depth_m,
+                    bgr=bgr,
+                    point=point,
+                    roi_meta=roi_meta,
+                    extra_lines=[f"distance={float(d):.2f}", f"z={float(z):.3f}", "reason=clip_range"],
+                )
+                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
                 raise AssertionError(f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})")
 
             abs_err = abs(float(z) - float(d))
             rel_err = abs_err / float(d) * 100.0
 
             if abs_err > float(self.MAX_ABS_ERROR_M):
+                fail_artifacts = self._save_failure_artifacts(
+                    prefix=f"depth_perception_fail_abs_err_d_{str(d).replace('.', '_')}",
+                    depth_m=depth_m,
+                    bgr=bgr,
+                    point=point,
+                    roi_meta=roi_meta,
+                    extra_lines=[
+                        f"distance={float(d):.2f}",
+                        f"z={float(z):.3f}",
+                        f"abs_err={float(abs_err):.3f}",
+                        "reason=abs_error",
+                    ],
+                )
+                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
                 raise AssertionError(
                     f"Depth absolute error too high at distance={d}: abs_err={abs_err:.4f}, max={self.MAX_ABS_ERROR_M}"
                 )
@@ -551,6 +774,8 @@ class DepthProfileBase(DepthCamera):
                 "measurements": results,
                 "monotonic_increasing": True,
                 "first_frame_diagnostics": first_frame_diagnostics or {},
+                "topic_diagnostics": self.get_last_test_diagnostics().get("depth_topic_resolution", {}),
+                "selected_depth_topic": self._resolved_depth_topic,
             },
         }
 
@@ -670,6 +895,7 @@ class DepthProfileBase(DepthCamera):
         for x in metrics["x_values_m"]:
             self._move_and_settle(simulator, self.C5_RANGE_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.3)
             depth_msg = self._wait_depth(timeout=2.0)
+            self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
             depth_m = self._depth_msg_to_meters(depth_msg)
             color_msg = self._try_wait_color(timeout=1.0)
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
@@ -771,6 +997,8 @@ class DepthProfileBase(DepthCamera):
 
         metrics["x_min_ok_m"] = float(best_start)
         metrics["x_max_ok_m"] = float(best_end)
+        metrics["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
+        metrics["selected_depth_topic"] = self._resolved_depth_topic
         metrics["checks"] = {
             "x_min_ok_le_0_5": bool(float(best_start) <= 0.5 + 1e-6),
             "x_max_ok_ge_10_0": bool(float(best_end) >= 10.0 - 1e-6),

@@ -52,7 +52,9 @@
     </model>
 
     <model name="front_cube">
-      <pose>3.0 0.0 0.25 0 0 0</pose>
+      <!-- Базово вынесен по Y, чтобы back_cube был виден до окклюзии.
+           В тестах окклюдер (front_cube) двигается по Y к центру. -->
+      <pose>3.0 0.40 0.25 0 0 0</pose>
       <static>false</static>
       <link name="link">
         <gravity>false</gravity>
@@ -74,9 +76,8 @@
     </model>
 
     <model name="back_cube">
-      <!-- Back cube расположен дальше по X, чтобы фронтальный куб реально его перекрывал.
-           Y-смещения выставляются тестом через /gazebo/set_model_state. -->
-      <pose>3.6 0.10 0.25 0 0 0</pose>
+      <!-- Blue object в центре FOV; окклюзия управляется движением front_cube по Y. -->
+      <pose>3.6 0.0 0.25 0 0 0</pose>
       <static>false</static>
       <link name="link">
         <gravity>false</gravity>
@@ -92,6 +93,7 @@
           <material>
             <ambient>0 0 1 1</ambient>
             <diffuse>0 0 1 1</diffuse>
+            <emissive>0 0 0.35 1</emissive>
           </material>
         </visual>
       </link>

@@ -463,9 +463,26 @@ class StereoProfileBase(Sensor):
         if color == "red":
             return self._red_mask(hsv)
 
+        if color == "blue":
+            # Для stereo C7 допускаем более широкий диапазон по S/V,
+            # т.к. при headless-рендере синий объект часто темнее ожидаемого.
+            blue_main = cv2.inRange(
+                hsv,
+                np.array([85, 40, 25], dtype=np.uint8),
+                np.array([145, 255, 255], dtype=np.uint8),
+            )
+            blue_dark = cv2.inRange(
+                hsv,
+                np.array([80, 20, 10], dtype=np.uint8),
+                np.array([150, 180, 170], dtype=np.uint8),
+            )
+            mask = cv2.bitwise_or(blue_main, blue_dark)
+            cleaned = self._clean_mask(mask)
+            kernel = np.ones((3, 3), np.uint8)
+            return cv2.dilate(cleaned, kernel, iterations=1)
+
         ranges: Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]] = {
             "green": ((40, 80, 60), (85, 255, 255)),
-            "blue": ((100, 90, 60), (135, 255, 255)),
             "yellow": ((20, 90, 90), (40, 255, 255)),
         }
         if color not in ranges:
@@ -664,14 +681,27 @@ class StereoProfileBase(Sensor):
         if not simulator.wait_for_model_spawn(self.C7_BACK_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C7_BACK_CUBE_NAME}")
 
-        self._move_and_settle(simulator, self.C7_FRONT_CUBE_NAME, x=3.0, y=0.0, z=0.25)
+        back_x = 3.6
+        front_x = 3.0
+        baseline_front_y = 0.40
+
+        # Базово делаем синий объект (back cube) видимым в центре,
+        # затем двигаем передний окклюдер по Y.
+        move_back = self._set_model_pose_and_readback(self.C7_BACK_CUBE_NAME, x=back_x, y=0.0, z=0.25, settle_s=0.45)
+        if not move_back.get("set_model_state", {}).get("success", False):
+            raise RuntimeError(f"Failed to position back cube: {move_back}")
+
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
         rospy.wait_for_service("/gazebo/get_model_state", timeout=30.0)
-
-        back_x = 3.6
-        move_before = self._set_model_pose_and_readback(self.C7_BACK_CUBE_NAME, x=back_x, y=0.0, z=0.25, settle_s=0.45)
+        move_before = self._set_model_pose_and_readback(
+            self.C7_FRONT_CUBE_NAME,
+            x=front_x,
+            y=baseline_front_y,
+            z=0.25,
+            settle_s=0.45,
+        )
         if not move_before.get("set_model_state", {}).get("success", False):
-            raise RuntimeError(f"Failed to position back cube before occlusion cases: {move_before}")
+            raise RuntimeError(f"Failed to position front cube before occlusion cases: {move_before}")
 
         metrics: Dict[str, Any] = {
             "left": {"blue_pixels": {}},
@@ -679,7 +709,9 @@ class StereoProfileBase(Sensor):
             "cases": dict(self.C7_CASES),
             "threshold": int(self.C7_MIN_PIXELS),
             "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
-            "occluder_motion": {"before": move_before, "cases": {}},
+            "occluder_model": str(self.C7_FRONT_CUBE_NAME),
+            "occluded_model": str(self.C7_BACK_CUBE_NAME),
+            "occluder_motion": {"before": move_before, "cases": {}, "back_cube": move_back},
         }
 
         # Базовый кадр до окклюзии
@@ -706,8 +738,8 @@ class StereoProfileBase(Sensor):
 
         for case_name, y in self.C7_CASES.items():
             move_diag = self._set_model_pose_and_readback(
-                self.C7_BACK_CUBE_NAME,
-                x=back_x,
+                self.C7_FRONT_CUBE_NAME,
+                x=front_x,
                 y=float(y),
                 z=0.25,
                 settle_s=0.45,

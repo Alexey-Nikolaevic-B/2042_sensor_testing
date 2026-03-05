@@ -1,12 +1,14 @@
 <launch>
   <arg name="world_path" default="$(find scenario_test_pkg)/worlds/base_world.world"/>
+  <!-- backward-compatible alias for old launch calls -->
+  <arg name="world_file" default="$(arg world_path)"/>
   <arg name="paused" default="false"/>
   <arg name="gui" default="false"/>
   <arg name="headless" default="true"/>
   <arg name="use_sim_time" default="true"/>
 
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
-    <arg name="world_name" value="$(arg world_path)"/>
+    <arg name="world_name" value="$(arg world_file)"/>
     <arg name="paused" value="$(arg paused)"/>
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
     <arg name="gui" value="$(arg gui)"/>

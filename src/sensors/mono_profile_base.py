@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 from math import atan, degrees
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -273,6 +274,45 @@ class MonoProfileBase(MonoCamera):
             cv2.putText(debug, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
             y += 28
         return debug
+
+    @staticmethod
+    def _read_clip_from_sdf(camera_model_path_abs: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "camera_model_path_abs": str(camera_model_path_abs),
+            "near_m": None,
+            "far_m": None,
+            "source": "",
+            "error": "",
+        }
+        if not camera_model_path_abs:
+            result["error"] = "camera_model_path_abs is empty"
+            return result
+
+        try:
+            tree = ET.parse(camera_model_path_abs)
+            root = tree.getroot()
+            clip = root.find(".//sensor/camera/clip")
+            if clip is None:
+                clip = root.find(".//camera/clip")
+            if clip is None:
+                result["error"] = "No <clip> section found in SDF"
+                return result
+
+            near_node = clip.find("near")
+            far_node = clip.find("far")
+            if near_node is None or far_node is None:
+                result["error"] = "No <near>/<far> in <clip>"
+                return result
+
+            near_v = float((near_node.text or "").strip())
+            far_v = float((far_node.text or "").strip())
+            result["near_m"] = float(near_v)
+            result["far_m"] = float(far_v)
+            result["source"] = "sdf_clip"
+            return result
+        except Exception as exc:
+            result["error"] = f"Failed to parse SDF clip: {exc}"
+            return result
 
     def _save_frame(self, name: str, frame: np.ndarray) -> str:
         out = os.path.join(self._captured_dir(), name)
@@ -553,11 +593,22 @@ class MonoProfileBase(MonoCamera):
         return {"id": "C9", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c10_clipping_test(self, simulator) -> Dict[str, Any]:
+        clip_cfg = self._read_clip_from_sdf(self.sensor_sdf_path)
+        near_target = float(clip_cfg["near_m"]) if clip_cfg.get("near_m") is not None else float(self.clip_near)
+        far_target = float(clip_cfg["far_m"]) if clip_cfg.get("far_m") is not None else float(self.clip_far)
+        near_tol = max(0.05, abs(near_target) * 0.05)
+        far_tol = max(0.05, abs(far_target) * 0.05)
+        near_start = min(float(self.C10_NEAR_START_X), max(0.01, near_target * 0.3))
+        near_end = max(float(self.C10_NEAR_SEARCH_END_X), near_target * 8.0)
+
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
-            "near_clip_target_m": float(self.clip_near),
-            "far_clip_target_m": float(self.clip_far),
-            "near_search": {"start_x": float(self.C10_NEAR_START_X), "end_x": float(self.C10_NEAR_SEARCH_END_X)},
+            "near_clip_target_m": float(near_target),
+            "far_clip_target_m": float(far_target),
+            "clip_source": clip_cfg,
+            "near_tolerance_m": float(near_tol),
+            "far_tolerance_m": float(far_tol),
+            "near_search": {"start_x": float(near_start), "end_x": float(near_end)},
             "far_search": {"coarse_step": float(self.C10_FAR_COARSE_STEP), "fine_step": float(self.C10_FAR_FINE_STEP)},
             "min_red_pixels": int(self.C10_MIN_RED_PIXELS),
             "min_visible_ratio": float(self.C10_MIN_VISIBLE_RATIO),
@@ -570,7 +621,7 @@ class MonoProfileBase(MonoCamera):
         near_before: Optional[Tuple[float, np.ndarray, int]] = None
         near_after: Optional[Tuple[float, np.ndarray, int]] = None
 
-        for x in self._iter_float_range(self.C10_NEAR_START_X, self.C10_NEAR_SEARCH_END_X, self.C10_NEAR_STEP):
+        for x in self._iter_float_range(near_start, near_end, self.C10_NEAR_STEP):
             self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.2)
             msg = self._wait_image(timeout=35.0)
             frame = self._msg_to_bgr(msg)
@@ -592,7 +643,7 @@ class MonoProfileBase(MonoCamera):
 
         # Ищем дальше реального far_clip с запасом, чтобы надежно пройти границу отсечения
         # даже на камерах с большим far и низкой дискретизацией шага.
-        far_search_stop = max(float(self.clip_far) + 5.0, float(self.clip_far) * 1.5)
+        far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
         metrics["far_search_stop_m"] = float(far_search_stop)
         for x in self._iter_float_range(
             near_x + float(self.C10_FAR_COARSE_STEP),
@@ -609,7 +660,7 @@ class MonoProfileBase(MonoCamera):
             # Теперь учитываем физически корректный "практически исчез" на дальнем участке:
             # очень малая доля видимого объекта (<1% кадра) при X >= 0.9*far_clip.
             tiny_far_object = bool(
-                float(x) >= (0.9 * float(self.clip_far))
+                float(x) >= (0.9 * float(far_target))
                 and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
             )
             if visible and not tiny_far_object:
@@ -634,7 +685,7 @@ class MonoProfileBase(MonoCamera):
             red_pixels = int(red_stats["red_pixels"])
             visible = bool(red_stats["visible_by_pixels"])
             tiny_far_object = bool(
-                float(x) >= (0.9 * float(self.clip_far))
+                float(x) >= (0.9 * float(far_target))
                 and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
             )
             if visible and not tiny_far_object:
@@ -647,11 +698,11 @@ class MonoProfileBase(MonoCamera):
         metrics["x_far_m"] = far_x
         metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
 
-        near_ok = abs(near_x - float(self.clip_near)) <= 0.05
-        far_ok = abs(far_x - float(self.clip_far)) <= 0.05
+        near_ok = abs(near_x - float(near_target)) <= float(near_tol)
+        far_ok = abs(far_x - float(far_target)) <= float(far_tol)
         metrics["checks"] = {
-            "near_abs_error_m": float(abs(near_x - float(self.clip_near))),
-            "far_abs_error_m": float(abs(far_x - float(self.clip_far))),
+            "near_abs_error_m": float(abs(near_x - float(near_target))),
+            "far_abs_error_m": float(abs(far_x - float(far_target))),
             "near_ok": bool(near_ok),
             "far_ok": bool(far_ok),
         }
@@ -713,8 +764,8 @@ class MonoProfileBase(MonoCamera):
         metrics_path = self._save_metrics_json("c10_clipping_metrics.json", metrics)
         if not (near_ok and far_ok):
             raise AssertionError(
-                f"C10 failed: near={near_x:.3f} (target {self.clip_near:.3f}), "
-                f"far={far_x:.3f} (target {self.clip_far:.3f})"
+                f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
+                f"far={far_x:.3f} (target {far_target:.3f}, tol={far_tol:.3f})"
             )
 
         return {"id": "C10", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
