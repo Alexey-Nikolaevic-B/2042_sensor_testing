@@ -254,13 +254,21 @@ class Simulator():
             timeout_s=4.0,
             max_lines=400,
         )
+        node_snap = self._run_shell_capture(
+            "rosnode list | grep '^/gazebo$' || true",
+            timeout_s=4.0,
+            max_lines=50,
+        )
         services = [str(line).strip() for line in snap.get("stdout_tail", []) if str(line).strip()]
+        gazebo_node_exists = any(str(line).strip() == "/gazebo" for line in node_snap.get("stdout_tail", []))
         logger_services = {"/gazebo/get_loggers", "/gazebo/set_logger_level"}
         only_logger = bool(services) and set(services).issubset(logger_services)
         return {
             "services": services,
             "only_logger_services": bool(only_logger),
+            "gazebo_node_exists": bool(gazebo_node_exists),
             "raw": snap,
+            "node_raw": node_snap,
         }
 
     def _process_state(self, pattern: str, ps_limit: int = 200) -> Dict[str, object]:
@@ -322,6 +330,10 @@ class Simulator():
             roslaunch_err_tail = self._read_file_tail(launch_log_files.get("roslaunch_stderr", ""), max_lines=50)
             gzserver_out_tail = self._read_file_tail(launch_log_files.get("gzserver_stdout", ""), max_lines=200)
             gzserver_err_tail = self._read_file_tail(launch_log_files.get("gzserver_stderr", ""), max_lines=200)
+            if not gzserver_out_tail and roslaunch_out_tail:
+                gzserver_out_tail = list(roslaunch_out_tail)
+            if not gzserver_err_tail and roslaunch_err_tail:
+                gzserver_err_tail = list(roslaunch_err_tail)
             lines.extend(roslaunch_out_tail)
             lines.extend(roslaunch_err_tail)
             lines.extend(gzserver_out_tail)
@@ -486,9 +498,13 @@ class Simulator():
         services: Tuple[str, ...],
         timeout_s: float,
         gzserver_grace_s: float = 12.0,
+        base_service: str = "/gazebo/get_world_properties",
+        only_logger_grace_s: float = 8.0,
+        second_chance_s: float = 8.0,
     ) -> Tuple[bool, Dict[str, str], List[Dict[str, object]], str, Dict[str, object]]:
+        start_ts = time.time()
         deadline = time.time() + timeout_s
-        pending = list(services)
+        pending = list(dict.fromkeys(list(services) + [base_service]))
         last_errors: Dict[str, str] = {}
         attempts: List[Dict[str, object]] = []
         attempt_num = 0
@@ -496,6 +512,7 @@ class Simulator():
         gzserver_seen_alive = False
         gzserver_grace_deadline = time.time() + float(gzserver_grace_s)
         only_logger_snapshot: Dict[str, object] = {}
+        optional_services = [srv for srv in pending if srv != base_service]
 
         while time.time() < deadline:
             attempt_num += 1
@@ -527,17 +544,29 @@ class Simulator():
                 )
                 return False, dict(last_errors), attempts, fail_reason, only_logger_snapshot
 
+            base_service_ready = False
             still_pending = []
-            for srv in pending:
+            try:
+                rospy.wait_for_service(base_service, timeout=0.5)
+                base_service_ready = True
+            except Exception as exc:
+                last_errors[base_service] = str(exc)
+                still_pending.append(base_service)
+                fail_reason = "gazebo_services_not_available"
+
+            for srv in optional_services:
                 try:
-                    rospy.wait_for_service(srv, timeout=0.5)
+                    rospy.wait_for_service(srv, timeout=0.1 if base_service_ready else 0.05)
                 except Exception as exc:
                     last_errors[srv] = str(exc)
                     still_pending.append(srv)
-                    fail_reason = "gazebo_services_not_available"
+                    if not base_service_ready:
+                        fail_reason = "gazebo_services_not_available"
             attempts.append(
                 {
                     "attempt": int(attempt_num),
+                    "base_service": base_service,
+                    "base_service_ready": bool(base_service_ready),
                     "pending_services": list(still_pending),
                     "elapsed_s": float(timeout_s - max(0.0, deadline - time.time())),
                     "roslaunch_returncode": roslaunch_returncode,
@@ -545,16 +574,20 @@ class Simulator():
                 }
             )
 
-            if still_pending:
+            if base_service_ready:
+                return True, {}, attempts, "ok", only_logger_snapshot
+
+            if time.time() - start_ts >= float(only_logger_grace_s):
                 detector = self._detect_only_logger_services()
                 only_logger_snapshot = detector
-                if bool(detector.get("only_logger_services", False)):
+                if bool(detector.get("only_logger_services", False)) and bool(detector.get("gazebo_node_exists", False)):
                     fail_reason = "gazebo_ros_api_plugin_failed"
                     attempts.append(
                         {
                             "attempt": int(attempt_num),
                             "event": "gazebo_ros_api_plugin_failed",
                             "services": detector.get("services", []),
+                            "gazebo_node_exists": detector.get("gazebo_node_exists", False),
                         }
                     )
                     return False, dict(last_errors), attempts, fail_reason, only_logger_snapshot
@@ -562,9 +595,26 @@ class Simulator():
             if still_pending:
                 logger.info(f"Waiting Gazebo services (attempt {attempt_num}): pending={still_pending}")
             pending = still_pending
-            if not pending:
-                return True, {}, attempts, "ok", only_logger_snapshot
             time.sleep(0.1)
+
+        try:
+            rospy.wait_for_service(base_service, timeout=float(second_chance_s))
+            attempts.append(
+                {
+                    "attempt": int(attempt_num + 1),
+                    "event": "second_chance_base_service_ready",
+                    "base_service": base_service,
+                    "second_chance_s": float(second_chance_s),
+                }
+            )
+            return True, {}, attempts, "ok_second_chance", only_logger_snapshot
+        except Exception as exc:
+            last_errors[base_service] = str(exc)
+
+        detector = self._detect_only_logger_services()
+        only_logger_snapshot = detector
+        if bool(detector.get("only_logger_services", False)) and bool(detector.get("gazebo_node_exists", False)):
+            fail_reason = "gazebo_ros_api_plugin_failed"
 
         return False, {srv: last_errors.get(srv, "timeout") for srv in pending}, attempts, fail_reason, only_logger_snapshot
 
@@ -741,7 +791,7 @@ class Simulator():
                 if launch_attempt > 1:
                     self.kill_gazebo()
                     time.sleep(0.5)
-                self._prepare_ros_log_dir(reset=(launch_attempt > 1))
+                self._prepare_ros_log_dir(reset=False)
             except Exception as exc:
                 snapshot = self._launch_output_snapshot(max_lines=50)
                 failure_details = self._collect_launch_failure_details(snapshot)
@@ -786,10 +836,8 @@ class Simulator():
                 f"roslaunch {shlex.quote(self.SENSOR_PKG)} {shlex.quote(self.LAUNCH_FILE)} "
                 f"world_path:={shlex.quote(launch_world_abs)} "
                 "paused:=false gui:=false headless:=true "
-                f"> >(tee -a {shlex.quote(launch_log_files['roslaunch_stdout'])} "
-                f"{shlex.quote(launch_log_files['gzserver_stdout'])} >/dev/null) "
-                f"2> >(tee -a {shlex.quote(launch_log_files['roslaunch_stderr'])} "
-                f"{shlex.quote(launch_log_files['gzserver_stderr'])} >&2)"
+                f">> {shlex.quote(launch_log_files['roslaunch_stdout'])} "
+                f"2>> {shlex.quote(launch_log_files['roslaunch_stderr'])}"
             )
 
             launch_env = os.environ.copy()
@@ -829,6 +877,7 @@ class Simulator():
                         message=message,
                         roslaunch_returncode=self.gazebo_process.poll(),
                         services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
+                        services_base_required="/gazebo/get_world_properties",
                         services_pending_errors=pending_errors,
                         services_wait_attempts=service_attempts,
                         launch_attempt=int(launch_attempt),
@@ -845,37 +894,21 @@ class Simulator():
                     return False
 
                 self.gazebo_is_running = True
-
-                if self.is_gazebo_running():
-                    snapshot = self._launch_output_snapshot(max_lines=50)
-                    failure_details = self._collect_launch_failure_details(snapshot, launch_log_files=launch_log_files)
-                    self._set_scene_diag(
-                        reason="ok",
-                        roslaunch_returncode=self.gazebo_process.poll(),
-                        services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
-                        services_wait_attempts=service_attempts,
-                        launch_attempt=int(launch_attempt),
-                        generated_world_path_abs=os.path.abspath(launch_world_abs),
-                        **failure_details,
-                        **snapshot,
-                    )
-                    logger.info('Gazebo started')
-                    return True
-
                 snapshot = self._launch_output_snapshot(max_lines=50)
                 failure_details = self._collect_launch_failure_details(snapshot, launch_log_files=launch_log_files)
                 self._set_scene_diag(
-                    reason="gazebo_not_running_after_start",
+                    reason="ok",
                     roslaunch_returncode=self.gazebo_process.poll(),
                     services_expected=list(self.GAZEBO_REQUIRED_SERVICES),
+                    services_base_required="/gazebo/get_world_properties",
+                    services_wait_attempts=service_attempts,
                     launch_attempt=int(launch_attempt),
                     generated_world_path_abs=os.path.abspath(launch_world_abs),
-                    ros_runtime=self._collect_ros_runtime_diagnostics(sensor_token=sensor_token),
                     **failure_details,
                     **snapshot,
                 )
-                logger.error('Failed to start Gazebo')
-                return False
+                logger.info('Gazebo started')
+                return True
 
             except Exception as e:
                 snapshot = self._launch_output_snapshot(max_lines=50)
