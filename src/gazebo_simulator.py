@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import rospy
 from gazebo_msgs.msg import ModelState, ModelStates
-from gazebo_msgs.srv import DeleteModel, GetWorldProperties, SetModelState, SpawnModel
+from gazebo_msgs.srv import DeleteModel, GetModelProperties, GetWorldProperties, SetModelState, SpawnModel
 from geometry_msgs.msg import Point, Pose, Quaternion
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image
@@ -199,6 +199,10 @@ class SimulationManager:
         camera_sensors_root = sensors_root / "camera"
         catkin_plugin_root = Path(self.REPO_ROOT) / "catkin_ws" / "devel" / "lib"
         ros_plugin_root = Path("/opt/ros/noetic/lib")
+        ros_plugin_package_roots = [
+            Path("/opt/ros/noetic/lib/gazebo_plugins"),
+            Path("/opt/ros/noetic/lib/gazebo_ros"),
+        ]
         system_model_roots = [
             Path("/usr/share/gazebo-11/models"),
             Path("/usr/share/gazebo/models"),
@@ -215,7 +219,7 @@ class SimulationManager:
         ]
 
         model_extras = self._existing_dirs([resources_root, models_root, sensors_root, camera_sensors_root] + system_model_roots)
-        plugin_extras = self._existing_dirs([catkin_plugin_root, ros_plugin_root] + system_plugin_roots)
+        plugin_extras = self._existing_dirs([catkin_plugin_root, ros_plugin_root] + ros_plugin_package_roots + system_plugin_roots)
         resource_extras = self._existing_dirs([resources_root] + system_resource_roots)
 
         merged_model_path = self._merge_env_paths(model_extras, env.get("GAZEBO_MODEL_PATH", ""))
@@ -584,18 +588,96 @@ class SimulationManager:
         except Exception as exc:
             return [f"<failed_to_read_log> {exc}"]
 
+    @staticmethod
+    def _read_file_head(path: Path, max_lines: int = 120) -> List[str]:
+        lines: List[str] = []
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f_in:
+                for line in f_in:
+                    lines.append(line.rstrip("\n"))
+                    if len(lines) >= int(max_lines):
+                        break
+            return lines
+        except Exception as exc:
+            return [f"<failed_to_read_log_head> {exc}"]
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        return re.sub(r"\x1B\[[0-?]*[ -/]*[@-~]", "", str(text or ""))
+
+    def _launch_output_lines_for_log_detection(self) -> List[str]:
+        lines: List[str] = []
+        snapshot = self._launch_output_snapshot(max_lines=300)
+        lines.extend(snapshot["launch_stdout_tail"])
+        lines.extend(snapshot["launch_stderr_tail"])
+
+        for path_str in self._scene_log_files.values():
+            path = Path(str(path_str or ""))
+            if not path.exists() or not path.is_file():
+                continue
+            lines.extend(self._read_file_head(path, max_lines=120))
+            lines.extend(self._read_file_tail(path, max_lines=40))
+
+        deduped: List[str] = []
+        for line in lines:
+            clean = self._strip_ansi(str(line).strip())
+            if clean and clean not in deduped:
+                deduped.append(clean)
+        return deduped
+
+    def _detect_roslaunch_log_dir(self) -> Dict[str, str]:
+        roslaunch_log_path = ""
+        for line in self._launch_output_lines_for_log_detection():
+            match = re.search(r"logging to\s+(.+?\.log)\s*$", line)
+            if match:
+                roslaunch_log_path = match.group(1).strip().strip("\"'")
+
+        if not roslaunch_log_path:
+            return {
+                "roslaunch_log_path_detected": "",
+                "gazebo_log_dir_detected": "",
+                "path_to_gazebo1_log": "",
+            }
+
+        try:
+            roslaunch_log = Path(roslaunch_log_path).expanduser().resolve()
+        except Exception:
+            roslaunch_log = Path(roslaunch_log_path).expanduser()
+        log_dir = roslaunch_log.parent
+        return {
+            "roslaunch_log_path_detected": str(roslaunch_log),
+            "gazebo_log_dir_detected": str(log_dir),
+            "path_to_gazebo1_log": str(log_dir / "gazebo-1.log"),
+        }
+
     def _collect_latest_gazebo_log_tail(self, max_lines: int = 200) -> Dict[str, object]:
-        search_roots = [
-            Path(self.ROS_LOG_PATH),
-            Path.home() / ".ros" / "log" / "latest",
-            Path.home() / ".ros" / "log",
-        ]
-        patterns = ("gazebo-*.log", "gzserver-*.log")
+        detected = self._detect_roslaunch_log_dir()
+        detected_log_dir = Path(str(detected.get("gazebo_log_dir_detected", "") or "")).expanduser()
+        search_roots: List[Path] = []
+        if str(detected.get("gazebo_log_dir_detected", "")).strip():
+            search_roots.append(detected_log_dir)
+        search_roots.extend(
+            [
+                Path(self.ROS_LOG_PATH),
+                Path.home() / ".ros" / "log" / "latest",
+                Path.home() / ".ros" / "log",
+            ]
+        )
+        patterns = (
+            "gazebo-1.log",
+            "gazebo.log",
+            "gazebo-*.log",
+            "gzserver-*.log",
+            "server-*.log",
+            "*.log",
+        )
         searched_paths: List[str] = []
         candidates: List[Path] = []
 
         for root in search_roots:
-            searched_paths.append(str(root))
+            root_str = str(root)
+            if root_str and root_str not in searched_paths:
+                searched_paths.append(root_str)
             if not root.exists() or not root.is_dir():
                 continue
             for pattern in patterns:
@@ -611,13 +693,51 @@ class SimulationManager:
                 "path": "",
                 "tail": ["<gazebo-log-not-found>"],
                 "searched_paths": searched_paths,
+                "gazebo_log_dir_detected": str(detected.get("gazebo_log_dir_detected", "")),
+                "path_to_gazebo1_log": str(detected.get("path_to_gazebo1_log", "")),
+                "roslaunch_log_path_detected": str(detected.get("roslaunch_log_path_detected", "")),
             }
 
-        chosen = sorted(candidates, key=lambda p: p.stat().st_mtime)[-1]
+        def _mtime(path: Path) -> float:
+            try:
+                return float(path.stat().st_mtime)
+            except Exception:
+                return 0.0
+
+        def _basename_rank(path: Path) -> int:
+            name = path.name.lower()
+            if name == "gazebo-1.log":
+                return 0
+            if re.fullmatch(r"gazebo-\d+\.log", name):
+                return 1
+            if name == "gazebo.log":
+                return 2
+            if name.startswith("gzserver-"):
+                return 3
+            if name.startswith("server-"):
+                return 4
+            if "gazebo" in name:
+                return 5
+            if name.startswith("roslaunch-"):
+                return 9
+            return 6
+
+        chosen = sorted(
+            candidates,
+            key=lambda path: (
+                0 if str(detected.get("gazebo_log_dir_detected", "")) and path.parent == detected_log_dir else 1,
+                _basename_rank(path),
+                -_mtime(path),
+                str(path),
+            ),
+        )[0]
         return {
             "path": str(chosen),
             "tail": self._read_file_tail(chosen, max_lines=max_lines),
             "searched_paths": searched_paths,
+            "gazebo_log_dir_detected": str(detected.get("gazebo_log_dir_detected", "")),
+            "path_to_gazebo1_log": str(detected.get("path_to_gazebo1_log", "")),
+            "roslaunch_log_path_detected": str(detected.get("roslaunch_log_path_detected", "")),
         }
 
     def _collect_runtime_diag(self, expected_topics: Optional[List[str]] = None) -> Dict[str, object]:
@@ -646,10 +766,14 @@ class SimulationManager:
             "rostopic_list_cmd": rostopic_dump,
             "rosservice_list_cmd": rosservice_dump,
             "rosnode_list_cmd": rosnode_dump,
-            "gazebo_log_tail": self._collect_latest_gazebo_log_tail(max_lines=200),
             "scene_log_files": dict(self._scene_log_files),
             "launch_env": scene.get("launch_env", {}),
         }
+        gazebo_log_info = self._collect_latest_gazebo_log_tail(max_lines=200)
+        diag["gazebo_log_tail"] = gazebo_log_info
+        diag["gazebo_log_dir_detected"] = gazebo_log_info.get("gazebo_log_dir_detected", "")
+        diag["path_to_gazebo1_log"] = gazebo_log_info.get("path_to_gazebo1_log", "")
+        diag["roslaunch_log_path_detected"] = gazebo_log_info.get("roslaunch_log_path_detected", "")
         return diag
 
     def collect_failure_diagnostics(self, expected_topics: Optional[List[str]] = None) -> Dict[str, object]:
@@ -879,6 +1003,41 @@ class SimulationManager:
             diag["exception"] = str(exc)
             return False, diag
 
+    def _get_model_properties_diag(self, model_name: str) -> Dict[str, object]:
+        diag: Dict[str, object] = {
+            "model_name": str(model_name or ""),
+            "success": False,
+            "status_message": "",
+            "parent_model_name": "",
+            "canonical_body_name": "",
+            "body_names": [],
+            "geom_names": [],
+            "joint_names": [],
+            "child_model_names": [],
+            "is_static": None,
+            "exception": "",
+        }
+        if not str(model_name or "").strip():
+            diag["status_message"] = "model_name is empty"
+            return diag
+
+        try:
+            rospy.wait_for_service("/gazebo/get_model_properties", timeout=5.0)
+            get_model_properties = rospy.ServiceProxy("/gazebo/get_model_properties", GetModelProperties)
+            response = get_model_properties(str(model_name))
+            diag["success"] = bool(response.success)
+            diag["status_message"] = str(response.status_message or "")
+            diag["parent_model_name"] = str(getattr(response, "parent_model_name", "") or "")
+            diag["canonical_body_name"] = str(getattr(response, "canonical_body_name", "") or "")
+            diag["body_names"] = [str(item) for item in getattr(response, "body_names", [])]
+            diag["geom_names"] = [str(item) for item in getattr(response, "geom_names", [])]
+            diag["joint_names"] = [str(item) for item in getattr(response, "joint_names", [])]
+            diag["child_model_names"] = [str(item) for item in getattr(response, "child_model_names", [])]
+            diag["is_static"] = bool(getattr(response, "is_static", False))
+        except Exception as exc:
+            diag["exception"] = str(exc)
+        return diag
+
     def open_scene(
         self,
         world_path: str,
@@ -1029,6 +1188,9 @@ class SimulationManager:
             )
             self.kill_gazebo()
             return False
+
+        model_properties_after_spawn = self._get_model_properties_diag(sensor_model_name)
+        self._set_scene_diag(model_properties_after_spawn=model_properties_after_spawn)
 
         topics_after_spawn_cmd = self._run_shell_capture("rostopic list || true", timeout_s=6.0, max_lines=500)
         topics_after_spawn = [
