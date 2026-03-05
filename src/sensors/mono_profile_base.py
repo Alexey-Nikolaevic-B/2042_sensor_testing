@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 import xml.etree.ElementTree as ET
 from math import atan, degrees
@@ -336,6 +337,168 @@ class MonoProfileBase(MonoCamera):
         simulator.set_pose(model_name, x=x, y=y, z=z)
         time.sleep(settle_s)
 
+    @staticmethod
+    def _c4_run_shell_capture(cmd: str, timeout_s: float = 5.0, max_lines: int = 200) -> Dict[str, Any]:
+        try:
+            res = subprocess.run(
+                ["bash", "-lc", cmd],
+                capture_output=True,
+                text=True,
+                timeout=float(timeout_s),
+                check=False,
+            )
+            return {
+                "cmd": str(cmd),
+                "returncode": int(res.returncode),
+                "stdout_tail": (res.stdout or "").splitlines()[-int(max_lines):],
+                "stderr_tail": (res.stderr or "").splitlines()[-int(max_lines):],
+            }
+        except Exception as exc:
+            return {
+                "cmd": str(cmd),
+                "returncode": None,
+                "stdout_tail": [],
+                "stderr_tail": [str(exc)],
+            }
+
+    @staticmethod
+    def _c4_read_latest_gzserver_log_tail(max_lines: int = 200) -> Dict[str, Any]:
+        latest_dir = Path.home() / ".ros" / "log" / "latest"
+        candidates: List[Path] = []
+        if latest_dir.exists():
+            candidates.extend(sorted(latest_dir.glob("gzserver-*.log")))
+            candidates.extend(sorted(latest_dir.glob("gazebo-*.log")))
+        if not candidates:
+            ros_log_root = Path.home() / ".ros" / "log"
+            if ros_log_root.exists():
+                candidates.extend(sorted(ros_log_root.rglob("gzserver-*.log")))
+                candidates.extend(sorted(ros_log_root.rglob("gazebo-*.log")))
+        if not candidates:
+            return {"path": "", "tail": ["<gazebo-log-not-found>"]}
+
+        path = sorted(candidates, key=lambda p: p.stat().st_mtime if p.exists() else 0.0)[-1]
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as f_in:
+                lines = f_in.read().splitlines()
+            return {"path": str(path), "tail": lines[-int(max_lines):]}
+        except Exception as exc:
+            return {"path": str(path), "tail": [f"<gazebo-log-read-error> {exc}"]}
+
+    def _c4_collect_scene_open_diagnostics(self) -> Dict[str, Any]:
+        rosservice_full = self._c4_run_shell_capture(
+            "rosservice list | grep '^/gazebo/' || true",
+            timeout_s=6.0,
+            max_lines=400,
+        )
+        rosnode_info = self._c4_run_shell_capture(
+            "rosnode info /gazebo || true",
+            timeout_s=6.0,
+            max_lines=200,
+        )
+        rostopic_gazebo_clock = self._c4_run_shell_capture(
+            "rostopic list | grep -E '^/clock$|^/gazebo/' || true",
+            timeout_s=6.0,
+            max_lines=300,
+        )
+        gz_pid_info = self._c4_run_shell_capture(
+            "pgrep -f '(^|/)gzserver([[:space:]]|$)' | head -n 1 || true",
+            timeout_s=3.0,
+            max_lines=10,
+        )
+        gz_pid = ""
+        for line in gz_pid_info.get("stdout_tail", []):
+            s = str(line).strip()
+            if s.isdigit():
+                gz_pid = s
+                break
+        if gz_pid:
+            gzserver_ps = self._c4_run_shell_capture(
+                f"ps -fp {gz_pid} || true",
+                timeout_s=3.0,
+                max_lines=80,
+            )
+        else:
+            gzserver_ps = {
+                "cmd": "ps -fp <gzserver_pid>",
+                "returncode": 0,
+                "stdout_tail": [],
+                "stderr_tail": ["gzserver pid not found"],
+            }
+
+        return {
+            "rosservice_gazebo_full": rosservice_full,
+            "rosnode_info_gazebo": rosnode_info,
+            "rostopic_gazebo_clock": rostopic_gazebo_clock,
+            "gzserver_ps": gzserver_ps,
+            "gazebo_log_tail": self._c4_read_latest_gzserver_log_tail(max_lines=200),
+        }
+
+    @staticmethod
+    def _c4_classify_scene_reason(last_reason: str, diagnostics: Dict[str, Any]) -> Tuple[str, str]:
+        reason = str(last_reason or "gazebo_api_timeout")
+        rosservice = diagnostics.get("rosservice_gazebo_full", {})
+        services = [
+            str(line).strip()
+            for line in rosservice.get("stdout_tail", [])
+            if str(line).strip().startswith("/gazebo/")
+        ]
+        service_set = set(services)
+        only_logger_services = service_set == {"/gazebo/get_loggers", "/gazebo/set_logger_level"}
+        if only_logger_services:
+            return (
+                "gazebo_only_logger_services",
+                "gazebo_ros_api_plugin likely not initialized (only logger services present)",
+            )
+        if reason in ("gzserver_died", "roslaunch_exited"):
+            return ("gzserver_died_early", "gzserver died before Gazebo API services became available")
+        return ("gazebo_api_timeout", "Gazebo API services timeout; see diagnostics: rosservice_gazebo_full / gazebo_log_tail")
+
+    def _open_c4_scene_with_retry(self, simulator) -> None:
+        world = self.test_to_world["c4_geometries_presence_test"]
+        original_timeout = float(getattr(simulator, "GAZEBO_SERVICES_TIMEOUT_S", 45.0))
+        extended_timeout = max(110.0, original_timeout)
+        attempts: List[Dict[str, Any]] = []
+        last_reason = "unknown"
+
+        try:
+            for attempt in (1, 2):
+                if attempt == 2:
+                    simulator.kill_gazebo()
+                    time.sleep(1.0)
+                simulator.GAZEBO_SERVICES_TIMEOUT_S = float(extended_timeout)
+
+                opened = simulator.open_scene(world, self.sensor_sdf_path)
+                scene_diag = simulator.get_last_scene_diagnostics() if hasattr(simulator, "get_last_scene_diagnostics") else {}
+                last_reason = str(scene_diag.get("reason", "unknown")) if isinstance(scene_diag, dict) else "unknown"
+                attempts.append({"attempt": int(attempt), "opened": bool(opened), "reason": last_reason})
+                if opened:
+                    rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+                    rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+                    return
+
+                if attempt == 1 and last_reason == "gazebo_services_not_available":
+                    continue
+                break
+        finally:
+            simulator.GAZEBO_SERVICES_TIMEOUT_S = float(original_timeout)
+
+        extra_diag = self._c4_collect_scene_open_diagnostics()
+        classified_reason, classified_msg = self._c4_classify_scene_reason(last_reason, extra_diag)
+        if hasattr(simulator, "_set_scene_diag") and callable(simulator._set_scene_diag):
+            simulator._set_scene_diag(
+                reason=classified_reason,
+                message=classified_msg,
+                c4_scene_open_retry={
+                    "extended_timeout_s": float(extended_timeout),
+                    "attempts": attempts,
+                },
+                **extra_diag,
+            )
+        raise RuntimeError(
+            f"Failed to open scene for c4_geometries_presence_test (reason={classified_reason}). "
+            f"See diagnostics: rosservice_gazebo_full / gazebo_log_tail"
+        )
+
     def c1_size_order_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
@@ -397,7 +560,7 @@ class MonoProfileBase(MonoCamera):
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {"pixel_counts": {}, "threshold": int(self.C4_MIN_PIXELS)}
 
-        self._open_test_scene(simulator, "c4_geometries_presence_test")
+        self._open_c4_scene_with_retry(simulator)
         msg = self._wait_image(timeout=35.0)
         frame = self._msg_to_bgr(msg)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
