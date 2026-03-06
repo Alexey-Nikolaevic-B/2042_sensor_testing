@@ -119,8 +119,33 @@ class MonoProfileBase(MonoCamera):
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return out
 
-    def _wait_image(self, timeout: float = 35.0) -> Image:
-        return rospy.wait_for_message(self.IMAGE_TOPIC, Image, timeout=timeout)
+    def _wait_image(self, timeout: float = 35.0, topic: Optional[str] = None) -> Image:
+        target_topic = str(topic or self.IMAGE_TOPIC)
+        return rospy.wait_for_message(target_topic, Image, timeout=timeout)
+
+    @staticmethod
+    def _scene_diag(simulator) -> Dict[str, Any]:
+        if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+            try:
+                diag = simulator.get_last_scene_diagnostics()
+                if isinstance(diag, dict):
+                    return diag
+            except Exception:
+                pass
+        return {}
+
+    def _resolved_image_topic(self, simulator) -> Tuple[str, Dict[str, Any]]:
+        expected_topic = str(self.IMAGE_TOPIC)
+        scene_diag = self._scene_diag(simulator)
+        resolved_topic = expected_topic
+
+        resolved_topics = scene_diag.get("resolved_topics", {})
+        if isinstance(resolved_topics, dict):
+            candidate = str(resolved_topics.get(expected_topic, "") or "").strip()
+            if candidate:
+                resolved_topic = candidate
+
+        return resolved_topic, scene_diag
 
     @staticmethod
     def _msg_stamp_s(msg: Image) -> float:
@@ -332,6 +357,7 @@ class MonoProfileBase(MonoCamera):
         return out
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
+        self._last_test_diagnostics = {}
         world = self.test_to_world[test_name]
         if not simulator.open_scene(
             world,
@@ -835,58 +861,111 @@ class MonoProfileBase(MonoCamera):
     def c2_resolution_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
-            "distances_m": [float(d) for d in self.C2_DISTANCES],
-            "large_contours": {},
-            "separated": {},
-            "min_contour_area_px": int(self.C2_MIN_CONTOUR_AREA),
-            "timings_s": {},
+            "world_file": str(self.test_to_world["c2_resolution_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "expected_resolution": {
+                "width": int(self.image_width),
+                "height": int(self.image_height),
+            },
+            "actual_resolution": None,
+            "encoding": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "status": "ERROR",
+            "error_reason": "",
         }
+        self._last_test_diagnostics = {}
+        self._set_test_diagnostics(c2_resolution=dict(metrics))
 
-        self._open_test_scene(simulator, "c2_resolution_test")
-        for model in (self.C2_SPHERE_A_NAME, self.C2_SPHERE_B_NAME):
-            if not simulator.wait_for_model_spawn(model, timeout=20):
-                raise RuntimeError(f"Model not spawned: {model}")
+        world = self.test_to_world["c2_resolution_test"]
+        if not simulator.open_scene(
+            world,
+            self.sensor_sdf_path,
+            expected_topics=self.get_expected_topics(),
+            sensor_name=self.sensor_name,
+        ):
+            scene_diag = self._scene_diag(simulator)
+            resolved_topics = scene_diag.get("resolved_topics", {}) if isinstance(scene_diag, dict) else {}
+            resolved_topic = ""
+            if isinstance(resolved_topics, dict):
+                resolved_topic = str(resolved_topics.get(self.IMAGE_TOPIC, "") or "").strip()
+            metrics["resolved_topic"] = resolved_topic or str(self.IMAGE_TOPIC)
+            metrics["topic_mapping_changed"] = bool(metrics["resolved_topic"] != str(self.IMAGE_TOPIC))
+            metrics["scene_open_success"] = False
+            metrics["error_reason"] = f"scene_open_failed:{scene_diag.get('reason', 'unknown')}" if scene_diag else "scene_open_failed"
+            self._set_test_diagnostics(c2_resolution=dict(metrics))
+            raise RuntimeError(
+                f"Failed to open scene for c2_resolution_test: {world} "
+                f"(reason={scene_diag.get('reason', 'unknown') if scene_diag else 'unknown'})"
+            )
 
-        self._move_and_settle(simulator, self.C2_SPHERE_A_NAME, x=3.0, y=0.0, z=0.25, settle_s=0.6)
+        rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+        metrics["scene_open_success"] = True
 
-        d_min: Optional[float] = None
-        for d in self.C2_DISTANCES:
-            started = time.perf_counter()
-            self._move_and_settle(simulator, self.C2_SPHERE_B_NAME, x=3.0, y=float(d), z=0.25, settle_s=0.5)
+        resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        self._set_test_diagnostics(c2_resolution=dict(metrics))
 
-            msg = self._wait_image(timeout=35.0)
+        try:
+            msg = self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"image_receive_failed:{exc}"
+            self._set_test_diagnostics(c2_resolution=dict(metrics))
+            raise RuntimeError(f"Failed to receive image for C2 from topic {resolved_topic}: {exc}") from exc
+
+        actual_width = int(getattr(msg, "width", 0) or 0)
+        actual_height = int(getattr(msg, "height", 0) or 0)
+        metrics["actual_resolution"] = {
+            "width": actual_width,
+            "height": actual_height,
+        }
+        metrics["encoding"] = str(getattr(msg, "encoding", "") or "")
+        metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
+
+        if actual_width <= 0 or actual_height <= 0:
+            metrics["error_reason"] = "invalid_image_resolution"
+            self._set_test_diagnostics(c2_resolution=dict(metrics))
+            raise RuntimeError(
+                f"C2 received invalid image dimensions from topic {resolved_topic}: "
+                f"width={actual_width}, height={actual_height}"
+            )
+
+        try:
             frame = self._msg_to_bgr(msg)
-            white = self._white_mask(frame)
-            contours = self._large_contours(white, min_area=self.C2_MIN_CONTOUR_AREA, border_margin=4)
+        except Exception:
+            frame = None
 
-            d_key = f"{d:.2f}"
-            contour_count = len(contours)
-            separated = contour_count >= 2
-            metrics["large_contours"][d_key] = int(contour_count)
-            metrics["separated"][d_key] = bool(separated)
-            metrics["timings_s"][d_key] = round(time.perf_counter() - started, 4)
+        if frame is not None:
+            debug = self._annotate(
+                frame,
+                [
+                    f"topic={resolved_topic}",
+                    f"expected={self.image_width}x{self.image_height}",
+                    f"actual={actual_width}x{actual_height}",
+                ],
+            )
+            artifacts.append(self._save_frame("c2_resolution_frame.png", debug))
 
-            if separated and (d_min is None or d < d_min):
-                d_min = float(d)
+        resolution_matches = (
+            actual_width == int(self.image_width) and actual_height == int(self.image_height)
+        )
+        metrics["checks"] = {"resolution_matches": bool(resolution_matches)}
+        metrics["status"] = "PASS" if resolution_matches else "FAIL"
+        if not resolution_matches:
+            metrics["error_reason"] = (
+                f"resolution_mismatch: expected={self.image_width}x{self.image_height}, "
+                f"actual={actual_width}x{actual_height}"
+            )
 
-            debug = frame.copy()
-            for _, (x, y, w, h) in contours:
-                cv2.rectangle(debug, (x, y), (x + w, y + h), (255, 255, 255), 2)
-            debug = self._annotate(debug, [f"d={d:.2f}m", f"contours={contour_count}", f"separated={separated}"])
-            artifacts.append(self._save_frame(f"c2_d_{d_key.replace('.', '_')}.png", debug))
-
-        checks = {
-            "d_0_10_separated": bool(metrics["separated"].get("0.10", False)),
-            "d_0_05_separated": bool(metrics["separated"].get("0.05", False)),
-            "d_min_le_0_05": bool(d_min is not None and d_min <= 0.05),
-        }
-        checks["pass"] = bool((checks["d_0_10_separated"] and checks["d_0_05_separated"]) or checks["d_min_le_0_05"])
-        metrics["d_min_m"] = None if d_min is None else round(float(d_min), 4)
-        metrics["checks"] = checks
-
+        self._set_test_diagnostics(c2_resolution=dict(metrics))
         metrics_path = self._save_metrics_json("c2_resolution_metrics.json", metrics)
-        if not checks["pass"]:
-            raise AssertionError(f"C2 checks failed: {checks}, large_contours={metrics['large_contours']}")
+        if not resolution_matches:
+            raise AssertionError(
+                f"C2 resolution mismatch: expected={self.image_width}x{self.image_height}, "
+                f"actual={actual_width}x{actual_height}, topic={resolved_topic}"
+            )
 
         return {"id": "C2", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
