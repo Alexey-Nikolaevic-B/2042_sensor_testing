@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ColCapture</class>
+ <widget class="QWidget" name="ColCapture">
+  <property name="minimumWidth"><number>220</number></property>
+  <layout class="QVBoxLayout" name="layout_root">
+   <property name="spacing"><number>0</number></property>
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item>
+    <widget class="QLabel" name="lbl_capture_image">
+     <property name="text"><string>no data captured</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="minimumHeight"><number>180</number></property>
+     <property name="maximumHeight"><number>220</number></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QWidget" name="wt_toolbar_top">
+     <property name="minimumHeight"><number>44</number></property>
+     <property name="maximumHeight"><number>44</number></property>
+     <layout class="QHBoxLayout" name="toolbar_top_layout">
+      <property name="spacing"><number>4</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>4</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>4</number></property>
+      <item>
+       <widget class="QPushButton" name="btn_capture">
+        <property name="text"><string>Capture</string></property>
+        <property name="minimumHeight"><number>32</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_save_capture">
+        <property name="text"><string/></property>
+        <property name="toolTip"><string>Save log</string></property>
+        <property name="minimumWidth"><number>32</number></property>
+        <property name="maximumWidth"><number>32</number></property>
+        <property name="minimumHeight"><number>32</number></property>
+        <property name="maximumHeight"><number>32</number></property>
+       </widget>
+      </item>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+       </spacer>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lbl_log">
+     <property name="text"><string/></property>
+     <property name="alignment"><set>Qt::AlignTop|Qt::AlignLeft</set></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property>
+    </spacer>
+   </item>
+   <item>
+    <widget class="QWidget" name="wt_toolbar_bottom">
+     <property name="minimumHeight"><number>44</number></property>
+     <property name="maximumHeight"><number>44</number></property>
+     <layout class="QHBoxLayout" name="toolbar_bottom_layout">
+      <property name="spacing"><number>4</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>4</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>4</number></property>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_clear_log">
+        <property name="text"><string/></property>
+        <property name="toolTip"><string>Clear log</string></property>
+        <property name="minimumWidth"><number>32</number></property>
+        <property name="maximumWidth"><number>32</number></property>
+        <property name="minimumHeight"><number>32</number></property>
+        <property name="maximumHeight"><number>32</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_copy_log">
+        <property name="text"><string/></property>
+        <property name="toolTip"><string>Copy log</string></property>
+        <property name="minimumWidth"><number>32</number></property>
+        <property name="maximumWidth"><number>32</number></property>
+        <property name="minimumHeight"><number>32</number></property>
+        <property name="maximumHeight"><number>32</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

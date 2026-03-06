@@ -1,19 +1,3 @@
-"""
-sensor_repository.py
-
-Single source of truth for sensor data in the UI layer.
-Reads from and writes to SQLite via sensor_storage.py.
-Emits Qt signals whenever data changes so every widget stays in sync.
-
-Signals
--------
-sensor_added   (dict)      – a new sensor was registered
-sensor_updated (dict)      – an existing sensor's data changed
-sensor_deleted (str)       – sensor was removed (emits sensor id string)
-sensors_loaded ()          – full dataset was (re)loaded from DB
-test_updated   (str, dict) – a test result changed (sensor id, test dict)
-"""
-
 import copy
 from datetime import datetime
 
@@ -22,15 +6,8 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import src.database.sensor_storage as db
 
 
-# ── Sensor value object ───────────────────────────────────────────────────────
 
 class Sensor:
-    """
-    Thin wrapper around a plain dict.
-    Supports both attribute access (sensor.name) and dict access (sensor['name'])
-    so all existing UI code works without changes.
-    """
-
     REQUIRED_FIELDS = ("id", "name", "type")
 
     def __init__(self, data: dict):
@@ -93,14 +70,7 @@ class Sensor:
         return f"<Sensor id={self.id!r} name={self.name!r}>"
 
 
-# ── Repository ────────────────────────────────────────────────────────────────
-
 class SensorRepository(QObject):
-    """
-    Observable store backed by SQLite through sensor_storage.
-    Construct once in __main__ then call SensorRepository.instance() anywhere.
-    """
-
     sensor_added   = pyqtSignal(dict)
     sensor_updated = pyqtSignal(dict)
     sensor_deleted = pyqtSignal(str)
@@ -122,10 +92,8 @@ class SensorRepository(QObject):
         db.init_db()
         self.load()
 
-    # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(self):
-        """Reload everything from the database."""
         self._sensors.clear()
         for raw in db.get_all_sensors():
             try:
@@ -133,10 +101,8 @@ class SensorRepository(QObject):
                 self._sensors[s.id] = s
             except (TypeError, ValueError) as exc:
                 print(f"[SensorRepository] Skipping invalid sensor: {exc}")
-        print(f"[SensorRepository] Loaded {len(self._sensors)} sensors from DB")
         self.sensors_loaded.emit()
 
-    # ── Read ──────────────────────────────────────────────────────────────────
 
     def all_sensors(self) -> list[dict]:
         return [s.to_dict() for s in self._sensors.values()]
@@ -157,10 +123,8 @@ class SensorRepository(QObject):
     def count(self) -> int:
         return len(self._sensors)
 
-    # ── Write ─────────────────────────────────────────────────────────────────
 
     def add_sensor(self, data: dict) -> dict:
-        """Register a new sensor in the DB and notify the UI."""
         db.add_sensor(
             sensor_name = data["name"],
             sensor_type = data["type"],
@@ -207,7 +171,6 @@ class SensorRepository(QObject):
         description: str = "",
         duration: float = 0.0,
     ) -> dict:
-        """Persist a test result, update in-memory state, emit test_updated."""
         s = self._sensors.get(sensor_id)
         if s is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
