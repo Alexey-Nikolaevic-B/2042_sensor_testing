@@ -61,7 +61,7 @@ def _start_simulator_init(core: Core, on_log, on_fail):
         on_log("Initialising ROS node...")
         core.simulator.launch_node()
         if core.simulator.node_is_running:
-            on_log("✔ Simulator ready — you can now run tests.")
+            on_log("✔ Simulator ready you can now run tests.")
         else:
             on_fail("✘ ROS node failed to initialise (check ROS logs).")
 

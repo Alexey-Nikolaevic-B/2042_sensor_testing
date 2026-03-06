@@ -1,14 +1,3 @@
-"""
-sensor_storage.py
-
-SQLite persistence layer for sensors and their test results.
-
-Tables
-------
-Sensors     — one row per registered sensor
-TestResults — one row per test run, FK → Sensors.id
-"""
-
 import sqlite3
 import json
 from datetime import datetime
@@ -42,8 +31,6 @@ CREATE TABLE IF NOT EXISTS TestResults (
 );
 """
 
-
-# ── Internal helpers (defined first so all functions below can use them) ──────
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DATABASE)
@@ -88,7 +75,6 @@ def _row_to_test_dict(row: sqlite3.Row) -> dict:
     }
 
 
-# ── Init ──────────────────────────────────────────────────────────────────────
 
 def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
@@ -96,7 +82,6 @@ def init_db() -> None:
         conn.executescript(_SCHEMA)
 
 
-# ── Sensors ───────────────────────────────────────────────────────────────────
 
 def add_sensor(
     sensor_name: str,
@@ -201,7 +186,6 @@ def get_sensor_types() -> list[str]:
     return [r["sensor_type"] for r in rows]
 
 
-# ── Test results ──────────────────────────────────────────────────────────────
 
 def save_test_result(
     sensor_name: str,
@@ -278,8 +262,6 @@ def get_test_history(sensor_name: str, test_name: str) -> list[dict]:
         ).fetchall()
     return [_row_to_test_dict(r) for r in rows]
 
-
-# ── Backwards-compatible alias ────────────────────────────────────────────────
 
 def get_sensors() -> list[tuple]:
     """Original API: returns (id, sensor_name, sensor_type, sdf_path) tuples."""

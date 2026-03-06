@@ -108,7 +108,7 @@ class _TestWorker(QObject):
                 status = "Passed" if passed else "Failed"
                 mark   = "Suc" if passed else "✘"
 
-                self.log_line.emit(f"{mark}  {test_name} — {status}  ({duration:.1f}s)")
+                self.log_line.emit(f"{mark}  {test_name}  {status}  ({duration:.1f}s)")
                 if isinstance(result, dict):
                     for k, v in result.items():
                         if k != "passed":

@@ -1,12 +1,13 @@
 from datetime import datetime
 
 from PyQt5.QtWidgets import QWidget, QSizePolicy
-from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
 from .theme import Colors, Styles, Icons, Layout, QT_DIR
 from .ui_test_item import TestItem
+from .ui_col_2 import DESCRIPTION_STYLE, IMAGE_H, TOOLBAR_H, NAME_H, DESC_H
 
 
 class ColTests(QWidget):
@@ -21,12 +22,12 @@ class ColTests(QWidget):
         self._repo   = None
         self._sensor_backend = None
         self._test_widgets: dict[str, TestItem] = {}
-        self._runner_log_forward = None  # set by Main_UI to route logs to ColCapture
+        self._selected_test: str | None = None
+        self._runner_log_forward = None
 
+        self._enforce_heights()
         self._setup_styles()
         self._connect_signals()
-
-    # ── Public ────────────────────────────────────────────────────────────────
 
     def set_runner(self, runner, repo):
         self._runner = runner
@@ -36,8 +37,7 @@ class ColTests(QWidget):
         runner.test_finished.connect(self._on_test_finished)
         runner.all_finished.connect(self._on_all_finished)
         runner.error.connect(self._on_test_error)
-        # Forward log lines to ColCapture if already wired by Main_UI
-        if hasattr(self, '_runner_log_forward') and self._runner_log_forward:
+        if self._runner_log_forward:
             runner.log_line.connect(self._runner_log_forward)
 
     def load_sensor(self, sensor_data: dict):
@@ -48,19 +48,19 @@ class ColTests(QWidget):
         self._populate_tests(sensor_data.get("tests", []))
 
     def append_log(self, text: str):
-        # Forwarded to ColCapture via the parent MainWindow
-        # also shown in col_capture; col_tests just surfaces status
         pass
 
-    # ── Runner slots ──────────────────────────────────────────────────────────
-
     def _on_log_line(self, text: str):
-        pass  # ColCapture handles logs
+        pass
 
     def _on_test_started(self, test_name: str):
         w = self._test_widgets.get(test_name)
         if w:
             w.set_running(True)
+        else:
+            for widget in self._test_widgets.values():
+                if widget.is_running:
+                    widget.set_running(True)
 
     def _on_test_finished(self, test_name: str, result: dict, status: str, duration: float):
         w = self._test_widgets.get(test_name)
@@ -69,6 +69,11 @@ class ColTests(QWidget):
             w.test_status = status
             w.test_result = self._fmt_result(result)
             w.refresh()
+        else:
+            for widget in self._test_widgets.values():
+                if widget.is_running:
+                    widget.is_running = False
+                    widget.refresh()
         if self._repo and self._sensor_id:
             try:
                 self._repo.save_test_result(
@@ -78,10 +83,14 @@ class ColTests(QWidget):
                     result=result,
                     duration=duration,
                 )
-            except Exception as exc:
-                pass  # logged in ColCapture
+            except Exception:
+                pass
 
     def _on_all_finished(self):
+        for w in self._test_widgets.values():
+            if w.is_running:
+                w.is_running = False
+                w.refresh()
         self.btn_run_all.setEnabled(True)
 
     def _on_test_error(self, test_name: str, message: str):
@@ -91,8 +100,12 @@ class ColTests(QWidget):
             w.test_status = "Failed"
             w.test_result = f"Error: {message}"
             w.refresh()
-
-    # ── TestItem slots ────────────────────────────────────────────────────────
+        else:
+            for widget in self._test_widgets.values():
+                if widget.is_running:
+                    widget.is_running = False
+                    widget.test_status = "Failed"
+                    widget.refresh()
 
     def _on_item_run(self, test_name: str):
         if not self._can_run():
@@ -108,7 +121,15 @@ class ColTests(QWidget):
         if w:
             w.set_running(False)
 
-    # ── UI button slots ───────────────────────────────────────────────────────
+    def _on_item_selected(self, test_name: str):
+        if self._selected_test and self._selected_test in self._test_widgets:
+            self._test_widgets[self._selected_test].set_selected(False)
+        self._selected_test = test_name
+        w = self._test_widgets.get(test_name)
+        if w:
+            w.set_selected(True)
+            self.lbl_selected_test_name.setText(w.test_name)
+            self.lbl_test_description.setText(w.test_description)
 
     def _on_run_all(self):
         if not self._can_run():
@@ -117,12 +138,6 @@ class ColTests(QWidget):
             w.set_running(True)
         self.btn_run_all.setEnabled(False)
         self._runner.run_tests(self._sensor_backend)
-
-    def _on_test_description_update(self):
-        # called when a test item is clicked to show its description
-        pass
-
-    # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _can_run(self) -> bool:
         return self._runner is not None and self._sensor_backend is not None
@@ -165,34 +180,39 @@ class ColTests(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._test_widgets.clear()
+        self._selected_test = None
+        self.lbl_selected_test_name.setText("")
+        self.lbl_test_description.setText("")
 
         for test_data in tests:
             w = TestItem(parent=self)
             w.load(test_data)
             w.run_requested.connect(self._on_item_run)
             w.stop_requested.connect(self._on_item_stop)
-            w.run_requested.connect(
-                lambda name: self.lbl_test_description.setText(
-                    self._test_widgets[name].test_description
-                    if name in self._test_widgets else ""
-                )
-            )
+            w.selected.connect(self._on_item_selected)
             layout.addWidget(w)
             self._test_widgets[test_data["name"]] = w
 
-        layout.addStretch(1)
+        filler = QWidget()
+        filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        filler.setStyleSheet(f"background-color: {Colors.BG_COLUMN};")
+        layout.addWidget(filler)
 
     @staticmethod
     def _fmt_result(result) -> str:
         if not result:
             return ""
         if isinstance(result, dict):
-            return " | ".join(
-                f"{k}: {v}" for k, v in result.items() if k != "passed"
-            )
+            return " | ".join(f"{k}: {v}" for k, v in result.items() if k != "passed")
+        if isinstance(result, list):
+            return ", ".join(str(v) for v in result)
         return str(result)
 
-    # ── Styles ────────────────────────────────────────────────────────────────
+    def _enforce_heights(self):
+        self.lbl_test_image.setFixedHeight(IMAGE_H)
+        self.wt_toolbar.setFixedHeight(TOOLBAR_H)
+        self.lbl_selected_test_name.setFixedHeight(NAME_H)
+        self.scroll_description.setFixedHeight(DESC_H)
 
     def _connect_signals(self):
         self.btn_run_all.clicked.connect(self._on_run_all)
@@ -209,17 +229,17 @@ class ColTests(QWidget):
                 color: {Colors.TEXT_MUTED};
                 font-size: 12px;
             }}
-            QLabel#lbl_test_description {{
-                color: {Colors.TEXT_SECONDARY};
-                font-size: 12px;
-                padding: 4px 10px;
-                border-bottom: 1px solid {Colors.BORDER};
-                background-color: {Colors.BG_TOOLBAR};
+            QLabel#lbl_selected_test_name {{
+                color: {Colors.TEXT_WHITE};
+                font-size: 15px;
+                font-weight: bold;
+                padding: 0 12px;
             }}
             QScrollArea {{ border: none; background-color: transparent; }}
             QWidget#scroll_tests_contents {{ background-color: transparent; }}
             {Styles.SCROLLBAR}
         """)
+        self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)
         for btn, icon in [
             (self.btn_run_all,    Icons.RUN_ALL()),
             (self.btn_add_test,   Icons.ADD()),

@@ -88,7 +88,6 @@ class SensorCell(QFrame):
         super().mousePressEvent(event)
 
 
-
 class ColSensors(QWidget):
     sensor_selected = pyqtSignal(str)
 
@@ -104,7 +103,7 @@ class ColSensors(QWidget):
         self._setup_styles()
         self._setup_filter_menu()
         self._connect_signals()
-
+        self._remove_filter()
 
     def load_sensors(self, sensors: list[dict], types: list[str]):
         self._all_sensors = sensors
@@ -123,7 +122,6 @@ class ColSensors(QWidget):
         if sensor_id and sensor_id in self._cells:
             self._cells[sensor_id].set_selected(True)
 
-
     def _setup_styles(self):
         self.setStyleSheet(f"""
             QWidget {{ background-color: {Colors.BG_COLUMN}; }}
@@ -135,8 +133,8 @@ class ColSensors(QWidget):
                 background-color: {Colors.BG_TOOLBAR};
                 border-bottom: 1px solid {Colors.BORDER};
             }}
-            QScrollArea {{ border: none; background-color: transparent; }}
-            QWidget#scroll_sensors_contents {{ background-color: transparent; }}
+            QScrollArea {{ border: none; background-color: {Colors.BG_CARD}; }}
+            QWidget#scroll_sensors_contents {{ background-color: {Colors.BG_CARD}; }}
             {Styles.SCROLLBAR}
         """)
         self.input_search.setStyleSheet(f"""
@@ -191,7 +189,6 @@ class ColSensors(QWidget):
         self.input_search.textChanged.connect(self._apply_search)
         self.btn_clear_filter.clicked.connect(self._remove_filter)
 
-
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()
         while layout.count():
@@ -206,12 +203,14 @@ class ColSensors(QWidget):
             layout.addWidget(cell)
             self._cells[s["id"]] = cell
 
-        layout.addStretch(1)
+        filler = QWidget()
+        filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        filler.setStyleSheet(f"background-color: {Colors.BG_CARD};")
+        layout.addWidget(filler)
 
     def _on_cell_clicked(self, sensor_id: str):
         self.set_selected(sensor_id)
         self.sensor_selected.emit(sensor_id)
-
 
     def _apply_filter(self, filter_type: str):
         self._current_filter = filter_type

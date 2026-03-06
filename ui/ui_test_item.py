@@ -1,6 +1,6 @@
 import os
 from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5 import uic
 
 from .theme import Styles, Icons, Layout, Colors, QT_DIR
@@ -9,21 +9,24 @@ from .theme import Styles, Icons, Layout, Colors, QT_DIR
 class TestItem(QWidget):
     run_requested  = pyqtSignal(str)
     stop_requested = pyqtSignal(str)
+    selected       = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(os.path.join(QT_DIR, "test_item.ui"), self)
 
-        self.is_running   = False
-        self.test_name    = ""
-        self.test_status  = "Pending"
+        self.is_running       = False
+        self.is_selected      = False
+        self.test_name        = ""
+        self.test_status      = "Pending"
         self.test_description = ""
-        self.test_result  = ""
+        self.test_result      = ""
 
+        self.setObjectName("TestItem")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
         self._setup_styles()
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
-
-    # ── Public ────────────────────────────────────────────────────────────────
 
     def load(self, test_data: dict):
         self.test_name        = test_data.get("name", "")
@@ -31,6 +34,7 @@ class TestItem(QWidget):
         self.test_description = test_data.get("description", "")
         self.test_result      = str(test_data.get("result", ""))
         self.is_running       = False
+        self.is_selected      = False
         self.refresh()
 
     def refresh(self):
@@ -39,18 +43,49 @@ class TestItem(QWidget):
         self._refresh_button()
         self._refresh_progress()
         self._refresh_icon()
+        self._refresh_bg()
 
     def set_running(self, running: bool):
         self.is_running = running
         self.refresh()
 
-    # ── Private ───────────────────────────────────────────────────────────────
+    def set_selected(self, selected: bool):
+        self.is_selected = selected
+        self._refresh_bg()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.selected.emit(self.test_name)
+        super().mousePressEvent(event)
+
+    def enterEvent(self, event):
+        if not self.is_selected:
+            self.setStyleSheet(self._bg_style(Colors.BG_CARD_HOVER))
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if not self.is_selected:
+            self.setStyleSheet(self._bg_style(Colors.BG_CARD))
+        super().leaveEvent(event)
 
     def _on_run_stop_clicked(self):
         if self.is_running:
             self.stop_requested.emit(self.test_name)
         else:
             self.run_requested.emit(self.test_name)
+
+    def _refresh_bg(self):
+        if self.is_selected:
+            self.setStyleSheet(self._bg_style(Colors.BG_CARD_SEL))
+        else:
+            self.setStyleSheet(self._bg_style(Colors.BG_CARD))
+
+    @staticmethod
+    def _bg_style(bg: str) -> str:
+        return (
+            f"QWidget#TestItem {{ background-color: {bg};"
+            f" border-bottom: 1px solid {Colors.DIVIDER}; }}"
+        )
 
     def _refresh_status_bar(self):
         color = {
@@ -85,9 +120,7 @@ class TestItem(QWidget):
         )
 
     def _setup_styles(self):
-        self.setStyleSheet(
-            f"QWidget {{ background-color: transparent; }}"
-        )
+        self.setStyleSheet(self._bg_style(Colors.BG_CARD))
         self.btn_run_stop.setStyleSheet(Styles.BUTTON_ICON)
         self.progress_bar.setStyleSheet(Styles.PROGRESS_BAR)
         self.status_icon.setStyleSheet("background-color: transparent;")
