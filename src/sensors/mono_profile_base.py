@@ -148,6 +148,28 @@ class MonoProfileBase(MonoCamera):
         return resolved_topic, scene_diag
 
     @staticmethod
+    def _ensure_render_display_env() -> Dict[str, str]:
+        applied: Dict[str, str] = {}
+        if os.environ.get("DISPLAY"):
+            return applied
+
+        xauthority = os.environ.get("XAUTHORITY", "").strip()
+        if not xauthority:
+            default_xauthority = os.path.expanduser("~/.Xauthority")
+            if os.path.exists(default_xauthority):
+                os.environ["XAUTHORITY"] = default_xauthority
+                applied["XAUTHORITY"] = default_xauthority
+
+        for display in (":0",):
+            display_socket = f"/tmp/.X11-unix/X{display.lstrip(':')}"
+            if os.path.exists(display_socket):
+                os.environ["DISPLAY"] = display
+                applied["DISPLAY"] = display
+                break
+
+        return applied
+
+    @staticmethod
     def _msg_stamp_s(msg: Image) -> float:
         stamp = float(msg.header.stamp.to_sec())
         if stamp <= 0.0:
@@ -874,8 +896,10 @@ class MonoProfileBase(MonoCamera):
             "topic_mapping_changed": False,
             "status": "ERROR",
             "error_reason": "",
+            "display_env": {},
         }
         self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
         self._set_test_diagnostics(c2_resolution=dict(metrics))
 
         world = self.test_to_world["c2_resolution_test"]
