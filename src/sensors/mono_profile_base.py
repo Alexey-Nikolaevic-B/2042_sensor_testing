@@ -37,6 +37,8 @@ class MonoProfileBase(MonoCamera):
     C10_CUBE_NAME = "clip_cube"
 
     C1_POSITIONS = (1.0, 3.0, 5.0)
+    C1_TRACK_Y = 0.35
+    C1_TRACK_Z = 0.25
     C2_DISTANCES = (0.20, 0.15, 0.10, 0.05, 0.02)
     C2_MIN_CONTOUR_AREA = 80
     C1_MIN_MARGIN_RATIO = 1.10
@@ -176,14 +178,23 @@ class MonoProfileBase(MonoCamera):
             return float(time.time())
         return stamp
 
-    def _wait_image_after(self, prev_stamp_s: Optional[float], timeout: float = 35.0) -> Image:
+    def _wait_image_after(
+        self,
+        prev_stamp_s: Optional[float],
+        timeout: float = 35.0,
+        topic: Optional[str] = None,
+    ) -> Image:
         start = time.time()
-        last_msg: Optional[Image] = None
+        target_topic = str(topic or self.IMAGE_TOPIC)
+        saw_message = False
 
         while (time.time() - start) < float(timeout):
             remaining = max(0.2, float(timeout) - (time.time() - start))
-            msg = self._wait_image(timeout=min(remaining, 5.0))
-            last_msg = msg
+            try:
+                msg = self._wait_image(timeout=min(remaining, 5.0), topic=target_topic)
+            except rospy.ROSException:
+                continue
+            saw_message = True
 
             if prev_stamp_s is None:
                 return msg
@@ -192,9 +203,12 @@ class MonoProfileBase(MonoCamera):
             if stamp > float(prev_stamp_s) + 1e-6:
                 return msg
 
-        if last_msg is not None:
-            return last_msg
-        raise RuntimeError(f"No image received on {self.IMAGE_TOPIC} within {timeout:.1f}s")
+        if not saw_message:
+            raise RuntimeError(f"No image received on {target_topic} within {timeout:.1f}s")
+        raise RuntimeError(
+            f"No fresh image received on {target_topic} after stamp {float(prev_stamp_s):.6f} "
+            f"within {timeout:.1f}s"
+        )
 
     @staticmethod
     def _msg_to_bgr(msg: Image) -> np.ndarray:
@@ -760,22 +774,80 @@ class MonoProfileBase(MonoCamera):
     def c1_size_order_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c1_size_order_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
             "positions": list(self.C1_POSITIONS),
+            "cube_pose": {"y": float(self.C1_TRACK_Y), "z": float(self.C1_TRACK_Z)},
             "bbox_area_px": {},
+            "bbox_px": {},
+            "red_pixels": {},
             "frame_stamp_s": {},
             "min_margin_ratio": float(self.C1_MIN_MARGIN_RATIO),
+            "status": "ERROR",
+            "error_reason": "",
         }
 
-        self._open_test_scene(simulator, "c1_size_order_test")
+        def _store_c1_diag() -> str:
+            metrics_path = self._save_metrics_json("c1_size_order_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c1_size_order={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c1_diag()
+
+        try:
+            self._open_test_scene(simulator, "c1_size_order_test")
+        except Exception:
+            resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+            metrics["resolved_topic"] = str(resolved_topic)
+            metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+            metrics["scene_open_success"] = False
+            reason = "unknown"
+            if isinstance(scene_diag, dict):
+                reason = str(scene_diag.get("reason", "unknown"))
+            metrics["error_reason"] = f"scene_open_failed:{reason}"
+            _store_c1_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, _ = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        _store_c1_diag()
+
         if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C1_CUBE_NAME}"
+            _store_c1_diag()
             raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
 
         prev_stamp_s: Optional[float] = None
         for x in self.C1_POSITIONS:
             label = f"x{int(x)}"
-            self._move_and_settle(simulator, self.C1_CUBE_NAME, x=float(x), y=0.0, z=0.25)
+            self._move_and_settle(
+                simulator,
+                self.C1_CUBE_NAME,
+                x=float(x),
+                y=float(self.C1_TRACK_Y),
+                z=float(self.C1_TRACK_Z),
+            )
 
-            msg = self._wait_image_after(prev_stamp_s, timeout=35.0)
+            try:
+                msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            except Exception as exc:
+                metrics["error_reason"] = f"image_receive_failed:{exc}"
+                _store_c1_diag()
+                raise RuntimeError(f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}") from exc
             prev_stamp_s = self._msg_stamp_s(msg)
             frame = self._msg_to_bgr(msg)
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -783,6 +855,8 @@ class MonoProfileBase(MonoCamera):
             red = self._red_mask(hsv)
             area, (bx, by, bw, bh) = self._bbox_area(red)
             metrics["bbox_area_px"][label] = int(area)
+            metrics["bbox_px"][label] = {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)}
+            metrics["red_pixels"][label] = int(self._count_pixels(red))
             metrics["frame_stamp_s"][label] = float(prev_stamp_s)
 
             artifacts.append(self._save_frame(f"c1_{label}_raw.png", frame))
@@ -808,11 +882,17 @@ class MonoProfileBase(MonoCamera):
         order_ok = x1 > x3 > x5
         margin_ok = (x1 >= x3 * self.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * self.C1_MIN_MARGIN_RATIO)
         metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
+        metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
+        if not (order_ok and margin_ok):
+            metrics["error_reason"] = (
+                f"size_order_failed: checks={metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}"
+            )
 
+        metrics_path = _store_c1_diag()
         if not (order_ok and margin_ok):
             raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
 
-        return {"id": "C1", "metrics": metrics, "artifacts": artifacts}
+        return {"id": "C1", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c4_geometries_presence_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
@@ -1249,30 +1329,80 @@ class MonoProfileBase(MonoCamera):
     def c11_fps_stability_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c11_fps_stability_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
             "duration_target_s": float(self.C11_DURATION_S),
             "update_rate_target_hz": float(self.update_rate),
             "warmup_seconds": float(self.C11_WARMUP_SECONDS),
             "jitter_percentile": int(self.C11_JITTER_PERCENTILE),
             "jitter_limit_s": float(self.C11_MAX_JITTER_S),
+            "status": "ERROR",
+            "error_reason": "",
         }
 
-        self._open_test_scene(simulator, "c11_fps_stability_test")
-        self._wait_image(timeout=35.0)
+        def _store_c11_diag() -> str:
+            metrics_path = self._save_metrics_json("c11_fps_stability_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c11_fps_stability={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c11_diag()
+
+        try:
+            self._open_test_scene(simulator, "c11_fps_stability_test")
+        except Exception:
+            resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+            metrics["resolved_topic"] = str(resolved_topic)
+            metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+            metrics["scene_open_success"] = False
+            reason = "unknown"
+            if isinstance(scene_diag, dict):
+                reason = str(scene_diag.get("reason", "unknown"))
+            metrics["error_reason"] = f"scene_open_failed:{reason}"
+            _store_c11_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, _ = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        _store_c11_diag()
+
+        try:
+            self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"warmup_image_receive_failed:{exc}"
+            _store_c11_diag()
+            raise RuntimeError(f"Failed to receive warmup image for C11 from topic {resolved_topic}: {exc}") from exc
 
         timestamps: List[float] = []
         first_msg: Dict[str, Optional[Image]] = {"msg": None}
         last_msg: Dict[str, Optional[Image]] = {"msg": None}
+        header_stamp_missing_count = 0
 
         def _on_image(msg: Image) -> None:
+            nonlocal header_stamp_missing_count
             stamp = float(msg.header.stamp.to_sec())
             if stamp <= 0.0:
+                header_stamp_missing_count += 1
                 stamp = float(rospy.Time.now().to_sec())
             timestamps.append(stamp)
             if first_msg["msg"] is None:
                 first_msg["msg"] = msg
             last_msg["msg"] = msg
 
-        sub = rospy.Subscriber(self.IMAGE_TOPIC, Image, _on_image, queue_size=2000)
+        sub = rospy.Subscriber(resolved_topic, Image, _on_image, queue_size=2000)
         started_wall = time.perf_counter()
         try:
             while (time.perf_counter() - started_wall) < float(self.C11_DURATION_S):
@@ -1281,7 +1411,13 @@ class MonoProfileBase(MonoCamera):
             sub.unregister()
 
         metrics["duration_actual_s"] = round(time.perf_counter() - started_wall, 4)
+        metrics["raw_frames_captured"] = int(len(timestamps))
+        metrics["header_stamp_missing_count"] = int(header_stamp_missing_count)
+        metrics["first_raw_stamp_s"] = float(timestamps[0]) if timestamps else None
+        metrics["last_raw_stamp_s"] = float(timestamps[-1]) if timestamps else None
         if len(timestamps) < 2:
+            metrics["error_reason"] = f"not_enough_frames_captured:{len(timestamps)}"
+            _store_c11_diag()
             raise AssertionError(f"C11 failed: not enough frames captured ({len(timestamps)})")
 
         monotonic_stamps: List[float] = []
@@ -1289,11 +1425,19 @@ class MonoProfileBase(MonoCamera):
             if not monotonic_stamps or ts > monotonic_stamps[-1]:
                 monotonic_stamps.append(float(ts))
 
+        metrics["monotonic_frames_captured"] = int(len(monotonic_stamps))
+        metrics["non_monotonic_dropped"] = int(len(timestamps) - len(monotonic_stamps))
         if len(monotonic_stamps) < 2:
+            metrics["error_reason"] = "no_monotonic_timestamp_sequence"
+            _store_c11_diag()
             raise AssertionError("C11 failed: no monotonic timestamp sequence")
 
         warmup_frames = int(max(1, round(float(self.update_rate) * float(self.C11_WARMUP_SECONDS))))
         if len(monotonic_stamps) <= (warmup_frames + 1):
+            metrics["error_reason"] = (
+                f"not_enough_frames_after_warmup:{len(monotonic_stamps)} total,warmup={warmup_frames}"
+            )
+            _store_c11_diag()
             raise AssertionError(
                 f"C11 failed: not enough frames after warmup ({len(monotonic_stamps)} total, warmup={warmup_frames})"
             )
@@ -1301,10 +1445,12 @@ class MonoProfileBase(MonoCamera):
         eval_stamps = monotonic_stamps[warmup_frames:]
         total_dt = float(eval_stamps[-1] - eval_stamps[0])
         if total_dt <= 0.0:
+            metrics["error_reason"] = f"invalid_timestamps_interval:{total_dt}"
+            _store_c11_diag()
             raise AssertionError(f"C11 failed: invalid timestamps interval ({total_dt})")
 
         n_frames = len(eval_stamps)
-        fps_actual = float(n_frames / total_dt)
+        fps_actual = float((n_frames - 1) / total_dt)
         ideal_dt = float(1.0 / float(self.update_rate))
         deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
 
@@ -1324,6 +1470,8 @@ class MonoProfileBase(MonoCamera):
             {
                 "frames_captured": int(n_frames),
                 "frames_skipped_warmup": int(warmup_frames),
+                "first_eval_stamp_s": float(eval_stamps[0]),
+                "last_eval_stamp_s": float(eval_stamps[-1]),
                 "timestamps_interval_s": total_dt,
                 "fps_actual_hz": fps_actual,
                 "ideal_dt_s": ideal_dt,
@@ -1348,7 +1496,13 @@ class MonoProfileBase(MonoCamera):
             debug_last = self._annotate(frame_last, ["C11 last frame", f"dropouts={dropouts}", f"max_dt={max_dt:.4f}s"])
             artifacts.append(self._save_frame("c11_last_frame.png", debug_last))
 
-        metrics_path = self._save_metrics_json("c11_fps_stability_metrics.json", metrics)
+        metrics["status"] = "PASS" if (fps_ok and jitter_ok and dropouts_ok) else "FAIL"
+        if not (fps_ok and jitter_ok and dropouts_ok):
+            metrics["error_reason"] = (
+                f"fps_jitter_or_dropout_failed: fps={fps_actual:.3f}, jitter={jitter:.4f}, dropouts={dropouts}"
+            )
+
+        metrics_path = _store_c11_diag()
         if not (fps_ok and jitter_ok and dropouts_ok):
             raise AssertionError(
                 f"C11 failed: fps={fps_actual:.3f} (target>={0.95 * self.update_rate:.3f}), "
