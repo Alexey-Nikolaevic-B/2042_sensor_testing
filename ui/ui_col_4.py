@@ -1,12 +1,22 @@
 from datetime import datetime
 
-from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog, QLabel, QScrollArea, QVBoxLayout, QSizePolicy
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap, QColor, QTextCharFormat, QTextCursor
 from PyQt5 import uic
 
 from .theme import Colors, Styles, Icons, Layout, QT_DIR
 from .ui_col_2 import IMAGE_H, TOOLBAR_H
+
+
+_LEVEL_FMT: dict[str, tuple[str, str]] = {
+    "debug":    ("[DEBG]", "#6b7280"),
+    "info":     ("[INFO]", "#9ca3af"),
+    "warning":  ("[WARN]", "#f59e0b"),
+    "error":    ("[ERRO]", "#ef4444"),
+    "critical": ("[CRIT]", "#dc2626"),
+}
+
 
 
 class ColCapture(QWidget):
@@ -18,14 +28,13 @@ class ColCapture(QWidget):
         self._setup_styles()
         self._connect_signals()
 
-    def append_log(self, text: str):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        current   = self.lbl_log.text()
-        line      = f"[{timestamp}] {text}"
-        self.lbl_log.setText((current + "\n" + line).lstrip())
-        QTimer.singleShot(0, self._scroll_to_bottom)
+    def append_log(self, level: str, source: str, message: str) -> None:
+        prefix, color = _LEVEL_FMT.get(level.lower(), ("INF", "#9ca3af"))
+        ts   = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}]  {prefix}  {source}: {message}"
+        self._append_colored(line, color)
 
-    def set_capture_image(self, pixmap: QPixmap):
+    def set_capture_image(self, pixmap: QPixmap) -> None:
         if pixmap and not pixmap.isNull():
             self.lbl_capture_image.setPixmap(
                 pixmap.scaled(
@@ -40,15 +49,15 @@ class ColCapture(QWidget):
             self.lbl_capture_image.setText("no data captured")
 
     def _on_clear(self):
-        self.lbl_log.setText("")
+        self.log_view.clear()
 
     def _on_copy(self):
-        text = self.lbl_log.text()
+        text = self.log_view.toPlainText()
         if text:
             QApplication.clipboard().setText(text)
 
     def _on_save(self):
-        text = self.lbl_log.text()
+        text = self.log_view.toPlainText()
         if not text:
             return
         path, _ = QFileDialog.getSaveFileName(
@@ -61,11 +70,18 @@ class ColCapture(QWidget):
                 with open(path, "w") as f:
                     f.write(text)
             except OSError as e:
-                self.append_log(f"Error saving: {e}")
+                self.append_log("error", "ui.col_capture", f"Error saving log: {e}")
 
-    def _scroll_to_bottom(self):
-        sb = self.scroll_log.verticalScrollBar()
-        sb.setValue(sb.maximum())
+    def _append_colored(self, text: str, hex_color: str) -> None:
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(hex_color))
+        cursor = self.log_view.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        if self.log_view.toPlainText():
+            cursor.insertText("\n")
+        cursor.insertText(text, fmt)
+        self.log_view.setTextCursor(cursor)
+        self.log_view.ensureCursorVisible()
 
     def _enforce_heights(self):
         self.lbl_capture_image.setFixedHeight(IMAGE_H)
@@ -93,19 +109,14 @@ class ColCapture(QWidget):
                 color: {Colors.TEXT_MUTED};
                 font-size: 12px;
             }}
-            QScrollArea#scroll_log {{
-                border: none;
-                background-color: {Colors.BG_LOG};
-            }}
-            QWidget#scroll_log_contents {{
-                background-color: {Colors.BG_LOG};
-            }}
-            QLabel#lbl_log {{
+            QPlainTextEdit#log_view {{
                 background-color: {Colors.BG_LOG};
                 color: {Colors.TEXT_PRIMARY};
                 font-family: monospace;
                 font-size: 11px;
-                padding: 8px;
+                border: none;
+                padding: 6px;
+                selection-background-color: #334155;
             }}
             {Styles.SCROLLBAR}
         """)

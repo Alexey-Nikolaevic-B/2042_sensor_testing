@@ -3,9 +3,12 @@ import time
 import socket
 import threading
 import traceback
+
+from ui.log_bridge import setup_logging
+setup_logging()
+
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication
-
 from src.core import Core
 from sensor_repository import SensorRepository
 from ui.test_runner import TestRunner
@@ -13,9 +16,9 @@ from ui.ui_main import Main_UI
 
 
 class _SimInitThread(QThread):
-    log    = pyqtSignal(str)
+    log    = pyqtSignal(object)
     ready  = pyqtSignal()
-    failed = pyqtSignal(str)
+    failed = pyqtSignal(object)
 
     POLL_INTERVAL = 0.5
     TIMEOUT       = 30.0
@@ -25,27 +28,21 @@ class _SimInitThread(QThread):
         self._core = core
 
     def run(self):
-        import sys
-        import socket
-
-        self.log.emit("Starting roscore...")
+        self.log.emit(("info",    "__main__", "Starting roscore..."))
         self._core.simulator.launch_ros()
-
-        self.log.emit("Waiting for roscore to be ready...")
+        self.log.emit(("info",    "__main__", "Waiting for roscore to be ready..."))
         deadline = time.time() + self.TIMEOUT
-        attempt  = 0
         while time.time() < deadline:
-            attempt += 1
             try:
                 with socket.create_connection(("localhost", 11311), timeout=1.0):
                     pass
-                self.log.emit("roscore is ready.")
+                self.log.emit(("info", "__main__", "roscore is ready."))
                 self.ready.emit()
                 return
-            except OSError as e:
+            except OSError:
                 time.sleep(self.POLL_INTERVAL)
-
-        self.failed.emit(f"roscore did not become ready within {self.TIMEOUT:.0f}s")
+        self.failed.emit(("error", "__main__",
+                          f"roscore did not become ready within {self.TIMEOUT:.0f}s"))
 
 
 _sim_init_thread: _SimInitThread = None
@@ -53,30 +50,26 @@ _sim_init_thread: _SimInitThread = None
 
 def _start_simulator_init(core: Core, on_log, on_fail):
     global _sim_init_thread
-
     _sim_init_thread = _SimInitThread(core)
 
     def _on_ready():
-        import sys
-        on_log("Initialising ROS node...")
+        on_log(("info", "__main__", "Initialising ROS node..."))
         core.simulator.launch_node()
         if core.simulator.node_is_running:
-            on_log("✔ Simulator ready you can now run tests.")
+            on_log(("info",  "__main__", "Simulator ready, you can now run tests."))
         else:
-            on_fail("✘ ROS node failed to initialise (check ROS logs).")
+            on_fail(("error", "__main__", "ROS node failed to initialise (check ROS logs)."))
 
-    _sim_init_thread.log.connect(on_log)
+    _sim_init_thread.log.connect(lambda t: on_log(t))
     _sim_init_thread.ready.connect(_on_ready)
-    _sim_init_thread.failed.connect(on_fail)
+    _sim_init_thread.failed.connect(lambda t: on_fail(t))
     _sim_init_thread.start()
-    import sys
 
 
 def _seed_db_from_registry(repo: SensorRepository) -> None:
     try:
         from src.sensors import REGISTRY, make_sensor
         from config import CONFIG
-
         for (sensor_type, sensor_name) in REGISTRY.keys():
             if repo.get_sensor_by_name(sensor_name):
                 continue
@@ -90,7 +83,6 @@ def _seed_db_from_registry(repo: SensorRepository) -> None:
                 })
             except Exception as exc:
                 print(f"[seed] Could not register {sensor_name}: {exc}")
-
     except ImportError:
         print("[seed] Backend not available")
 
@@ -106,10 +98,17 @@ if __name__ == "__main__":
     window.test_page.set_runner(runner, repo)
     window.show()
 
+    def _sim_log(level: str, msg: str):
+        window.col_capture.append_log(level, "src.gazebo_simulator", msg)
+    core.simulator.on_log = _sim_log
+
+    def _ui_log(t):
+        window.col_capture.append_log(t[0], t[1], t[2])
+
     _start_simulator_init(
-        core   = core,
-        on_log = window.test_page.append_log,
-        on_fail= window.test_page.append_log,
+        core    = core,
+        on_log  = _ui_log,
+        on_fail = _ui_log,
     )
 
     try:
@@ -126,7 +125,6 @@ if __name__ == "__main__":
                     _sim_init_thread.wait(5000)
             except RuntimeError:
                 pass
-
         if runner._thread is not None:
             runner._worker.request_stop() if runner._worker else None
             try:

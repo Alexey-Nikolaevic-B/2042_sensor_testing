@@ -10,7 +10,6 @@ from .ui_col_3 import ColTests
 from .ui_col_4 import ColCapture
 from sensor_repository import SensorRepository
 
-
 class Main_UI(QMainWindow):
 
     def __init__(self):
@@ -81,7 +80,7 @@ class Main_UI(QMainWindow):
 
         self.col_sensors.sensor_selected.connect(self._on_sensor_selected)
 
-        self.col_tests._runner_log_forward = self.col_capture.append_log
+        # self.col_tests._runner_log_forward = self.col_capture.append_log
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()
