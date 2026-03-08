@@ -2,7 +2,7 @@
 <!--
   Что это:
   - Сцена C10 для проверки near/far clipping камеры.
-  - В сцене один контрастный куб `clip_cube`, стартующий близко к камере.
+  - В сцене один контрастный красный таргет `clip_cube`, тонкий по X.
 
   Как используется:
   - Тест двигает `clip_cube` по X в даль до превышения far_clip через /gazebo/set_model_state.
@@ -33,12 +33,12 @@
         <gravity>false</gravity>
         <collision name="collision">
           <geometry>
-            <box><size>0.5 0.5 0.5</size></box>
+            <box><size>0.01 0.5 0.5</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>0.5 0.5 0.5</size></box>
+            <box><size>0.01 0.5 0.5</size></box>
           </geometry>
           <material>
             <ambient>1.0 0.1 0.1 1</ambient>

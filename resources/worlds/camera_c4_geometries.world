@@ -119,24 +119,19 @@
       </link>
     </model>
 
-    <model name="c4_yellow_cone">
+    <!-- Gazebo classic on the Ubuntu runner hangs on primitive cone geometry here. -->
+    <model name="c4_yellow_box">
       <pose>3.0 0.6 0.25 0 0 0</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
-            <cone>
-              <radius>0.25</radius>
-              <length>0.5</length>
-            </cone>
+            <box><size>0.5 0.5 0.5</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <cone>
-              <radius>0.25</radius>
-              <length>0.5</length>
-            </cone>
+            <box><size>0.5 0.5 0.5</size></box>
           </geometry>
           <material>
             <ambient>1 1 0 1</ambient>

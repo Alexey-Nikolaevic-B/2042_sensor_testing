@@ -56,9 +56,6 @@ class MonoProfileBase(MonoCamera):
     C10_FAR_COARSE_STEP = 0.5
     C10_FAR_FINE_STEP = 0.01
     C10_MIN_RED_PIXELS = 20
-    # Новый дополнительный критерий C10: объект считается практически исчезнувшим,
-    # если его видимая площадь < 1% кадра на дальнем участке поиска.
-    C10_MIN_VISIBLE_RATIO = 0.01
     C11_DURATION_S = 60.0
     C11_WARMUP_SECONDS = 2.0
     C11_JITTER_PERCENTILE = 95
@@ -896,24 +893,85 @@ class MonoProfileBase(MonoCamera):
 
     def c4_geometries_presence_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
-        metrics: Dict[str, Any] = {"pixel_counts": {}, "threshold": int(self.C4_MIN_PIXELS)}
+        metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c4_geometries_presence_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "pixel_counts": {},
+            "threshold": int(self.C4_MIN_PIXELS),
+            "display_env": {},
+            "status": "ERROR",
+            "error_reason": "",
+        }
 
-        self._open_c4_scene_with_retry(simulator)
-        msg = self._wait_image(timeout=35.0)
+        def _store_c4_diag() -> str:
+            metrics_path = self._save_metrics_json("c4_geometries_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c4_geometries_presence={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c4_diag()
+
+        try:
+            self._open_c4_scene_with_retry(simulator)
+        except Exception as exc:
+            metrics["error_reason"] = f"scene_open_failed:{exc}"
+            _store_c4_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
+        _store_c4_diag()
+
+        try:
+            msg = self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"image_receive_failed:{exc}"
+            _store_c4_diag()
+            raise RuntimeError(f"Failed to receive image for C4 from topic {resolved_topic}: {exc}") from exc
+
         frame = self._msg_to_bgr(msg)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         for color in ("red", "green", "blue", "yellow"):
             metrics["pixel_counts"][color] = self._count_pixels(self._color_mask(hsv, color))
 
-        artifacts.append(self._save_frame("c4_geometries.png", frame))
         missing = {c: n for c, n in metrics["pixel_counts"].items() if int(n) <= int(metrics["threshold"])}
         metrics["checks"] = {"all_present": len(missing) == 0, "missing_or_low": missing}
+        metrics["status"] = "PASS" if len(missing) == 0 else "FAIL"
+        if missing:
+            metrics["error_reason"] = f"missing_or_low:{missing}"
+
+        debug = self._annotate(
+            frame,
+            [
+                f"topic={resolved_topic}",
+                f"threshold={metrics['threshold']}",
+                f"red={metrics['pixel_counts'].get('red', 0)}",
+                f"green={metrics['pixel_counts'].get('green', 0)}",
+                f"blue={metrics['pixel_counts'].get('blue', 0)}",
+                f"yellow={metrics['pixel_counts'].get('yellow', 0)}",
+            ],
+        )
+        artifacts.append(self._save_frame("c4_geometries.png", debug))
+        metrics_path = _store_c4_diag()
 
         if missing:
             raise AssertionError(f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}")
 
-        return {"id": "C4", "metrics": metrics, "artifacts": artifacts}
+        return {"id": "C4", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c7_occlusion_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
@@ -1159,6 +1217,12 @@ class MonoProfileBase(MonoCamera):
 
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c10_clipping_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
             "near_clip_target_m": float(near_target),
             "far_clip_target_m": float(far_target),
             "clip_source": clip_cfg,
@@ -1167,38 +1231,90 @@ class MonoProfileBase(MonoCamera):
             "near_search": {"start_x": float(near_start), "end_x": float(near_end)},
             "far_search": {"coarse_step": float(self.C10_FAR_COARSE_STEP), "fine_step": float(self.C10_FAR_FINE_STEP)},
             "min_red_pixels": int(self.C10_MIN_RED_PIXELS),
-            "min_visible_ratio": float(self.C10_MIN_VISIBLE_RATIO),
+            "visibility_rule": f"red_pixels>={int(self.C10_MIN_RED_PIXELS)}",
+            "status": "ERROR",
+            "error_reason": "",
         }
 
-        self._open_test_scene(simulator, "c10_clipping_test")
+        def _store_c10_diag() -> str:
+            metrics_path = self._save_metrics_json("c10_clipping_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c10_clipping={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c10_diag()
+
+        try:
+            self._open_test_scene(simulator, "c10_clipping_test")
+        except Exception as exc:
+            metrics["error_reason"] = f"scene_open_failed:{exc}"
+            _store_c10_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
+        _store_c10_diag()
+
         if not simulator.wait_for_model_spawn(self.C10_CUBE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C10_CUBE_NAME}"
+            _store_c10_diag()
             raise RuntimeError(f"Model not spawned: {self.C10_CUBE_NAME}")
+
+        try:
+            warmup_msg = self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"warmup_image_failed:{exc}"
+            _store_c10_diag()
+            raise RuntimeError(f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}") from exc
+
+        prev_stamp_s = self._msg_stamp_s(warmup_msg)
+
+        def _move_and_capture(x: float, settle_s: float) -> Tuple[np.ndarray, Dict[str, float], int]:
+            nonlocal prev_stamp_s
+
+            self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=settle_s)
+            msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            prev_stamp_s = self._msg_stamp_s(msg)
+            frame = self._msg_to_bgr(msg)
+            red_stats = self._red_stats(frame)
+            red_pixels = int(red_stats["red_pixels"])
+            return frame, red_stats, red_pixels
 
         near_before: Optional[Tuple[float, np.ndarray, int]] = None
         near_after: Optional[Tuple[float, np.ndarray, int]] = None
 
         for x in self._iter_float_range(near_start, near_end, self.C10_NEAR_STEP):
-            self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.2)
-            msg = self._wait_image(timeout=35.0)
-            frame = self._msg_to_bgr(msg)
-            red_stats = self._red_stats(frame)
-            red_pixels = int(red_stats["red_pixels"])
+            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
             if bool(red_stats["visible_by_pixels"]):
                 near_after = (float(x), frame, red_pixels)
                 break
             near_before = (float(x), frame, red_pixels)
 
         if near_after is None:
+            metrics["error_reason"] = "near_boundary_not_found"
+            _store_c10_diag()
             raise AssertionError("C10 failed: clip_cube did not appear in near search range")
 
         near_x = float(near_after[0])
         metrics["x_near_m"] = near_x
+        metrics["near_boundary"] = {
+            "before_x_m": float(near_before[0]) if near_before is not None else None,
+            "after_x_m": float(near_after[0]),
+        }
 
         far_last_visible = near_after
         far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
 
-        # Ищем дальше реального far_clip с запасом, чтобы надежно пройти границу отсечения
-        # даже на камерах с большим far и низкой дискретизацией шага.
         far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
         metrics["far_search_stop_m"] = float(far_search_stop)
         for x in self._iter_float_range(
@@ -1206,26 +1322,17 @@ class MonoProfileBase(MonoCamera):
             far_search_stop,
             float(self.C10_FAR_COARSE_STEP),
         ):
-            self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.2)
-            msg = self._wait_image(timeout=35.0)
-            frame = self._msg_to_bgr(msg)
-            red_stats = self._red_stats(frame)
-            red_pixels = int(red_stats["red_pixels"])
+            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
             visible = bool(red_stats["visible_by_pixels"])
-            # Исторически критерий был только по red_pixels==0.
-            # Теперь учитываем физически корректный "практически исчез" на дальнем участке:
-            # очень малая доля видимого объекта (<1% кадра) при X >= 0.9*far_clip.
-            tiny_far_object = bool(
-                float(x) >= (0.9 * float(far_target))
-                and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
-            )
-            if visible and not tiny_far_object:
+            if visible:
                 far_last_visible = (float(x), frame, red_pixels)
             else:
                 far_first_not_visible = (float(x), frame, red_pixels)
                 break
 
         if far_first_not_visible is None:
+            metrics["error_reason"] = "far_boundary_not_found"
+            _store_c10_diag()
             raise AssertionError("C10 failed: clip_cube did not disappear in far search range")
 
         fine_start = max(float(near_x), float(far_last_visible[0]) - float(self.C10_FAR_COARSE_STEP))
@@ -1234,17 +1341,9 @@ class MonoProfileBase(MonoCamera):
         far_first_not_visible_fine = far_first_not_visible
 
         for x in self._iter_float_range(fine_start, fine_end, float(self.C10_FAR_FINE_STEP)):
-            self._move_and_settle(simulator, self.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.15)
-            msg = self._wait_image(timeout=35.0)
-            frame = self._msg_to_bgr(msg)
-            red_stats = self._red_stats(frame)
-            red_pixels = int(red_stats["red_pixels"])
+            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.15)
             visible = bool(red_stats["visible_by_pixels"])
-            tiny_far_object = bool(
-                float(x) >= (0.9 * float(far_target))
-                and float(red_stats["pixel_ratio"]) < float(self.C10_MIN_VISIBLE_RATIO)
-            )
-            if visible and not tiny_far_object:
+            if visible:
                 far_last_visible_fine = (float(x), frame, red_pixels)
             else:
                 far_first_not_visible_fine = (float(x), frame, red_pixels)
@@ -1253,6 +1352,10 @@ class MonoProfileBase(MonoCamera):
         far_x = float(far_last_visible_fine[0])
         metrics["x_far_m"] = far_x
         metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
+        metrics["far_boundary"] = {
+            "last_visible_x_m": float(far_last_visible_fine[0]),
+            "first_not_visible_x_m": float(far_first_not_visible_fine[0]),
+        }
 
         near_ok = abs(near_x - float(near_target)) <= float(near_tol)
         far_ok = abs(far_x - float(far_target)) <= float(far_tol)
@@ -1267,8 +1370,13 @@ class MonoProfileBase(MonoCamera):
         far_before_stats = self._red_stats(far_last_visible_fine[1])
         far_after_stats = self._red_stats(far_first_not_visible_fine[1])
         metrics["visibility_debug"] = {
+            "near_before_red_pixels": int(near_before[2]) if near_before is not None else None,
+            "near_before_pixel_ratio": float(self._red_stats(near_before[1])["pixel_ratio"]) if near_before is not None else None,
+            "near_after_red_pixels": int(near_after[2]),
             "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
+            "far_before_red_pixels": int(far_last_visible_fine[2]),
             "far_before_pixel_ratio": float(far_before_stats["pixel_ratio"]),
+            "far_after_red_pixels": int(far_first_not_visible_fine[2]),
             "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
         }
 
@@ -1280,6 +1388,7 @@ class MonoProfileBase(MonoCamera):
                     f"red_px={near_before[2]}",
                     f"ratio={self._red_stats(near_before[1])['pixel_ratio']:.4f}",
                     "visible=False",
+                    f"topic={resolved_topic}",
                 ],
             )
             artifacts.append(self._save_frame("c10_near_before.png", dbg))
@@ -1291,6 +1400,7 @@ class MonoProfileBase(MonoCamera):
                 f"red_px={near_after[2]}",
                 f"ratio={near_after_stats['pixel_ratio']:.4f}",
                 "visible=True",
+                f"topic={resolved_topic}",
             ],
         )
         artifacts.append(self._save_frame("c10_near_after.png", dbg))
@@ -1302,6 +1412,7 @@ class MonoProfileBase(MonoCamera):
                 f"red_px={far_last_visible_fine[2]}",
                 f"ratio={far_before_stats['pixel_ratio']:.4f}",
                 "visible=True",
+                f"topic={resolved_topic}",
             ],
         )
         artifacts.append(self._save_frame("c10_far_before.png", dbg))
@@ -1312,12 +1423,20 @@ class MonoProfileBase(MonoCamera):
                 f"far_after x={far_first_not_visible_fine[0]:.2f}",
                 f"red_px={far_first_not_visible_fine[2]}",
                 f"ratio={far_after_stats['pixel_ratio']:.4f}",
-                "visible=False_or_tiny",
+                "visible=False",
+                f"topic={resolved_topic}",
             ],
         )
         artifacts.append(self._save_frame("c10_far_after.png", dbg))
 
-        metrics_path = self._save_metrics_json("c10_clipping_metrics.json", metrics)
+        metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
+        if not (near_ok and far_ok):
+            metrics["error_reason"] = (
+                f"clipping_mismatch: near={near_x:.3f}/{near_target:.3f}, "
+                f"far={far_x:.3f}/{far_target:.3f}"
+            )
+
+        metrics_path = _store_c10_diag()
         if not (near_ok and far_ok):
             raise AssertionError(
                 f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
