@@ -241,16 +241,6 @@ class StereoProfileBase(Sensor):
         return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
 
     @staticmethod
-    def _choose_topic(candidates: List[str]) -> str:
-        if not candidates:
-            return ""
-        prioritized = sorted(
-            candidates,
-            key=lambda t: (0 if t.endswith("/image_raw") else 1, len(t), t),
-        )
-        return prioritized[0]
-
-    @staticmethod
     def _looks_like_side_topic(topic: str, side: str) -> bool:
         normalized = str(topic or "").strip()
         if not normalized:
@@ -328,40 +318,37 @@ class StereoProfileBase(Sensor):
                     "topics_found": last_topics,
                     "topic_mapping_changed": True,
                 }
-
-        token = sensor_name
-        left_candidates = [
-            t for t in last_topics
-            if (("/left/" in t) or ("_left/" in t) or t.endswith("_left/image_raw"))
-            and ("image_raw" in t or t.endswith("/image"))
+        safe_candidates = [
+            {
+                "left": left_topic,
+                "right": right_topic,
+                "source": source,
+                "published": bool(left_topic in last_topics and right_topic in last_topics),
+            }
+            for left_topic, right_topic, source in preferred_pairs
+            if self._is_valid_stereo_pair(left_topic, right_topic)
         ]
-        right_candidates = [
-            t for t in last_topics
-            if (("/right/" in t) or ("_right/" in t) or t.endswith("_right/image_raw"))
-            and ("image_raw" in t or t.endswith("/image"))
-        ]
+        published_left_candidates = [topic for topic in last_topics if self._looks_like_side_topic(topic, "left")]
+        published_right_candidates = [topic for topic in last_topics if self._looks_like_side_topic(topic, "right")]
+        sensor_namespace_left = [topic for topic in published_left_candidates if sensor_name and sensor_name in topic]
+        sensor_namespace_right = [topic for topic in published_right_candidates if sensor_name and sensor_name in topic]
 
-        # Сначала ищем кандидаты в namespace профиля, затем общий fallback.
-        ns_left = [t for t in left_candidates if token in t]
-        ns_right = [t for t in right_candidates if token in t]
-        selected_left = self._choose_topic(ns_left) or cached_left or expected_left
-        selected_right = self._choose_topic(ns_right) or cached_right or expected_right
-        if not self._is_valid_stereo_pair(selected_left, selected_right):
-            distinct_ns_left = [t for t in ns_left if t != selected_right]
-            distinct_ns_right = [t for t in ns_right if t != selected_left]
-            selected_left = self._choose_topic(distinct_ns_left) or selected_left
-            selected_right = self._choose_topic(distinct_ns_right) or selected_right
-
-        return selected_left, selected_right, {
+        return "", "", {
             "expected_left": expected_left,
             "expected_right": expected_right,
-            "selected_left": selected_left,
-            "selected_right": selected_right,
-            "selected_source": "heuristic_sensor_namespace",
+            "selected_left": "",
+            "selected_right": "",
+            "selected_source": "unresolved_no_safe_pair",
             "topics_found": last_topics,
-            "topic_mapping_changed": bool(selected_left != expected_left or selected_right != expected_right),
+            "topic_mapping_changed": False,
             "scene_resolved_left": cached_left,
             "scene_resolved_right": cached_right,
+            "safe_candidates": safe_candidates,
+            "published_left_candidates": published_left_candidates,
+            "published_right_candidates": published_right_candidates,
+            "sensor_namespace_left_candidates": sensor_namespace_left,
+            "sensor_namespace_right_candidates": sensor_namespace_right,
+            "resolve_reason": "no_safe_stereo_pair_after_warmup",
         }
 
     def _wait_pair_closest(
