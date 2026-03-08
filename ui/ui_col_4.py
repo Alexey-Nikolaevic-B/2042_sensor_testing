@@ -23,7 +23,7 @@ class ColCapture(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        uic.loadUi(f"{QT_DIR}/col_capture.ui", self)
+        uic.loadUi(f"{QT_DIR}/col_4.ui", self)
         self._enforce_heights()
         self._setup_styles()
         self._connect_signals()
@@ -70,7 +70,7 @@ class ColCapture(QWidget):
                 with open(path, "w") as f:
                     f.write(text)
             except OSError as e:
-                self.append_log("error", "ui.col_capture", f"Error saving log: {e}")
+                self.append_log("error", "ui.col_4", f"Error saving log: {e}")
 
     def _append_colored(self, text: str, hex_color: str) -> None:
         fmt = QTextCharFormat()

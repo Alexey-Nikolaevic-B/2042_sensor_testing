@@ -31,15 +31,15 @@ class Main_UI(QMainWindow):
         self.setAttribute(Qt.WA_TranslucentBackground)
 
     def _build_columns(self):
-        self.col_sensors = ColSensors()
-        self.col_details = ColDetails()
-        self.col_tests   = ColTests()
-        self.col_capture = ColCapture()
+        self.col_1 = ColSensors()
+        self.col_2 = ColDetails()
+        self.col_3   = ColTests()
+        self.col_4 = ColCapture()
 
-        self.test_page = self.col_tests
+        self.test_page = self.col_3
 
-        for col in (self.col_sensors, self.col_details,
-                    self.col_tests, self.col_capture):
+        for col in (self.col_1, self.col_2,
+                    self.col_3, self.col_4):
             col.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             self.splitter_main.addWidget(col)
 
@@ -80,18 +80,18 @@ class Main_UI(QMainWindow):
         self.btn_maximize.clicked.connect(self._toggle_maximize)
         self.btn_close.clicked.connect(self.close)
 
-        self.col_sensors.sensor_selected.connect(self._on_sensor_selected)
-        self.col_sensors.add_requested.connect(self._on_add_sensor)
-        self.col_sensors.delete_requested.connect(self._on_delete_sensor)
+        self.col_1.sensor_selected.connect(self._on_sensor_selected)
+        self.col_1.add_requested.connect(self._on_add_sensor)
+        self.col_1.delete_requested.connect(self._on_delete_sensor)
 
 
-        self.col_tests._runner_log_forward = self.col_capture.append_log
+        self.col_3._runner_log_forward = self.col_4.append_log
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()
         sensors = repo.all_sensors()
         types   = repo.get_types()
-        self.col_sensors.load_sensors(sensors, types)
+        self.col_1.load_sensors(sensors, types)
 
 
         repo.sensor_added.connect(lambda _: self._reload_sensors())
@@ -105,26 +105,26 @@ class Main_UI(QMainWindow):
         if not sensor:
             return
         data = sensor
-        self.col_details.load_sensor(data)
-        self.col_tests.load_sensor(data)
+        self.col_2.load_sensor(data)
+        self.col_3.load_sensor(data)
 
     def _reload_sensors(self):
         repo = SensorRepository.instance()
-        prev_id = self.col_sensors._selected_id
-        self.col_sensors.load_sensors(repo.all_sensors(), repo.get_types())
+        prev_id = self.col_1._selected_id
+        self.col_1.load_sensors(repo.all_sensors(), repo.get_types())
         if prev_id:
-            self.col_sensors.set_selected(prev_id)
+            self.col_1.set_selected(prev_id)
 
             sensor = repo.get_sensor(prev_id)
             if sensor:
-                self.col_details.load_sensor(sensor)
-                self.col_tests.load_sensor(sensor)
+                self.col_2.load_sensor(sensor)
+                self.col_3.load_sensor(sensor)
 
     def _on_test_updated(self, sensor_id: str):
         repo   = SensorRepository.instance()
         sensor = repo.get_sensor(sensor_id)
         if sensor:
-            self.col_sensors.refresh_sensor(sensor)
+            self.col_1.refresh_sensor(sensor)
 
     def _on_add_sensor(self):
         dlg = AddSensorDialog(parent=self)
@@ -138,7 +138,7 @@ class Main_UI(QMainWindow):
             return
         try:
             updated = repo.update_sensor(sensor_id, sensor_dict)
-            self.col_sensors.refresh_sensor(updated)
+            self.col_1.refresh_sensor(updated)
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Update failed', str(e))
@@ -146,12 +146,12 @@ class Main_UI(QMainWindow):
     def _on_delete_sensor(self, sensor_id: str):
         repo = SensorRepository.instance()
         try:
-            was_selected = (self.col_sensors._selected_id == sensor_id)
+            was_selected = (self.col_1._selected_id == sensor_id)
             repo.delete_sensor(sensor_id)
-            self.col_sensors.remove_cell(sensor_id)
+            self.col_1.remove_cell(sensor_id)
             if was_selected:
-                self.col_details.clear()
-                self.col_tests.clear()
+                self.col_2.clear()
+                self.col_3.clear()
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Delete failed', str(e))

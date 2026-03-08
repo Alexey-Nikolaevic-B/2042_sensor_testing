@@ -99,11 +99,11 @@ if __name__ == "__main__":
     window.show()
 
     def _sim_log(level: str, msg: str):
-        window.col_capture.append_log(level, "src.gazebo_simulator", msg)
+        window.col_4.append_log(level, "src.gazebo_simulator", msg)
     core.simulator.on_log = _sim_log
 
     def _ui_log(t):
-        window.col_capture.append_log(t[0], t[1], t[2])
+        window.col_4.append_log(t[0], t[1], t[2])
 
     _start_simulator_init(
         core    = core,

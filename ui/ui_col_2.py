@@ -37,7 +37,7 @@ class ColDetails(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        uic.loadUi(f"{QT_DIR}/col_details.ui", self)
+        uic.loadUi(f"{QT_DIR}/col_2.ui", self)
         self._sensor_data: dict | None = None
         self._enforce_heights()
         self._setup_styles()

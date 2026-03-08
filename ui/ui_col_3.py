@@ -14,7 +14,7 @@ class ColTests(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        uic.loadUi(f"{QT_DIR}/col_tests.ui", self)
+        uic.loadUi(f"{QT_DIR}/col_3.ui", self)
 
         self._sensor_data: dict | None = None
         self._sensor_id: str | None = None

@@ -127,7 +127,7 @@ class ColSensors(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        uic.loadUi(f"{QT_DIR}/col_sensors.ui", self)
+        uic.loadUi(f"{QT_DIR}/col_1.ui", self)
 
         self._cells:          dict[str, SensorCell] = {}
         self._selected_id:    str | None = None
