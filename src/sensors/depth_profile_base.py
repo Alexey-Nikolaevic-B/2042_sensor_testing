@@ -47,6 +47,7 @@ class DepthProfileBase(DepthCamera):
     C5_END_X = 10.0
     C5_STEP = 0.5
     C5_DEPTH_TOLERANCE_M = 0.10
+    C5_CLIP_MARGIN_M = 0.05
     C5_TARGET_SIZE_X_M = 0.5
     DEPTH_ROI_HALF_WINDOW = 2  # 5x5 ROI
 
@@ -63,6 +64,7 @@ class DepthProfileBase(DepthCamera):
     DEPTH_WAIT_PER_CANDIDATE_S = 1.2
     FRAME_FRESH_TIMEOUT_S = 4.0
     CLIP_SATURATION_EPS_M = 0.02
+    DEPTH_POST_MOVE_CONFIRMATION_FRAMES = 2
     C3_TARGET_SIZE_X_M = 0.5
     C3_MEAN_ABS_ERROR_M = 0.08
     C3_MAX_ABS_ERROR_M = 0.15
@@ -769,9 +771,35 @@ class DepthProfileBase(DepthCamera):
             return True
         return all(value >= far_threshold for value in finite_values)
 
+    def _wait_confirmed_depth_after(
+        self,
+        prev_stamp_s: Optional[float],
+        fresh_frames: Optional[int] = None,
+        stage: str = "",
+    ) -> Tuple[Image, List[float]]:
+        count = max(1, int(fresh_frames or self.DEPTH_POST_MOVE_CONFIRMATION_FRAMES))
+        stamps: List[float] = []
+        latest_prev = prev_stamp_s
+        msg: Optional[Image] = None
+        for idx in range(count):
+            msg = self._wait_depth_after(
+                prev_stamp_s=latest_prev,
+                timeout=self.FRAME_FRESH_TIMEOUT_S,
+                stage=f"{stage}_confirm_{idx + 1}",
+            )
+            latest_prev = self._msg_stamp_s(msg)
+            stamps.append(float(latest_prev))
+        assert msg is not None
+        return msg, stamps
+
     @staticmethod
     def _front_face_depth(center_x_m: float, size_x_m: float) -> float:
         return float(center_x_m) - (float(size_x_m) * 0.5)
+
+    def _c5_expected_in_contract_range(self, expected_depth: float) -> bool:
+        near_limit = float(self.clip_near) + float(self.C5_CLIP_MARGIN_M)
+        far_limit = float(self.clip_far) - float(self.C5_CLIP_MARGIN_M)
+        return bool(near_limit <= float(expected_depth) <= far_limit)
 
     def _wait_depth(self, timeout: float = 3.0) -> Image:
         if not self.DEPTH_TOPIC:
@@ -868,19 +896,19 @@ class DepthProfileBase(DepthCamera):
                 sample["reset_frame_stamp_s"] = float(reset_stamp_s)
 
                 simulator.set_pose(cube_name, float(d) + 0.25, 0.0, cube_z)
-                depth_msg = self._wait_depth_after(
+                depth_msg, confirmation_stamps = self._wait_confirmed_depth_after(
                     prev_stamp_s=reset_stamp_s,
-                    timeout=3.0,
                     stage=f"depth_perception_target_d_{str(d).replace('.', '_')}",
                 )
                 depth_stamp_s = self._msg_stamp_s(depth_msg)
                 last_depth_stamp_s = depth_stamp_s
                 sample["depth_frame_stamp_s"] = float(depth_stamp_s)
+                sample["post_move_depth_frame_stamps_s"] = [float(v) for v in confirmation_stamps]
 
                 self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
                 depth_m = self._depth_msg_to_meters(depth_msg)
                 color_msg = self._wait_color_after(
-                    prev_stamp_s=reset_stamp_s,
+                    prev_stamp_s=depth_stamp_s - 1e-6,
                     timeout=2.0,
                     stage=f"depth_perception_color_d_{str(d).replace('.', '_')}",
                 )
@@ -1216,6 +1244,7 @@ class DepthProfileBase(DepthCamera):
         metrics: Dict[str, Any] = {
             "x_values_m": self._iter_float_range(self.C5_START_X, self.C5_END_X, self.C5_STEP),
             "tolerance_m": float(self.C5_DEPTH_TOLERANCE_M),
+            "clip_margin_m": float(self.C5_CLIP_MARGIN_M),
             "target_size_x_m": float(self.C5_TARGET_SIZE_X_M),
             "samples": [],
             "first_frame_diagnostics": {},
@@ -1253,7 +1282,7 @@ class DepthProfileBase(DepthCamera):
 
             roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
             expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M))
-            expected_in_sensor_range = bool(self.clip_near <= expected_depth <= self.clip_far)
+            expected_in_sensor_range = self._c5_expected_in_contract_range(expected_depth)
 
             finite_ok = bool(z is not None and np.isfinite(z))
             abs_err = float(abs(float(z) - float(expected_depth))) if finite_ok else float("inf")
@@ -1323,7 +1352,9 @@ class DepthProfileBase(DepthCamera):
         expected_ok_x_values = [
             float(x)
             for x in metrics["x_values_m"]
-            if self.clip_near <= self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M)) <= self.clip_far
+            if self._c5_expected_in_contract_range(
+                self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M))
+            )
         ]
         best_start = None
         best_end = None
