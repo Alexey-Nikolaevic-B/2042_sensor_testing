@@ -1161,10 +1161,15 @@ class StereoProfileBase(Sensor):
             self._save_frame("s2_c8_disparity_rois.png", dbg),
         ]
 
-        if not check_non_worse:
+        self._set_test_diagnostics(stereo_s2={"metrics": copy.deepcopy(metrics)})
+
+        if not (check_non_worse and check_gain_005):
             raise AssertionError(
-                f"S2 failed: textured_ratio={valid_ratio_textured:.4f} < smooth_ratio={valid_ratio_smooth:.4f}, "
-                f"gain={gain:.4f}"
+                "S2 failed: "
+                f"textured_ratio={valid_ratio_textured:.4f}, "
+                f"smooth_ratio={valid_ratio_smooth:.4f}, "
+                f"gain={gain:.4f}, "
+                f"required_gain>={self.S2_MIN_VALID_GAIN:.4f}"
             )
 
         return {"id": "S2", "metrics": metrics, "artifacts": artifacts}
