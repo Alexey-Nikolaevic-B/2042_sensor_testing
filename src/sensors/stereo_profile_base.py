@@ -562,7 +562,10 @@ class StereoProfileBase(Sensor):
     ) -> Tuple[Optional[float], int]:
         x, y, w, h = bbox
         roi = depth_map[y:y + h, x:x + w]
-        valid = roi[np.isfinite(roi) & (roi > 0.0)]
+        with np.errstate(invalid="ignore"):
+            finite = np.isfinite(roi)
+        valid = roi[finite]
+        valid = valid[valid > 0.0]
         if valid.size == 0:
             return None, 0
         return float(np.median(valid)), int(valid.size)
