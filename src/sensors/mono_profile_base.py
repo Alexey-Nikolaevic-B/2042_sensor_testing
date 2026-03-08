@@ -50,6 +50,7 @@ class MonoProfileBase(MonoCamera):
     C9_STEP = 0.05
     C9_MAX_Y = 4.0
     C9_MIN_CONTOUR_AREA = 120
+    C9_SPHERE_RADIUS_M = 0.1
     C10_NEAR_START_X = 0.05
     C10_NEAR_SEARCH_END_X = 2.0
     C10_NEAR_STEP = 0.01
@@ -976,32 +977,92 @@ class MonoProfileBase(MonoCamera):
     def c7_occlusion_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
         metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c7_occlusion_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
             "cases": dict(self.C7_CASES),
             "blue_pixels": {},
             "threshold": int(self.C7_MIN_PIXELS),
+            "status": "ERROR",
+            "error_reason": "",
         }
 
-        self._open_test_scene(simulator, "c7_occlusion_test")
+        def _store_c7_diag() -> str:
+            metrics_path = self._save_metrics_json("c7_occlusion_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c7_occlusion={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c7_diag()
+
+        try:
+            self._open_test_scene(simulator, "c7_occlusion_test")
+        except Exception as exc:
+            metrics["error_reason"] = f"scene_open_failed:{exc}"
+            _store_c7_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
+        _store_c7_diag()
+
         if not simulator.wait_for_model_spawn(self.C7_FRONT_CUBE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C7_FRONT_CUBE_NAME}"
+            _store_c7_diag()
             raise RuntimeError(f"Model not spawned: {self.C7_FRONT_CUBE_NAME}")
         if not simulator.wait_for_model_spawn(self.C7_BACK_CUBE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C7_BACK_CUBE_NAME}"
+            _store_c7_diag()
             raise RuntimeError(f"Model not spawned: {self.C7_BACK_CUBE_NAME}")
 
-        self._move_and_settle(simulator, self.C7_FRONT_CUBE_NAME, x=3.0, y=0.0, z=0.25)
+        try:
+            warmup_msg = self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"warmup_image_failed:{exc}"
+            _store_c7_diag()
+            raise RuntimeError(f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}") from exc
+
+        prev_stamp_s = self._msg_stamp_s(warmup_msg)
+
+        def _move_and_capture(model_name: str, x: float, y: float, z: float, settle_s: float = 0.35) -> np.ndarray:
+            nonlocal prev_stamp_s
+
+            self._move_and_settle(simulator, model_name, x=float(x), y=float(y), z=float(z), settle_s=settle_s)
+            msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            prev_stamp_s = self._msg_stamp_s(msg)
+            return self._msg_to_bgr(msg)
+
+        _move_and_capture(self.C7_BACK_CUBE_NAME, x=3.6, y=0.0, z=0.25)
 
         for case_name, y in self.C7_CASES.items():
-            self._move_and_settle(simulator, self.C7_BACK_CUBE_NAME, x=3.0, y=float(y), z=0.25)
-
-            msg = self._wait_image(timeout=35.0)
-            frame = self._msg_to_bgr(msg)
+            frame = _move_and_capture(self.C7_FRONT_CUBE_NAME, x=3.0, y=float(y), z=0.25)
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
             blue = self._color_mask(hsv, "blue")
             blue_count = self._count_pixels(blue)
             metrics["blue_pixels"][case_name] = int(blue_count)
 
-            debug = frame.copy()
-            cv2.putText(debug, f"{case_name}: blue={blue_count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+            debug = self._annotate(
+                frame,
+                [
+                    f"topic={resolved_topic}",
+                    f"{case_name}: blue={blue_count}",
+                    f"front_y={float(y):.2f}",
+                ],
+            )
             artifacts.append(self._save_frame(f"c7_{case_name}.png", debug))
 
         blue_25 = metrics["blue_pixels"].get("occ_25", 0)
@@ -1009,6 +1070,13 @@ class MonoProfileBase(MonoCamera):
         relation_ok = blue_25 > blue_50
         threshold_ok = blue_25 > self.C7_MIN_PIXELS and blue_50 > self.C7_MIN_PIXELS
         metrics["checks"] = {"occlusion_relation": bool(relation_ok), "threshold_ok": bool(threshold_ok)}
+        metrics["status"] = "PASS" if (relation_ok and threshold_ok) else "FAIL"
+        if not (relation_ok and threshold_ok):
+            metrics["error_reason"] = (
+                f"occlusion_mismatch: occ_25={blue_25}, occ_50={blue_50}, threshold={self.C7_MIN_PIXELS}"
+            )
+
+        metrics_path = _store_c7_diag()
 
         if not (relation_ok and threshold_ok):
             raise AssertionError(
@@ -1016,7 +1084,7 @@ class MonoProfileBase(MonoCamera):
                 f"threshold={self.C7_MIN_PIXELS}"
             )
 
-        return {"id": "C7", "metrics": metrics, "artifacts": artifacts}
+        return {"id": "C7", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c2_resolution_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
@@ -1136,23 +1204,70 @@ class MonoProfileBase(MonoCamera):
         x_fixed = 2.0
 
         metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c9_fov_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
             "x_fixed_m": float(x_fixed),
             "step_y_m": float(self.C9_STEP),
             "target_fov_rad": float(self.horizontal_fov),
+            "sphere_radius_m": float(self.C9_SPHERE_RADIUS_M),
             "samples": [],
+            "status": "ERROR",
+            "error_reason": "",
         }
 
-        self._open_test_scene(simulator, "c9_fov_test")
+        def _store_c9_diag() -> str:
+            metrics_path = self._save_metrics_json("c9_fov_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c9_fov={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c9_diag()
+
+        try:
+            self._open_test_scene(simulator, "c9_fov_test")
+        except Exception as exc:
+            metrics["error_reason"] = f"scene_open_failed:{exc}"
+            _store_c9_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
+        _store_c9_diag()
+
         if not simulator.wait_for_model_spawn(self.C9_SPHERE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C9_SPHERE_NAME}"
+            _store_c9_diag()
             raise RuntimeError(f"Model not spawned: {self.C9_SPHERE_NAME}")
 
+        try:
+            warmup_msg = self._wait_image(timeout=35.0, topic=resolved_topic)
+        except Exception as exc:
+            metrics["error_reason"] = f"warmup_image_failed:{exc}"
+            _store_c9_diag()
+            raise RuntimeError(f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}") from exc
+
+        prev_stamp_s = self._msg_stamp_s(warmup_msg)
         last_visible: Optional[Tuple[float, np.ndarray, int]] = None
         first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
 
         for y in self._iter_float_range(0.0, float(self.C9_MAX_Y), float(self.C9_STEP)):
             self._move_and_settle(simulator, self.C9_SPHERE_NAME, x=x_fixed, y=float(y), z=0.2, settle_s=0.35)
-
-            msg = self._wait_image(timeout=35.0)
+            msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            prev_stamp_s = self._msg_stamp_s(msg)
             frame = self._msg_to_bgr(msg)
             white = self._white_mask(frame)
             contours = self._large_contours(white, min_area=self.C9_MIN_CONTOUR_AREA, border_margin=4)
@@ -1168,37 +1283,62 @@ class MonoProfileBase(MonoCamera):
                 break
 
         if last_visible is None:
+            metrics["error_reason"] = "object_never_detected"
+            _store_c9_diag()
             raise AssertionError("C9 failed: object was never detected in frame")
         if first_not_visible is None:
+            metrics["error_reason"] = "object_never_lost"
+            _store_c9_diag()
             raise AssertionError("C9 failed: object did not disappear within tested Y range")
 
-        y_max = float(last_visible[0])
+        y_visible = float(last_visible[0])
         y_lost = float(first_not_visible[0])
-        measured_fov = float(2.0 * atan(y_max / x_fixed))
+        y_transition = float((y_visible + y_lost) / 2.0)
+        y_edge_estimate = float(y_transition + float(self.C9_SPHERE_RADIUS_M))
+        measured_fov = float(2.0 * atan(y_edge_estimate / x_fixed))
         target_fov = float(self.horizontal_fov)
         rel_error = float(abs(measured_fov - target_fov) / target_fov) if target_fov > 0 else float("inf")
 
         dbg_visible = self._annotate(
             last_visible[1],
-            [f"Ymax={y_max:.2f} m", f"FOVmeasured={measured_fov:.5f} rad", "visible=True"],
+            [
+                f"topic={resolved_topic}",
+                f"Yvisible={y_visible:.2f} m",
+                f"Yedge={y_edge_estimate:.2f} m",
+                f"FOVmeasured={measured_fov:.5f} rad",
+                "visible=True",
+            ],
         )
         artifacts.append(self._save_frame("c9_ymax_visible.png", dbg_visible))
 
         dbg_lost = self._annotate(
             first_not_visible[1],
-            [f"Y={y_lost:.2f} m", f"FOVtarget={target_fov:.5f} rad", "visible=False"],
+            [
+                f"topic={resolved_topic}",
+                f"Ylost={y_lost:.2f} m",
+                f"Yedge={y_edge_estimate:.2f} m",
+                f"FOVtarget={target_fov:.5f} rad",
+                "visible=False",
+            ],
         )
         artifacts.append(self._save_frame("c9_after_ymax_not_visible.png", dbg_lost))
 
-        metrics["y_max_visible_m"] = y_max
+        metrics["y_max_visible_m"] = y_visible
         metrics["y_first_not_visible_m"] = y_lost
+        metrics["y_transition_m"] = y_transition
+        metrics["y_edge_estimate_m"] = y_edge_estimate
         metrics["fov_measured_rad"] = measured_fov
         metrics["fov_measured_deg"] = float(degrees(measured_fov))
         metrics["fov_target_deg"] = float(degrees(target_fov))
         metrics["relative_error"] = rel_error
         metrics["checks"] = {"rel_error_le_0_02": bool(rel_error <= 0.02)}
+        metrics["status"] = "PASS" if rel_error <= 0.02 else "FAIL"
+        if rel_error > 0.02:
+            metrics["error_reason"] = (
+                f"fov_mismatch: measured={measured_fov:.6f}, target={target_fov:.6f}, rel_error={rel_error:.4f}"
+            )
 
-        metrics_path = self._save_metrics_json("c9_fov_metrics.json", metrics)
+        metrics_path = _store_c9_diag()
         if rel_error > 0.02:
             raise AssertionError(
                 f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
