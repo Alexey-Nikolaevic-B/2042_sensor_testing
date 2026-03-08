@@ -64,7 +64,7 @@ class TestMetaRow(QWidget):
 
     def _refresh_style(self):
         bar_color = Colors.STATUS_YELLOW if self.missing else Colors.ACCENT
-        bg        = Colors.BG_CARD_SEL if self._selected else "transparent"
+        bg        = Colors.TEXT_SECONDARY if self._selected else "transparent"
         self._bar.setStyleSheet(f"background-color: {bar_color};")
         self.setStyleSheet(f"""
             QWidget#TestMetaRow {{
@@ -72,7 +72,7 @@ class TestMetaRow(QWidget):
                 border-bottom: 1px solid {Colors.BORDER};
             }}
             QWidget#TestMetaRow:hover {{
-                background-color: {Colors.BG_CARD_HOVER};
+                background-color: {Colors.TEXT_PRIMARY};
             }}
         """)
 
@@ -222,7 +222,7 @@ class EditTestsDialog(QDialog):
     def _setup_styles(self):
         C = Colors
         self.setStyleSheet(f"""
-            QDialog {{
+            EditTestsDialog {{
                 background-color: {C.BG_COLUMN};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 6px;
@@ -241,15 +241,8 @@ class EditTestsDialog(QDialog):
                 background-color: {C.BG_COLUMN};
                 border-right: 1px solid {C.BORDER};
             }}
-            QScrollArea#scroll_tests_list {{
-                background-color: transparent;
-                border: none;
-            }}
-            QWidget#scroll_tests_list_contents {{
-                background-color: {C.BG_CARD};
-            }}
             QLabel#row_display {{
-                color: {C.TEXT_PRIMARY};
+                color: {C.TEXT_BLACK};
                 font-size: 13px;
                 background: transparent;
             }}
@@ -298,6 +291,7 @@ class EditTestsDialog(QDialog):
                 background: transparent;
             }}
             QLineEdit {{
+                background-color: {C.BG_INPUT};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
                 color: {C.TEXT_WHITE};
@@ -314,12 +308,11 @@ class EditTestsDialog(QDialog):
                 background-color: {C.BG_INPUT};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_PRIMARY};
+                color: {C.TEXT_WHITE};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
             QPlainTextEdit:focus {{ border-color: {C.ACCENT}; }}
-            QLineEdit[text=""] {{ color: {C.TEXT_MUTED}; }}
             QLabel#lbl_missing_warn {{
                 color: {C.STATUS_YELLOW};
                 background-color: #2a2000;
@@ -357,6 +350,7 @@ class EditTestsDialog(QDialog):
                 border-radius: 4px;
             }}
             QPushButton#btn_close:hover {{ background-color: {C.BG_CARD_HOVER}; }}
+
             {Styles.SCROLLBAR}
         """)
 

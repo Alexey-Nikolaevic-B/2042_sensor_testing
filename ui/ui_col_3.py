@@ -283,7 +283,7 @@ class ColTests(QWidget):
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
-            QWidget {{ background-color: {Colors.BG_COLUMN}; }}
+            QWidget#ColSensors {{ background-color: {Colors.BG_COLUMN}; }}
             QWidget#wt_toolbar {{
                 background-color: {Colors.BG_TOOLBAR};
                 border-bottom: 1px solid {Colors.BORDER};
@@ -299,8 +299,8 @@ class ColTests(QWidget):
                 font-weight: bold;
                 padding: 0 12px;
             }}
-            QScrollArea {{ border: none; background-color: transparent; }}
-            QWidget#scroll_tests_contents {{ background-color: transparent; }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QWidget#scroll_tests_contents {{ background: transparent; }}
             {Styles.SCROLLBAR}
         """)
         self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)

@@ -78,15 +78,11 @@ class AddSensorDialog(QDialog):
         self.image_container.mousePressEvent = lambda _: self._pick_image()
 
     def _pick_image(self):
-        dlg = QFileDialog(self, "Choose sensor image", "",
-                          "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
-        dlg.setStyleSheet("")
-        if dlg.exec_():
-            paths = dlg.selectedFiles()
-            if not paths:
-                return
-            path = paths[0]
-        else:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose sensor image", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if not path:
             return
         self._image_source = path
         px = QPixmap(path)
@@ -95,15 +91,11 @@ class AddSensorDialog(QDialog):
             self.image_label.setText("")
 
     def _pick_sdf(self):
-        dlg = QFileDialog(self, "Choose SDF file", "",
-                          "SDF files (*.sdf);;All files (*)")
-        dlg.setStyleSheet("")
-        if dlg.exec_():
-            paths = dlg.selectedFiles()
-            if not paths:
-                return
-            path = paths[0]
-        else:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choose SDF file", "",
+            "SDF files (*.sdf);;All files (*)"
+        )
+        if not path:
             return
         self._sdf_source = path
         self.sdf_label.setText(os.path.basename(path))
@@ -139,22 +131,23 @@ class AddSensorDialog(QDialog):
         )
 
     def _populate_params(self, params: dict):
-        while self.params_layout.count() > 1:
-            item = self.params_layout.takeAt(0)
+        layout = self.params_contents.layout()
+        while layout.count() > 1:
+            item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._params = dict(params)
         if params:
             for key, value in params.items():
-                self.params_layout.insertWidget(
-                    self.params_layout.count() - 1,
+                layout.insertWidget(
+                    layout.count() - 1,
                     self._make_param_row(key, str(value))
                 )
         else:
             lbl = QLabel("No parameters detected.\nWill populate after backend SDF validation.")
             lbl.setObjectName("params_placeholder")
             lbl.setWordWrap(True)
-            self.params_layout.insertWidget(0, lbl)
+            layout.insertWidget(0, lbl)
 
     def _make_param_row(self, key: str, value: str) -> QWidget:
         row = QFrame()
@@ -208,7 +201,7 @@ class AddSensorDialog(QDialog):
             "type":        self._detected_type or "unknown",
             "sdf_path":    sdf_dest,
             "image_path":  image_dest,
-            "description": self.input_description.toPlainText().strip(),
+            "description": self._sensor_data.get("description", ""),
             "params":      dict(self._params),
         }
         if self._sensor_id:
@@ -234,7 +227,7 @@ class AddSensorDialog(QDialog):
     def _setup_styles(self):
         C = Colors
         self.setStyleSheet(f"""
-            QDialog {{
+            AddSensorDialog {{
                 background-color: {C.BG_CARD};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 6px;
@@ -247,7 +240,6 @@ class AddSensorDialog(QDialog):
                 color: {C.TEXT_WHITE};
                 font-size: 14px;
                 font-weight: bold;
-                background-color: {C.BG_TOOLBAR};
             }}
             QPushButton#btn_dialog_close {{
                 background: transparent; border: none; border-radius: 4px;
@@ -294,12 +286,6 @@ class AddSensorDialog(QDialog):
             QPlainTextEdit#input_description:focus {{
                 border-color: {C.ACCENT};
             }}
-            QScrollArea#params_scroll {{
-                background-color: {C.BG_COLUMN};
-                border: 1px solid {C.BORDER};
-                border-radius: 4px;
-            }}
-            QWidget#params_contents {{ background-color: {C.BG_COLUMN}; }}
             QFrame#param_row {{
                 background-color: transparent;
                 border-bottom: 1px solid {C.BORDER};
@@ -342,10 +328,16 @@ class AddSensorDialog(QDialog):
                 font-weight: bold;
                 padding: 0 20px;
             }}
-            QPushButton#btn_save:hover {{ background-color: #1e3d50; }}
+            QPushButton#btn_save:hover {{ background-color: white; }}
             QPushButton#btn_save:pressed {{ background-color: {C.BG_APP}; }}
-            {Styles.SCROLLBAR}
+            QScrollArea#params_scroll QLineEdit#field_input {{
+                background-color: #f5f5f5;
+                border: 1px solid #cccccc;
+                color: #111111;
+            }}
         """)
+
+
         self.btn_dialog_close.setIcon(Icons.CLOSE())
         self.btn_dialog_close.setIconSize(Layout.ICON_SIZE_SM)
         # Initial state: dot muted until SDF loaded

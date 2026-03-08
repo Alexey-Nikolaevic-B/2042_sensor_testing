@@ -135,7 +135,7 @@ class ColDetails(QWidget):
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
-            QWidget {{ background-color: {Colors.BG_COLUMN}; }}
+            QWidget#ColDetails {{ background-color: {Colors.BG_COLUMN}; }}
             QWidget#wt_toolbar {{
                 background-color: {Colors.BG_TOOLBAR};
                 border-bottom: 1px solid {Colors.BORDER};

@@ -25,6 +25,7 @@ class Colors:
     TEXT_SECONDARY = "#888888"
     TEXT_MUTED     = "#484848"
     TEXT_WHITE     = "#ffffff"
+    TEXT_BLACK     = "#111111"
     ACCENT         = "#4fc3f7"
     ACCENT_DIM     = "#193040"
     ACCENT_HOVER   = "#29b6f6"
