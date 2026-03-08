@@ -470,7 +470,8 @@ class SimulationManager:
             for expected_topic in expected:
                 if expected_topic in resolved:
                     continue
-                selected = self._match_expected_topic(expected_topic, published)
+                available_topics = [topic for topic in published if topic not in resolved.values()]
+                selected = self._match_expected_topic(expected_topic, available_topics)
                 if selected:
                     resolved[expected_topic] = selected
 

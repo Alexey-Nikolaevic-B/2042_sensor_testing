@@ -1082,7 +1082,9 @@ class StereoProfileBase(Sensor):
         wall_band = np.zeros((h, w), dtype=bool)
         wall_band[y0:y1, x0:x1] = True
 
-        wall_depth_mask = np.isfinite(depth_map) & (depth_map >= 4.2) & (depth_map <= 5.8)
+        finite_depth = np.isfinite(depth_map)
+        wall_depth_mask = np.zeros((h, w), dtype=bool)
+        wall_depth_mask[finite_depth] = (depth_map[finite_depth] >= 4.2) & (depth_map[finite_depth] <= 5.8)
         wall_mask = wall_band & wall_depth_mask
 
         left_half_mask = np.zeros((h, w), dtype=bool)
