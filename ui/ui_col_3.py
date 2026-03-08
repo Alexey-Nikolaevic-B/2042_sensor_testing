@@ -47,6 +47,17 @@ class ColTests(QWidget):
         self._load_test_image(sensor_data.get("test_image_path", ""))
         self._populate_tests(sensor_data.get("tests", []))
 
+    def clear(self):
+        """Reset column to empty state (called when sensor is deleted or deselected)."""
+        self._sensor_data    = None
+        self._sensor_id      = None
+        self._sensor_backend = None
+        self.lbl_test_image.clear()
+        self.lbl_test_image.setText("no test image")
+        self.lbl_selected_test_name.setText("—")
+        self.lbl_test_description.setText("")
+        self._populate_tests([])
+
     def append_log(self, text: str):
         pass
 

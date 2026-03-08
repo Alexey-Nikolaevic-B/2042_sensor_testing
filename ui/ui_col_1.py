@@ -1,24 +1,30 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QSizePolicy, QMenu, QAction
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
+    QSizePolicy, QMenu, QAction, QPushButton,
+)
 from PyQt5.QtCore import pyqtSignal, Qt
+from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
+from .theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR
 
 
 class SensorCell(QFrame):
-    clicked = pyqtSignal(str)
+    clicked        = pyqtSignal(str)
+    delete_clicked = pyqtSignal(str)
 
     STATUS_COLORS = {
-        "all_passed": Colors.STATUS_GREEN,
-        "some_failed": Colors.STATUS_YELLOW,
-        "all_failed": Colors.STATUS_RED,
+        "all_passed":   Colors.STATUS_GREEN,
+        "some_failed":  Colors.STATUS_YELLOW,
+        "all_failed":   Colors.STATUS_RED,
         "never_tested": Colors.STATUS_BLUE,
     }
 
     def __init__(self, sensor_data: dict, parent=None):
         super().__init__(parent)
-        self._data = sensor_data
+        self._data     = sensor_data
         self._selected = False
+        self._delete_mode = False
         self.setFixedHeight(Layout.SENSOR_CELL_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
         self._build()
@@ -38,6 +44,40 @@ class SensorCell(QFrame):
         self._lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         h.addWidget(self._lbl)
 
+        self._btn_trash = QPushButton()
+        self._btn_trash.setFixedSize(28, 28)
+        self._btn_trash.setIcon(QIcon(f"{ICON_DIR}/clear.png"))
+        self._btn_trash.setIconSize(Layout.ICON_SIZE_SM)
+        self._btn_trash.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(239, 68, 68, 0.20);
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(239, 68, 68, 0.40);
+            }}
+        """)
+        self._btn_trash.setVisible(False)
+        self._btn_trash.clicked.connect(lambda: self.delete_clicked.emit(self._data["id"]))
+        h.addWidget(self._btn_trash)
+        h.setContentsMargins(0, 0, 4, 0)
+
+        self._update_bar_color()
+
+    def set_delete_mode(self, active: bool):
+        self._delete_mode = active
+        self._btn_trash.setVisible(active)
+
+    def set_selected(self, selected: bool):
+        self._apply_style(selected)
+
+    def refresh(self, sensor_data: dict):
+        self._data = sensor_data
+        self._lbl.setText(sensor_data.get("name", ""))
         self._update_bar_color()
 
     def _status_key(self) -> str:
@@ -74,14 +114,6 @@ class SensorCell(QFrame):
             f" font-size: 13px; background-color: transparent;"
         )
 
-    def set_selected(self, selected: bool):
-        self._apply_style(selected)
-
-    def refresh(self, sensor_data: dict):
-        self._data = sensor_data
-        self._lbl.setText(sensor_data.get("name", ""))
-        self._update_bar_color()
-
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self._data["id"])
@@ -89,21 +121,24 @@ class SensorCell(QFrame):
 
 
 class ColSensors(QWidget):
-    sensor_selected = pyqtSignal(str)
+    sensor_selected  = pyqtSignal(str)
+    add_requested    = pyqtSignal()
+    delete_requested = pyqtSignal(str)   # sensor_id
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_sensors.ui", self)
 
-        self._cells: dict[str, SensorCell] = {}
-        self._selected_id: str | None = None
+        self._cells:          dict[str, SensorCell] = {}
+        self._selected_id:    str | None = None
         self._current_filter: str | None = None
-        self._all_sensors: list[dict] = []
+        self._all_sensors:    list[dict] = []
+        self._delete_mode:    bool       = False
 
         self._setup_styles()
         self._setup_filter_menu()
         self._connect_signals()
-        self._remove_filter()
+
 
     def load_sensors(self, sensors: list[dict], types: list[str]):
         self._all_sensors = sensors
@@ -121,6 +156,24 @@ class ColSensors(QWidget):
         self._selected_id = sensor_id
         if sensor_id and sensor_id in self._cells:
             self._cells[sensor_id].set_selected(True)
+
+    def remove_cell(self, sensor_id: str):
+        cell = self._cells.pop(sensor_id, None)
+        if cell:
+            cell.deleteLater()
+        if self._selected_id == sensor_id:
+            self._selected_id = None
+
+
+    def _toggle_delete_mode(self, active: bool):
+        self._delete_mode = active
+        for cell in self._cells.values():
+            cell.set_delete_mode(active)
+        checked_style = (
+            Styles.BUTTON_ICON +
+            f"QPushButton {{ background-color: {Colors.ACCENT_DIM}; border-radius: 4px; }}"
+        )
+        self.btn_delete.setStyleSheet(checked_style if active else Styles.BUTTON_ICON)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
@@ -157,7 +210,8 @@ class ColSensors(QWidget):
         for btn, icon in [
             (self.btn_filter,       Icons.FILTER()),
             (self.btn_add,          Icons.ADD()),
-            (self.btn_clear_filter, Icons.CLOSE()),
+            (self.btn_delete,       Icons.CLEAR()),
+            (self.btn_clear_filter, Icons.CLOSE_BLK()),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)
@@ -188,6 +242,8 @@ class ColSensors(QWidget):
     def _connect_signals(self):
         self.input_search.textChanged.connect(self._apply_search)
         self.btn_clear_filter.clicked.connect(self._remove_filter)
+        self.btn_add.clicked.connect(self.add_requested)
+        self.btn_delete.toggled.connect(self._toggle_delete_mode)
 
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()
@@ -196,19 +252,22 @@ class ColSensors(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._cells.clear()
-
         for s in sensors:
-            cell = SensorCell(s, parent=self)
-            cell.clicked.connect(self._on_cell_clicked)
+            cell = self._make_cell(s)
             layout.addWidget(cell)
-            self._cells[s["id"]] = cell
+        layout.addStretch(1)
 
-        filler = QWidget()
-        filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        filler.setStyleSheet(f"background-color: {Colors.BG_CARD};")
-        layout.addWidget(filler)
+    def _make_cell(self, sensor_data: dict) -> SensorCell:
+        cell = SensorCell(sensor_data, parent=self)
+        cell.set_delete_mode(self._delete_mode)
+        cell.clicked.connect(self._on_cell_clicked)
+        cell.delete_clicked.connect(self.delete_requested)
+        self._cells[sensor_data["id"]] = cell
+        return cell
 
     def _on_cell_clicked(self, sensor_id: str):
+        if self._delete_mode:
+            return
         self.set_selected(sensor_id)
         self.sensor_selected.emit(sensor_id)
 

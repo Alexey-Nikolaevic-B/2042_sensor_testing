@@ -4,6 +4,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
 from .theme import Colors, Styles, Icons, Layout, QT_DIR
+from .ui_add_sensor_dialog import AddSensorDialog
 
 DESCRIPTION_STYLE = f"""
     QScrollArea {{
@@ -32,6 +33,7 @@ DESC_H    = 72
 class ColDetails(QWidget):
     save_requested    = pyqtSignal(dict)
     save_as_requested = pyqtSignal(dict)
+    sensor_updated    = pyqtSignal(dict)   # emitted after edit dialog saves
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,12 +119,19 @@ class ColDetails(QWidget):
                 item.widget().deleteLater()
 
     def _connect_signals(self):
-        self.btn_save.clicked.connect(
-            lambda: self.save_requested.emit(self._sensor_data or {})
-        )
-        self.btn_save_as.clicked.connect(
-            lambda: self.save_as_requested.emit(self._sensor_data or {})
-        )
+        self.btn_edit.clicked.connect(self._on_edit)
+
+    def _on_edit(self):
+        if not self._sensor_data:
+            return
+        dlg = AddSensorDialog(parent=self, sensor_data=self._sensor_data)
+        dlg.sensor_saved.connect(self._on_edit_saved)
+        dlg.exec_()
+
+    def _on_edit_saved(self, sensor_dict: dict):
+        self.sensor_updated.emit(sensor_dict)
+        # Refresh the column with new data immediately
+        self.load_sensor(sensor_dict)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
@@ -153,8 +162,6 @@ class ColDetails(QWidget):
         """)
         self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)
         for btn, icon, style in [
-            (self.btn_save,    Icons.SAVE(), Styles.BUTTON_DEFAULT),
-            (self.btn_save_as, Icons.SAVE(), Styles.BUTTON_DEFAULT),
             (self.btn_edit,    Icons.EDIT(), Styles.BUTTON_ICON),
         ]:
             btn.setIcon(icon)

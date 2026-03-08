@@ -8,7 +8,9 @@ from .ui_col_1 import ColSensors
 from .ui_col_2 import ColDetails
 from .ui_col_3 import ColTests
 from .ui_col_4 import ColCapture
-from sensor_repository import SensorRepository
+from .sensor_repository import SensorRepository
+from .ui_add_sensor_dialog import AddSensorDialog
+
 
 class Main_UI(QMainWindow):
 
@@ -79,8 +81,11 @@ class Main_UI(QMainWindow):
         self.btn_close.clicked.connect(self.close)
 
         self.col_sensors.sensor_selected.connect(self._on_sensor_selected)
+        self.col_sensors.add_requested.connect(self._on_add_sensor)
+        self.col_sensors.delete_requested.connect(self._on_delete_sensor)
 
-        # self.col_tests._runner_log_forward = self.col_capture.append_log
+
+        self.col_tests._runner_log_forward = self.col_capture.append_log
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()
@@ -88,9 +93,11 @@ class Main_UI(QMainWindow):
         types   = repo.get_types()
         self.col_sensors.load_sensors(sensors, types)
 
+
         repo.sensor_added.connect(lambda _: self._reload_sensors())
         repo.sensor_updated.connect(lambda _: self._reload_sensors())
         repo.test_updated.connect(self._on_test_updated)
+
 
     def _on_sensor_selected(self, sensor_id: str):
         repo = SensorRepository.instance()
@@ -103,13 +110,60 @@ class Main_UI(QMainWindow):
 
     def _reload_sensors(self):
         repo = SensorRepository.instance()
+        prev_id = self.col_sensors._selected_id
         self.col_sensors.load_sensors(repo.all_sensors(), repo.get_types())
+        if prev_id:
+            self.col_sensors.set_selected(prev_id)
+
+            sensor = repo.get_sensor(prev_id)
+            if sensor:
+                self.col_details.load_sensor(sensor)
+                self.col_tests.load_sensor(sensor)
 
     def _on_test_updated(self, sensor_id: str):
         repo   = SensorRepository.instance()
         sensor = repo.get_sensor(sensor_id)
         if sensor:
             self.col_sensors.refresh_sensor(sensor)
+
+    def _on_add_sensor(self):
+        dlg = AddSensorDialog(parent=self)
+        dlg.sensor_saved.connect(self._on_sensor_saved)
+        dlg.exec_()
+
+    def _on_sensor_edited(self, sensor_dict: dict):
+        repo = SensorRepository.instance()
+        sensor_id = sensor_dict.get('id')
+        if not sensor_id:
+            return
+        try:
+            updated = repo.update_sensor(sensor_id, sensor_dict)
+            self.col_sensors.refresh_sensor(updated)
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, 'Update failed', str(e))
+
+    def _on_delete_sensor(self, sensor_id: str):
+        repo = SensorRepository.instance()
+        try:
+            was_selected = (self.col_sensors._selected_id == sensor_id)
+            repo.delete_sensor(sensor_id)
+            self.col_sensors.remove_cell(sensor_id)
+            if was_selected:
+                self.col_details.clear()
+                self.col_tests.clear()
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, 'Delete failed', str(e))
+
+    def _on_sensor_saved(self, sensor_dict: dict):
+        repo = SensorRepository.instance()
+        try:
+            repo.add_sensor(sensor_dict)
+            # repo.sensor_added signal triggers _reload_sensors automatically
+        except Exception as e:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Save failed", str(e))
 
     def _toggle_maximize(self):
         if self._is_maximized:

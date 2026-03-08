@@ -10,7 +10,7 @@ setup_logging()
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 from src.core import Core
-from sensor_repository import SensorRepository
+from ui.sensor_repository import SensorRepository
 from ui.test_runner import TestRunner
 from ui.ui_main import Main_UI
 

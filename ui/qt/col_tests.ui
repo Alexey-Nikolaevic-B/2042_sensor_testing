@@ -127,7 +127,7 @@
         <x>0</x>
         <y>0</y>
         <width>220</width>
-        <height>72</height>
+        <height>177</height>
        </rect>
       </property>
       <layout class="QVBoxLayout" name="desc_layout">
@@ -183,7 +183,7 @@
         <x>0</x>
         <y>0</y>
         <width>220</width>
-        <height>72</height>
+        <height>176</height>
        </rect>
       </property>
       <layout class="QVBoxLayout" name="tests_list_layout">
