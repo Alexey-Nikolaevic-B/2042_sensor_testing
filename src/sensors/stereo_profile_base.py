@@ -250,6 +250,25 @@ class StereoProfileBase(Sensor):
         )
         return prioritized[0]
 
+    @staticmethod
+    def _looks_like_side_topic(topic: str, side: str) -> bool:
+        normalized = str(topic or "").strip()
+        if not normalized:
+            return False
+        if side == "left":
+            return ("/left/" in normalized) or ("_left/" in normalized) or normalized.endswith("_left/image_raw")
+        if side == "right":
+            return ("/right/" in normalized) or ("_right/" in normalized) or normalized.endswith("_right/image_raw")
+        return False
+
+    @classmethod
+    def _is_valid_stereo_pair(cls, left_topic: str, right_topic: str) -> bool:
+        left = str(left_topic or "").strip()
+        right = str(right_topic or "").strip()
+        if not left or not right or left == right:
+            return False
+        return bool(cls._looks_like_side_topic(left, "left") and cls._looks_like_side_topic(right, "right"))
+
     def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
         expected_left = str(self.LEFT_IMAGE_TOPIC)
         expected_right = str(self.RIGHT_IMAGE_TOPIC)
@@ -258,7 +277,7 @@ class StereoProfileBase(Sensor):
         sensor_name = str(self.sensor_name)
 
         preferred_pairs: List[Tuple[str, str, str]] = []
-        if cached_left and cached_right:
+        if self._is_valid_stereo_pair(cached_left, cached_right):
             preferred_pairs.append((cached_left, cached_right, "scene_resolved"))
         if expected_left and expected_right and (expected_left, expected_right) != (cached_left, cached_right):
             preferred_pairs.append((expected_left, expected_right, "expected"))
@@ -275,7 +294,7 @@ class StereoProfileBase(Sensor):
             topics = self._list_image_topics()
             last_topics = topics
             for left_topic, right_topic, source in preferred_pairs:
-                if left_topic in topics and right_topic in topics:
+                if self._is_valid_stereo_pair(left_topic, right_topic) and left_topic in topics and right_topic in topics:
                     return left_topic, right_topic, {
                         "expected_left": expected_left,
                         "expected_right": expected_right,
@@ -287,7 +306,7 @@ class StereoProfileBase(Sensor):
                     }
             time.sleep(0.2)
 
-        if expected_left in last_topics and expected_right in last_topics:
+        if self._is_valid_stereo_pair(expected_left, expected_right) and expected_left in last_topics and expected_right in last_topics:
             return expected_left, expected_right, {
                 "expected_left": expected_left,
                 "expected_right": expected_right,
@@ -299,7 +318,7 @@ class StereoProfileBase(Sensor):
             }
 
         for left_topic, right_topic, source in preferred_pairs[1:]:
-            if left_topic in last_topics and right_topic in last_topics:
+            if self._is_valid_stereo_pair(left_topic, right_topic) and left_topic in last_topics and right_topic in last_topics:
                 return left_topic, right_topic, {
                     "expected_left": expected_left,
                     "expected_right": expected_right,
@@ -327,6 +346,11 @@ class StereoProfileBase(Sensor):
         ns_right = [t for t in right_candidates if token in t]
         selected_left = self._choose_topic(ns_left) or cached_left or expected_left
         selected_right = self._choose_topic(ns_right) or cached_right or expected_right
+        if not self._is_valid_stereo_pair(selected_left, selected_right):
+            distinct_ns_left = [t for t in ns_left if t != selected_right]
+            distinct_ns_right = [t for t in ns_right if t != selected_left]
+            selected_left = self._choose_topic(distinct_ns_left) or selected_left
+            selected_right = self._choose_topic(distinct_ns_right) or selected_right
 
         return selected_left, selected_right, {
             "expected_left": expected_left,
@@ -336,6 +360,8 @@ class StereoProfileBase(Sensor):
             "selected_source": "heuristic_sensor_namespace",
             "topics_found": last_topics,
             "topic_mapping_changed": bool(selected_left != expected_left or selected_right != expected_right),
+            "scene_resolved_left": cached_left,
+            "scene_resolved_right": cached_right,
         }
 
     def _wait_pair_closest(
