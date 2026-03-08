@@ -233,6 +233,10 @@ class StereoProfileBase(Sensor):
         return stamp
 
     @staticmethod
+    def _pair_stamp(left_msg: Image, right_msg: Image) -> float:
+        return float(max(StereoProfileBase._msg_stamp(left_msg), StereoProfileBase._msg_stamp(right_msg)))
+
+    @staticmethod
     def _list_image_topics() -> List[str]:
         try:
             published = rospy.get_published_topics()
@@ -356,6 +360,7 @@ class StereoProfileBase(Sensor):
         timeout: float = 25.0,
         retries: int = 3,
         max_skew_s: float = 0.08,
+        min_pair_stamp_s: Optional[float] = None,
     ) -> Tuple[Image, Image, float]:
         try:
             import message_filters
@@ -370,6 +375,7 @@ class StereoProfileBase(Sensor):
                 "timeout_s": float(timeout),
                 "retries": int(retries),
                 "max_skew_s": float(max_skew_s),
+                "min_pair_stamp_s": None if min_pair_stamp_s is None else float(min_pair_stamp_s),
                 "queue_size": int(self.PAIR_QUEUE_SIZE),
                 "slop_s": float(self.PAIR_SLOP_S),
                 "attempts": [],
@@ -400,10 +406,17 @@ class StereoProfileBase(Sensor):
                 with lock:
                     if pair_holder:
                         return
+                    pair_stamp = self._pair_stamp(left_msg, right_msg)
+                    if min_pair_stamp_s is not None and pair_stamp <= float(min_pair_stamp_s) + 1e-6:
+                        attempt_diag["pairs_rejected_before_min_stamp"] = int(
+                            attempt_diag.get("pairs_rejected_before_min_stamp", 0)
+                        ) + 1
+                        return
                     skew = abs(self._msg_stamp(left_msg) - self._msg_stamp(right_msg))
                     pair_holder["left"] = left_msg
                     pair_holder["right"] = right_msg
                     pair_holder["skew"] = float(skew)
+                    pair_holder["pair_stamp"] = float(pair_stamp)
 
             left_counter_sub = rospy.Subscriber(left_topic, Image, _left_count, queue_size=200)
             right_counter_sub = rospy.Subscriber(right_topic, Image, _right_count, queue_size=200)
@@ -438,8 +451,10 @@ class StereoProfileBase(Sensor):
                 has_pair = bool(pair_holder)
                 if has_pair:
                     skew = float(pair_holder["skew"])
+                    pair_stamp = float(pair_holder["pair_stamp"])
                     attempt_diag["pair_received"] = True
                     attempt_diag["pair_skew_s"] = skew
+                    attempt_diag["pair_stamp_s"] = pair_stamp
                     pair_diag["attempts"].append(attempt_diag)
                     self._set_test_diagnostics(stereo_pair_capture=pair_diag)
                     if skew <= float(max_skew_s):
@@ -753,14 +768,21 @@ class StereoProfileBase(Sensor):
         if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
 
+        warm_left_msg, warm_right_msg, _ = self._wait_pair_closest(
+            timeout=float(self.PAIR_TIMEOUT_S),
+            retries=int(self.PAIR_RETRIES),
+            max_skew_s=float(self.PAIR_MAX_SKEW_S),
+        )
+        prev_pair_stamp = self._pair_stamp(warm_left_msg, warm_right_msg)
         self._move_and_settle(simulator, self.C1_CUBE_NAME, x=3.0, y=0.0, z=0.25)
-
-        data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
-        if data is None:
-            raise RuntimeError("No stereo frames")
-
-        left = data["left_cv"]
-        right = data["right_cv"]
+        left_msg, right_msg, skew = self._wait_pair_closest(
+            timeout=float(self.PAIR_TIMEOUT_S),
+            retries=int(self.PAIR_RETRIES),
+            max_skew_s=float(self.PAIR_MAX_SKEW_S),
+            min_pair_stamp_s=float(prev_pair_stamp),
+        )
+        left = self._msg_to_bgr(left_msg)
+        right = self._msg_to_bgr(right_msg)
 
         left_hsv = cv2.cvtColor(left, cv2.COLOR_BGR2HSV)
         right_hsv = cv2.cvtColor(right, cv2.COLOR_BGR2HSV)
@@ -773,7 +795,8 @@ class StereoProfileBase(Sensor):
 
         l_center_x = lx + lw / 2.0
         r_center_x = rx + rw / 2.0
-        disparity_px = abs(l_center_x - r_center_x)
+        disparity_px_signed = float(l_center_x - r_center_x)
+        disparity_px = float(abs(disparity_px_signed))
 
         left_dbg = left.copy()
         right_dbg = right.copy()
@@ -782,18 +805,25 @@ class StereoProfileBase(Sensor):
         self._save_frame("stereo_disparity_left.png", left_dbg)
         self._save_frame("stereo_disparity_right.png", right_dbg)
 
-        if disparity_px < float(self.MIN_DISPARITY_PX):
-            raise AssertionError(f"Disparity too small: {disparity_px} px < {self.MIN_DISPARITY_PX}")
+        metrics = {
+            "left_center_x": float(l_center_x),
+            "right_center_x": float(r_center_x),
+            "disparity_px": float(disparity_px),
+            "disparity_px_signed": float(disparity_px_signed),
+            "min_disparity_px": float(self.MIN_DISPARITY_PX),
+            "pair_skew_s": float(skew),
+            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
+        }
+        self._set_test_diagnostics(stereo_disparity={"metrics": dict(metrics)})
+
+        if disparity_px_signed < float(self.MIN_DISPARITY_PX):
+            raise AssertionError(
+                f"Signed disparity too small or inverted: {disparity_px_signed} px < {self.MIN_DISPARITY_PX}"
+            )
 
         return {
             "id": "STEREO_DISPARITY",
-            "metrics": {
-                "left_center_x": float(l_center_x),
-                "right_center_x": float(r_center_x),
-                "disparity_px": float(disparity_px),
-                "min_disparity_px": float(self.MIN_DISPARITY_PX),
-                "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
-            },
+            "metrics": metrics,
         }
 
     def stereo_occlusion_test(self, simulator) -> Dict[str, Any]:
@@ -835,13 +865,18 @@ class StereoProfileBase(Sensor):
             "occluder_model": str(self.C7_FRONT_CUBE_NAME),
             "occluded_model": str(self.C7_BACK_CUBE_NAME),
             "occluder_motion": {"before": move_before, "cases": {}, "back_cube": move_back},
+            "pair_skew_s": {"before": None, "cases": {}},
         }
 
         # Базовый кадр до окклюзии
-        base_data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
-        if base_data is None:
-            raise RuntimeError("No stereo frames for baseline before occlusion")
-        for side, frame in (("left", base_data["left_cv"]), ("right", base_data["right_cv"])):
+        base_left_msg, base_right_msg, base_skew = self._wait_pair_closest(
+            timeout=float(self.PAIR_TIMEOUT_S),
+            retries=int(self.PAIR_RETRIES),
+            max_skew_s=float(self.PAIR_MAX_SKEW_S),
+        )
+        prev_pair_stamp = self._pair_stamp(base_left_msg, base_right_msg)
+        metrics["pair_skew_s"]["before"] = float(base_skew)
+        for side, frame in (("left", self._msg_to_bgr(base_left_msg)), ("right", self._msg_to_bgr(base_right_msg))):
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             blue = self._color_mask(hsv, "blue")
             blue_count = self._count_pixels(blue)
@@ -871,11 +906,16 @@ class StereoProfileBase(Sensor):
             if not move_diag.get("set_model_state", {}).get("success", False):
                 raise RuntimeError(f"set_model_state failed for {case_name}: {move_diag}")
 
-            data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
-            if data is None:
-                raise RuntimeError(f"No stereo frames for case {case_name}")
+            left_msg, right_msg, skew = self._wait_pair_closest(
+                timeout=float(self.PAIR_TIMEOUT_S),
+                retries=int(self.PAIR_RETRIES),
+                max_skew_s=float(self.PAIR_MAX_SKEW_S),
+                min_pair_stamp_s=float(prev_pair_stamp),
+            )
+            prev_pair_stamp = self._pair_stamp(left_msg, right_msg)
+            metrics["pair_skew_s"]["cases"][case_name] = float(skew)
 
-            for side, frame in (("left", data["left_cv"]), ("right", data["right_cv"])):
+            for side, frame in (("left", self._msg_to_bgr(left_msg)), ("right", self._msg_to_bgr(right_msg))):
                 hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 blue = self._color_mask(hsv, "blue")
                 blue_count = self._count_pixels(blue)
@@ -899,12 +939,18 @@ class StereoProfileBase(Sensor):
 
             relation_ok = blue_25 > blue_50
             threshold_ok = blue_25 > self.C7_MIN_PIXELS and blue_50 > self.C7_MIN_PIXELS
+            metrics[side]["checks"] = {
+                "occlusion_relation": bool(relation_ok),
+                "threshold_ok": bool(threshold_ok),
+            }
 
             if not (relation_ok and threshold_ok):
+                self._set_test_diagnostics(stereo_occlusion={"metrics": copy.deepcopy(metrics)})
                 raise AssertionError(
                     f"Stereo C7 failed on {side}: blue_25={blue_25}, blue_50={blue_50}, threshold={self.C7_MIN_PIXELS}"
                 )
 
+        self._set_test_diagnostics(stereo_occlusion={"metrics": copy.deepcopy(metrics)})
         return {"id": "STEREO_C7", "metrics": metrics}
 
     def s1_stereo_accuracy_test(self, simulator) -> Dict[str, Any]:
