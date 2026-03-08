@@ -56,6 +56,8 @@ class DepthProfileBase(DepthCamera):
     C6_MIN_CHANGED_RATIO = 0.80
     DEPTH_TOPIC_WARMUP_TIMEOUT_S = 20.0
     DEPTH_WAIT_PER_CANDIDATE_S = 1.2
+    FRAME_FRESH_TIMEOUT_S = 4.0
+    CLIP_SATURATION_EPS_M = 0.02
 
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
@@ -81,6 +83,7 @@ class DepthProfileBase(DepthCamera):
         }
         self.camera_model_name = self._read_camera_model_name()
         self._resolved_depth_topic = ""
+        self._resolved_image_topic = ""
 
     def _set_test_diagnostics(self, **kwargs) -> None:
         self._last_test_diagnostics.update(kwargs)
@@ -124,7 +127,11 @@ class DepthProfileBase(DepthCamera):
     def _open_test_scene(self, simulator, test_name: str) -> None:
         self._last_test_diagnostics = {}
         self._resolved_depth_topic = ""
+        self._resolved_image_topic = ""
         world = self.test_to_world[test_name]
+        display_env = self._ensure_render_display_env()
+        if display_env:
+            self._set_test_diagnostics(render_display_env=display_env)
         if not simulator.open_scene(
             world,
             self.sensor_sdf_path,
@@ -136,6 +143,15 @@ class DepthProfileBase(DepthCamera):
                 diag = simulator.get_last_scene_diagnostics()
             reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
             raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
+        self._update_resolved_topics(simulator)
+        self._set_test_diagnostics(
+            scene_open_success=True,
+            world_file=str(world),
+            expected_depth_topic=str(self.DEPTH_TOPIC),
+            expected_image_topic=str(self.IMAGE_TOPIC or ""),
+            resolved_depth_topic=str(self._resolved_depth_topic or self.DEPTH_TOPIC),
+            resolved_image_topic=str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+        )
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
 
@@ -616,6 +632,135 @@ class DepthProfileBase(DepthCamera):
         }
         return selected, diag
 
+    @staticmethod
+    def _scene_diag(simulator) -> Dict[str, Any]:
+        if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+            try:
+                diag = simulator.get_last_scene_diagnostics()
+                if isinstance(diag, dict):
+                    return diag
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _ensure_render_display_env() -> Dict[str, str]:
+        applied: Dict[str, str] = {}
+        if os.environ.get("DISPLAY"):
+            return applied
+
+        xauthority = os.environ.get("XAUTHORITY", "").strip()
+        if not xauthority:
+            default_xauthority = os.path.expanduser("~/.Xauthority")
+            if os.path.exists(default_xauthority):
+                os.environ["XAUTHORITY"] = default_xauthority
+                applied["XAUTHORITY"] = default_xauthority
+
+        for display in (":0",):
+            display_socket = f"/tmp/.X11-unix/X{display.lstrip(':')}"
+            if os.path.exists(display_socket):
+                os.environ["DISPLAY"] = display
+                applied["DISPLAY"] = display
+                break
+
+        return applied
+
+    @staticmethod
+    def _msg_stamp_s(msg: Image) -> float:
+        stamp = float(msg.header.stamp.to_sec())
+        if stamp <= 0.0:
+            return float(time.time())
+        return stamp
+
+    def _update_resolved_topics(self, simulator) -> Dict[str, Any]:
+        scene_diag = self._scene_diag(simulator)
+        resolved_topics = scene_diag.get("resolved_topics", {}) if isinstance(scene_diag, dict) else {}
+        if isinstance(resolved_topics, dict):
+            depth_candidate = str(resolved_topics.get(self.DEPTH_TOPIC, "") or "").strip()
+            image_candidate = str(resolved_topics.get(self.IMAGE_TOPIC, "") or "").strip()
+            if depth_candidate:
+                self._resolved_depth_topic = depth_candidate
+            if image_candidate:
+                self._resolved_image_topic = image_candidate
+        return scene_diag
+
+    def _resolved_color_topic(self) -> str:
+        return str(self._resolved_image_topic or self.IMAGE_TOPIC or "").strip()
+
+    def _wait_message_after(
+        self,
+        prev_stamp_s: Optional[float],
+        topic: str,
+        timeout: float,
+        stage: str,
+    ) -> Image:
+        target_topic = str(topic or "").strip()
+        if not target_topic:
+            raise RuntimeError(f"No topic configured for stage={stage}")
+
+        start = time.time()
+        saw_message = False
+        while (time.time() - start) < float(timeout):
+            remaining = max(0.2, float(timeout) - (time.time() - start))
+            try:
+                msg = rospy.wait_for_message(target_topic, Image, timeout=min(1.0, remaining))
+            except rospy.ROSException:
+                continue
+
+            saw_message = True
+            stamp_s = self._msg_stamp_s(msg)
+            if prev_stamp_s is None or stamp_s > (float(prev_stamp_s) + 1e-6):
+                return msg
+
+        if saw_message:
+            raise RuntimeError(
+                f"No fresh frame on topic={target_topic} after stage={stage}; prev_stamp_s={prev_stamp_s}"
+            )
+        raise RuntimeError(f"No frame received on topic={target_topic} during stage={stage}")
+
+    def _wait_depth_after(self, prev_stamp_s: Optional[float], timeout: Optional[float] = None, stage: str = "") -> Image:
+        if not self.DEPTH_TOPIC:
+            raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
+        if not self._resolved_depth_topic:
+            selected, diag = self._resolve_depth_topic(self.DEPTH_TOPIC_WARMUP_TIMEOUT_S)
+            self._resolved_depth_topic = selected or self.DEPTH_TOPIC
+            self._set_test_diagnostics(depth_topic_resolution=diag)
+        return self._wait_message_after(
+            prev_stamp_s=prev_stamp_s,
+            topic=self._resolved_depth_topic,
+            timeout=float(timeout or self.FRAME_FRESH_TIMEOUT_S),
+            stage=str(stage or "depth_wait_after"),
+        )
+
+    def _wait_color_after(self, prev_stamp_s: Optional[float], timeout: Optional[float] = None, stage: str = "") -> Optional[Image]:
+        target_topic = self._resolved_color_topic()
+        if not target_topic:
+            return None
+        return self._wait_message_after(
+            prev_stamp_s=prev_stamp_s,
+            topic=target_topic,
+            timeout=float(timeout or self.FRAME_FRESH_TIMEOUT_S),
+            stage=str(stage or "color_wait_after"),
+        )
+
+    def _is_far_clip_saturated(self, z: Optional[float], roi_stats: Dict[str, Any]) -> bool:
+        if z is None or not np.isfinite(z):
+            return False
+        far_threshold = float(self.clip_far) - float(self.CLIP_SATURATION_EPS_M)
+        if float(z) < far_threshold:
+            return False
+
+        roi_values = [
+            roi_stats.get("min_m"),
+            roi_stats.get("max_m"),
+            roi_stats.get("mean_m"),
+            roi_stats.get("median_m"),
+        ]
+        finite_values = [float(v) for v in roi_values if v is not None and np.isfinite(v)]
+        if not finite_values:
+            return True
+        return all(value >= far_threshold for value in finite_values)
+
     def _wait_depth(self, timeout: float = 3.0) -> Image:
         if not self.DEPTH_TOPIC:
             raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
@@ -639,10 +784,11 @@ class DepthProfileBase(DepthCamera):
         raise RuntimeError(f"Failed to receive depth frame. candidates={candidates}, errors={errors}")
 
     def _try_wait_color(self, timeout: float = 1.0) -> Optional[Image]:
-        if not self.IMAGE_TOPIC:
+        target_topic = self._resolved_color_topic()
+        if not target_topic:
             return None
         try:
-            return rospy.wait_for_message(self.IMAGE_TOPIC, Image, timeout=timeout)
+            return rospy.wait_for_message(target_topic, Image, timeout=timeout)
         except rospy.ROSException:
             return None
 
@@ -659,85 +805,185 @@ class DepthProfileBase(DepthCamera):
         results = []
         measured_values = []
         first_frame_diagnostics: Optional[Dict[str, Any]] = None
+        last_depth_stamp_s: Optional[float] = None
+        metrics_payload: Dict[str, Any] = {
+            "status": "RUNNING",
+            "error_reason": "",
+            "world_file": str(self.test_to_world["depth_perception_test"]),
+            "scene_open_success": True,
+            "expected_depth_topic": str(self.DEPTH_TOPIC),
+            "expected_image_topic": str(self.IMAGE_TOPIC or ""),
+            "resolved_depth_topic": str(self._resolved_depth_topic or self.DEPTH_TOPIC),
+            "resolved_image_topic": str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+            "distances_m": list(self.TEST_DISTANCES),
+            "max_abs_error_m": float(self.MAX_ABS_ERROR_M),
+            "clip_near_m": float(self.clip_near),
+            "clip_far_m": float(self.clip_far),
+            "measurements": results,
+        }
+
+        def _persist_depth_metrics(status: str, error_reason: str = "") -> str:
+            metrics_payload["status"] = str(status)
+            metrics_payload["error_reason"] = str(error_reason)
+            metrics_payload["first_frame_diagnostics"] = first_frame_diagnostics or {}
+            metrics_payload["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
+            metrics_payload["selected_depth_topic"] = str(self._resolved_depth_topic or self.DEPTH_TOPIC)
+            metrics_payload["selected_image_topic"] = str(self._resolved_image_topic or self.IMAGE_TOPIC or "")
+            path = self._save_metrics_json("depth_perception_metrics.json", metrics_payload)
+            self._set_test_diagnostics(depth_perception_metrics_json=path)
+            return path
 
         for d in self.TEST_DISTANCES:
-            simulator.set_pose(cube_name, reset_x, 0.0, cube_z)
-            time.sleep(0.05)
+            sample: Dict[str, Any] = {
+                "distance_m": float(d),
+                "status": "RUNNING",
+                "resolved_depth_topic": str(self._resolved_depth_topic or self.DEPTH_TOPIC),
+                "resolved_image_topic": str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+            }
+            try:
+                if last_depth_stamp_s is None:
+                    baseline_msg = self._wait_depth(timeout=2.0)
+                    last_depth_stamp_s = self._msg_stamp_s(baseline_msg)
+                    sample["baseline_stamp_s"] = float(last_depth_stamp_s)
 
-            simulator.set_pose(cube_name, float(d) + 0.25, 0.0, cube_z)
-            time.sleep(0.6)
-
-            depth_msg = self._wait_depth(timeout=1.5)
-            self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
-            depth_m = self._depth_msg_to_meters(depth_msg)
-            color_msg = self._try_wait_color(timeout=1.0)
-            bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
-            z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr=bgr, color_hint="green")
-            if z is None or np.isnan(z) or z <= 0.0:
-                fail_artifacts = self._save_failure_artifacts(
-                    prefix=f"depth_perception_fail_d_{str(d).replace('.', '_')}",
-                    depth_m=depth_m,
-                    bgr=bgr,
-                    point=point,
-                    roi_meta=roi_meta,
-                    extra_lines=[f"distance={float(d):.2f}", "reason=invalid_measurement"],
+                simulator.set_pose(cube_name, reset_x, 0.0, cube_z)
+                reset_depth_msg = self._wait_depth_after(
+                    prev_stamp_s=last_depth_stamp_s,
+                    timeout=3.0,
+                    stage=f"depth_perception_reset_d_{str(d).replace('.', '_')}",
                 )
-                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
-                raise RuntimeError(f"Invalid depth measurement at distance={d}: {z}")
+                reset_stamp_s = self._msg_stamp_s(reset_depth_msg)
+                sample["reset_frame_stamp_s"] = float(reset_stamp_s)
 
-            if first_frame_diagnostics is None:
-                first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
-                first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
-                first_frame_diagnostics["measurement_roi"] = roi_meta
-                self._set_test_diagnostics(depth_perception_first_frame=first_frame_diagnostics)
-
-            roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
-
-            if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
-                fail_artifacts = self._save_failure_artifacts(
-                    prefix=f"depth_perception_fail_clip_d_{str(d).replace('.', '_')}",
-                    depth_m=depth_m,
-                    bgr=bgr,
-                    point=point,
-                    roi_meta=roi_meta,
-                    extra_lines=[f"distance={float(d):.2f}", f"z={float(z):.3f}", "reason=clip_range"],
+                simulator.set_pose(cube_name, float(d) + 0.25, 0.0, cube_z)
+                depth_msg = self._wait_depth_after(
+                    prev_stamp_s=reset_stamp_s,
+                    timeout=3.0,
+                    stage=f"depth_perception_target_d_{str(d).replace('.', '_')}",
                 )
-                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
-                raise AssertionError(f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})")
+                depth_stamp_s = self._msg_stamp_s(depth_msg)
+                last_depth_stamp_s = depth_stamp_s
+                sample["depth_frame_stamp_s"] = float(depth_stamp_s)
 
-            abs_err = abs(float(z) - float(d))
-            rel_err = abs_err / float(d) * 100.0
-
-            if abs_err > float(self.MAX_ABS_ERROR_M):
-                fail_artifacts = self._save_failure_artifacts(
-                    prefix=f"depth_perception_fail_abs_err_d_{str(d).replace('.', '_')}",
-                    depth_m=depth_m,
-                    bgr=bgr,
-                    point=point,
-                    roi_meta=roi_meta,
-                    extra_lines=[
-                        f"distance={float(d):.2f}",
-                        f"z={float(z):.3f}",
-                        f"abs_err={float(abs_err):.3f}",
-                        "reason=abs_error",
-                    ],
+                self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
+                depth_m = self._depth_msg_to_meters(depth_msg)
+                color_msg = self._wait_color_after(
+                    prev_stamp_s=reset_stamp_s,
+                    timeout=2.0,
+                    stage=f"depth_perception_color_d_{str(d).replace('.', '_')}",
                 )
-                self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
-                raise AssertionError(
-                    f"Depth absolute error too high at distance={d}: abs_err={abs_err:.4f}, max={self.MAX_ABS_ERROR_M}"
-                )
+                bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                if color_msg is not None:
+                    sample["color_frame_stamp_s"] = float(self._msg_stamp_s(color_msg))
 
-            results.append(
-                {
-                    "distance": float(d),
-                    "measured": float(z),
-                    "abs_error": float(abs_err),
-                    "rel_error": float(rel_err),
-                    "measurement_roi": roi_meta,
-                    "roi_depth_stats": roi_stats,
-                }
-            )
-            measured_values.append(float(z))
+                z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr=bgr, color_hint="green")
+                sample["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                sample["measurement_roi"] = roi_meta
+                sample["measurement_source"] = str(roi_meta.get("source", ""))
+                if z is None or np.isnan(z) or z <= 0.0:
+                    fail_artifacts = self._save_failure_artifacts(
+                        prefix=f"depth_perception_fail_d_{str(d).replace('.', '_')}",
+                        depth_m=depth_m,
+                        bgr=bgr,
+                        point=point,
+                        roi_meta=roi_meta,
+                        extra_lines=[f"distance={float(d):.2f}", "reason=invalid_measurement"],
+                    )
+                    sample["status"] = "FAIL"
+                    sample["error_reason"] = "invalid_measurement"
+                    sample["artifacts"] = fail_artifacts
+                    self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
+                    _persist_depth_metrics(status="FAIL", error_reason="invalid_measurement")
+                    raise RuntimeError(f"Invalid depth measurement at distance={d}: {z}")
+
+                if first_frame_diagnostics is None:
+                    first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
+                    first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                    first_frame_diagnostics["measurement_roi"] = roi_meta
+                    self._set_test_diagnostics(depth_perception_first_frame=first_frame_diagnostics)
+
+                roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
+                far_clip_saturated = self._is_far_clip_saturated(z, roi_stats)
+                sample["roi_depth_stats"] = roi_stats
+                sample["measured_depth_m"] = float(z)
+                sample["far_clip_saturated"] = bool(far_clip_saturated)
+
+                if far_clip_saturated:
+                    fail_artifacts = self._save_failure_artifacts(
+                        prefix=f"depth_perception_fail_saturation_d_{str(d).replace('.', '_')}",
+                        depth_m=depth_m,
+                        bgr=bgr,
+                        point=point,
+                        roi_meta=roi_meta,
+                        extra_lines=[
+                            f"distance={float(d):.2f}",
+                            f"z={float(z):.3f}",
+                            f"clip_far={float(self.clip_far):.3f}",
+                            "reason=far_clip_saturation",
+                        ],
+                    )
+                    sample["status"] = "FAIL"
+                    sample["error_reason"] = "far_clip_saturation"
+                    sample["artifacts"] = fail_artifacts
+                    self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
+                    _persist_depth_metrics(status="FAIL", error_reason="far_clip_saturation")
+                    raise AssertionError(
+                        f"Depth measurement saturated at far clip at distance={d}: z={z}, clip_far={self.clip_far}"
+                    )
+
+                if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
+                    fail_artifacts = self._save_failure_artifacts(
+                        prefix=f"depth_perception_fail_clip_d_{str(d).replace('.', '_')}",
+                        depth_m=depth_m,
+                        bgr=bgr,
+                        point=point,
+                        roi_meta=roi_meta,
+                        extra_lines=[f"distance={float(d):.2f}", f"z={float(z):.3f}", "reason=clip_range"],
+                    )
+                    sample["status"] = "FAIL"
+                    sample["error_reason"] = "clip_range"
+                    sample["artifacts"] = fail_artifacts
+                    self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
+                    _persist_depth_metrics(status="FAIL", error_reason="clip_range")
+                    raise AssertionError(
+                        f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})"
+                    )
+
+                abs_err = abs(float(z) - float(d))
+                rel_err = abs_err / float(d) * 100.0
+                sample["abs_error_m"] = float(abs_err)
+                sample["rel_error_pct"] = float(rel_err)
+
+                if abs_err > float(self.MAX_ABS_ERROR_M):
+                    fail_artifacts = self._save_failure_artifacts(
+                        prefix=f"depth_perception_fail_abs_err_d_{str(d).replace('.', '_')}",
+                        depth_m=depth_m,
+                        bgr=bgr,
+                        point=point,
+                        roi_meta=roi_meta,
+                        extra_lines=[
+                            f"distance={float(d):.2f}",
+                            f"z={float(z):.3f}",
+                            f"abs_err={float(abs_err):.3f}",
+                            "reason=abs_error",
+                        ],
+                    )
+                    sample["status"] = "FAIL"
+                    sample["error_reason"] = "abs_error"
+                    sample["artifacts"] = fail_artifacts
+                    self._set_test_diagnostics(depth_perception_failure=fail_artifacts)
+                    _persist_depth_metrics(status="FAIL", error_reason="abs_error")
+                    raise AssertionError(
+                        f"Depth absolute error too high at distance={d}: abs_err={abs_err:.4f}, max={self.MAX_ABS_ERROR_M}"
+                    )
+
+                sample["status"] = "PASS"
+                results.append(sample)
+                measured_values.append(float(z))
+            except Exception:
+                if sample not in results:
+                    results.append(sample)
+                raise
 
             x0, y0, x1, y1 = [int(v) for v in roi_meta.get("roi_xyxy", [0, 0, 0, 0])]
             if bgr is not None:
@@ -776,10 +1022,12 @@ class DepthProfileBase(DepthCamera):
 
         monotonic_ok = all(measured_values[i] < measured_values[i + 1] for i in range(len(measured_values) - 1))
         if not monotonic_ok:
+            _persist_depth_metrics(status="FAIL", error_reason="monotonicity")
             raise AssertionError(f"Depth monotonicity failed: {measured_values}")
 
+        metrics_json = _persist_depth_metrics(status="PASS")
         return {
-                "id": "DEPTH",
+            "id": "DEPTH",
             "metrics": {
                 "distances_m": list(self.TEST_DISTANCES),
                 "max_abs_error_m": float(self.MAX_ABS_ERROR_M),
@@ -788,7 +1036,9 @@ class DepthProfileBase(DepthCamera):
                 "first_frame_diagnostics": first_frame_diagnostics or {},
                 "topic_diagnostics": self.get_last_test_diagnostics().get("depth_topic_resolution", {}),
                 "selected_depth_topic": self._resolved_depth_topic,
+                "selected_image_topic": self._resolved_image_topic,
             },
+            "metrics_json": metrics_json,
         }
 
     def c3_view_angle_stability_test(self, simulator) -> Dict[str, Any]:
