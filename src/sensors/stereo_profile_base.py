@@ -49,6 +49,10 @@ class StereoProfileBase(Sensor):
     S2_CROP_BLOCK_SIZE = 21
     S2_CROP_TEXTURE_THRESHOLD = 10
     S2_CROP_UNIQUENESS_RATIO = 10
+    S2_ROI_Y0_RATIO = 0.26
+    S2_ROI_Y1_RATIO = 0.58
+    S2_ROI_X0_RATIO = 0.24
+    S2_ROI_X1_RATIO = 0.76
     # Первичный прогрев топиков/кадров для stereo делаем длиннее,
     # иначе на "холодном" запуске часто прилетают таймауты.
     PAIR_TIMEOUT_S = 25.0
@@ -1105,10 +1109,10 @@ class StereoProfileBase(Sensor):
         gray_right = cv2.cvtColor(right, cv2.COLOR_BGR2GRAY)
 
         h, w = disparity.shape[:2]
-        y0 = int(0.18 * h)
-        y1 = int(0.70 * h)
-        x0 = int(0.12 * w)
-        x1 = int(0.88 * w)
+        y0 = int(float(self.S2_ROI_Y0_RATIO) * h)
+        y1 = int(float(self.S2_ROI_Y1_RATIO) * h)
+        x0 = int(float(self.S2_ROI_X0_RATIO) * w)
+        x1 = int(float(self.S2_ROI_X1_RATIO) * w)
         xm = (x0 + x1) // 2
 
         wall_band = np.zeros((h, w), dtype=bool)
