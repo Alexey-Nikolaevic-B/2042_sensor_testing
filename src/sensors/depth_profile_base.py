@@ -47,17 +47,25 @@ class DepthProfileBase(DepthCamera):
     C5_END_X = 10.0
     C5_STEP = 0.5
     C5_DEPTH_TOLERANCE_M = 0.10
+    C5_TARGET_SIZE_X_M = 0.5
     DEPTH_ROI_HALF_WINDOW = 2  # 5x5 ROI
 
     C6_START_X = 2.0
     C6_END_X = 1.0
     C6_STEP = 0.01
+    C6_TARGET_SIZE_X_M = 0.5
     C6_DEPTH_CHANGE_EPS_M = 0.004
     C6_MIN_CHANGED_RATIO = 0.80
+    C6_MONOTONIC_TOLERANCE_M = 0.002
+    C6_DELTA_TOLERANCE_M = 0.003
+    C6_ABS_ERROR_TOLERANCE_M = 0.03
     DEPTH_TOPIC_WARMUP_TIMEOUT_S = 20.0
     DEPTH_WAIT_PER_CANDIDATE_S = 1.2
     FRAME_FRESH_TIMEOUT_S = 4.0
     CLIP_SATURATION_EPS_M = 0.02
+    C3_TARGET_SIZE_X_M = 0.5
+    C3_MEAN_ABS_ERROR_M = 0.08
+    C3_MAX_ABS_ERROR_M = 0.15
 
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
@@ -761,6 +769,10 @@ class DepthProfileBase(DepthCamera):
             return True
         return all(value >= far_threshold for value in finite_values)
 
+    @staticmethod
+    def _front_face_depth(center_x_m: float, size_x_m: float) -> float:
+        return float(center_x_m) - (float(size_x_m) * 0.5)
+
     def _wait_depth(self, timeout: float = 3.0) -> Image:
         if not self.DEPTH_TOPIC:
             raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
@@ -1046,8 +1058,10 @@ class DepthProfileBase(DepthCamera):
         metrics: Dict[str, Any] = {
             "samples_target": int(self.C3_SAMPLES),
             "radius_m": float(self.C3_RADIUS_M),
-            "max_deviation_limit": float(self.C3_MAX_DEV_RATIO),
-            "measurements_m": [],
+            "expected_curve": "front_face_depth = radius*cos(theta) - target_half_depth",
+            "mean_abs_error_limit_m": float(self.C3_MEAN_ABS_ERROR_M),
+            "max_abs_error_limit_m": float(self.C3_MAX_ABS_ERROR_M),
+            "samples": [],
             "mode": "",
         }
 
@@ -1055,8 +1069,9 @@ class DepthProfileBase(DepthCamera):
         if not simulator.wait_for_model_spawn(self.C3_TARGET_CUBE_NAME, timeout=20):
             raise RuntimeError(f"Model not spawned: {self.C3_TARGET_CUBE_NAME}")
 
-        depths: List[float] = []
+        samples: List[Dict[str, Any]] = []
         use_camera_orbit = simulator.wait_for_model_spawn(self.camera_model_name, timeout=10)
+        last_depth_stamp_s: Optional[float] = None
 
         if use_camera_orbit:
             metrics["mode"] = "camera_orbit"
@@ -1070,24 +1085,48 @@ class DepthProfileBase(DepthCamera):
                     yaw = atan2(cube_y - cam_y, cube_x - cam_x)
                     self._set_model_pose_6d(self.camera_model_name, x=cam_x, y=cam_y, z=cam_z, yaw=yaw, settle_s=0.35)
 
-                    depth_msg = self._wait_depth(timeout=2.0)
+                    depth_msg = self._wait_depth_after(
+                        prev_stamp_s=last_depth_stamp_s,
+                        timeout=3.0,
+                        stage=f"c3_camera_orbit_{i}",
+                    )
+                    last_depth_stamp_s = self._msg_stamp_s(depth_msg)
                     depth_m = self._depth_msg_to_meters(depth_msg)
-                    color_msg = self._try_wait_color(timeout=1.0)
+                    color_msg = self._wait_color_after(
+                        prev_stamp_s=last_depth_stamp_s - 1e-6,
+                        timeout=2.0,
+                        stage=f"c3_camera_orbit_color_{i}",
+                    )
                     bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
                     z, point = self._measure_depth(depth_m, bgr, color_hint="blue")
                     if z is None or np.isnan(z) or np.isinf(z):
                         continue
-                    depths.append(float(z))
+                    expected_depth = max(
+                        0.0,
+                        float(self.C3_RADIUS_M) - (float(self.C3_TARGET_SIZE_X_M) * 0.5),
+                    )
+                    abs_err = abs(float(z) - expected_depth)
+                    samples.append(
+                        {
+                            "sample_index": int(i),
+                            "theta_rad": float(theta),
+                            "camera_x_m": float(cam_x),
+                            "camera_y_m": float(cam_y),
+                            "measured_depth_m": float(z),
+                            "expected_depth_m": float(expected_depth),
+                            "abs_error_m": float(abs_err),
+                        }
+                    )
 
                     if i in (0, self.C3_SAMPLES // 2):
                         dbg = self._draw_debug(depth_m, bgr, point, [f"C3 camera orbit", f"sample={i}", f"depth={z:.3f}m"])
                         artifacts.append(self._save_frame(f"c3_camera_orbit_{i}.png", dbg))
 
-                if len(depths) < max(10, int(0.6 * self.C3_SAMPLES)):
-                    raise RuntimeError(f"Too few valid measurements in camera orbit mode: {len(depths)}")
+                if len(samples) < max(10, int(0.6 * self.C3_SAMPLES)):
+                    raise RuntimeError(f"Too few valid measurements in camera orbit mode: {len(samples)}")
             except Exception as exc:
                 metrics["mode_error"] = str(exc)
-                depths.clear()
+                samples.clear()
                 use_camera_orbit = False
 
         if not use_camera_orbit:
@@ -1103,39 +1142,71 @@ class DepthProfileBase(DepthCamera):
                 y = self.C3_RADIUS_M * sin(float(theta))
                 self._move_and_settle(simulator, self.C3_TARGET_CUBE_NAME, x=x, y=y, z=0.25, settle_s=0.25)
 
-                depth_msg = self._wait_depth(timeout=2.0)
+                depth_msg = self._wait_depth_after(
+                    prev_stamp_s=last_depth_stamp_s,
+                    timeout=3.0,
+                    stage=f"c3_target_orbit_{i}",
+                )
+                last_depth_stamp_s = self._msg_stamp_s(depth_msg)
                 depth_m = self._depth_msg_to_meters(depth_msg)
-                color_msg = self._try_wait_color(timeout=1.0)
+                color_msg = self._wait_color_after(
+                    prev_stamp_s=last_depth_stamp_s - 1e-6,
+                    timeout=2.0,
+                    stage=f"c3_target_orbit_color_{i}",
+                )
                 bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
                 z, point = self._measure_depth(depth_m, bgr, color_hint="blue")
                 if z is None or np.isnan(z) or np.isinf(z):
                     continue
-                depths.append(float(z))
+                expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C3_TARGET_SIZE_X_M))
+                abs_err = abs(float(z) - expected_depth)
+                samples.append(
+                    {
+                        "sample_index": int(i),
+                        "theta_rad": float(theta),
+                        "target_center_x_m": float(x),
+                        "target_center_y_m": float(y),
+                        "expected_depth_m": float(expected_depth),
+                        "measured_depth_m": float(z),
+                        "abs_error_m": float(abs_err),
+                    }
+                )
 
                 if i in (0, self.C3_SAMPLES // 2):
-                    dbg = self._draw_debug(depth_m, bgr, point, [f"C3 equivalent", f"sample={i}", f"depth={z:.3f}m"])
+                    dbg = self._draw_debug(
+                        depth_m,
+                        bgr,
+                        point,
+                        [f"C3 equivalent", f"sample={i}", f"depth={z:.3f}m", f"expected={expected_depth:.3f}m"],
+                    )
                     artifacts.append(self._save_frame(f"c3_equivalent_{i}.png", dbg))
 
-        if len(depths) < 10:
-            raise RuntimeError(f"C3 failed: too few valid depth samples ({len(depths)})")
+        if len(samples) < 10:
+            metrics["samples"] = samples
+            metrics_path = self._save_metrics_json("c3_view_angle_stability_metrics.json", metrics)
+            raise RuntimeError(f"C3 failed: too few valid depth samples ({len(samples)})")
 
-        z_mean = float(np.mean(depths))
-        z_min = float(np.min(depths))
-        z_max = float(np.max(depths))
-        max_dev_ratio = float((z_max - z_min) / z_mean) if z_mean > 1e-9 else float("inf")
+        abs_errors = [float(sample["abs_error_m"]) for sample in samples]
+        measured_depths = [float(sample["measured_depth_m"]) for sample in samples]
+        expected_depths = [float(sample["expected_depth_m"]) for sample in samples]
 
-        metrics["measurements_m"] = [float(v) for v in depths]
-        metrics["mean_depth_m"] = z_mean
-        metrics["min_depth_m"] = z_min
-        metrics["max_depth_m"] = z_max
-        metrics["max_deviation_ratio"] = max_dev_ratio
-        metrics["checks"] = {"max_deviation_le_0_05": bool(max_dev_ratio <= self.C3_MAX_DEV_RATIO)}
+        mean_abs_error = float(np.mean(abs_errors))
+        max_abs_error = float(np.max(abs_errors))
+        metrics["samples"] = samples
+        metrics["mean_measured_depth_m"] = float(np.mean(measured_depths))
+        metrics["mean_expected_depth_m"] = float(np.mean(expected_depths))
+        metrics["mean_abs_error_m"] = mean_abs_error
+        metrics["max_abs_error_m"] = max_abs_error
+        metrics["checks"] = {
+            "mean_abs_error_ok": bool(mean_abs_error <= self.C3_MEAN_ABS_ERROR_M),
+            "max_abs_error_ok": bool(max_abs_error <= self.C3_MAX_ABS_ERROR_M),
+        }
 
         metrics_path = self._save_metrics_json("c3_view_angle_stability_metrics.json", metrics)
-        if max_dev_ratio > self.C3_MAX_DEV_RATIO:
+        if not all(metrics["checks"].values()):
             raise AssertionError(
-                f"C3 failed: max_deviation={max_dev_ratio:.4f} > {self.C3_MAX_DEV_RATIO:.4f}, "
-                f"min={z_min:.4f}, max={z_max:.4f}, mean={z_mean:.4f}"
+                f"C3 failed: mean_abs_error={mean_abs_error:.4f} (limit={self.C3_MEAN_ABS_ERROR_M:.4f}), "
+                f"max_abs_error={max_abs_error:.4f} (limit={self.C3_MAX_ABS_ERROR_M:.4f})"
             )
 
         return {"id": "C3", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
@@ -1145,6 +1216,7 @@ class DepthProfileBase(DepthCamera):
         metrics: Dict[str, Any] = {
             "x_values_m": self._iter_float_range(self.C5_START_X, self.C5_END_X, self.C5_STEP),
             "tolerance_m": float(self.C5_DEPTH_TOLERANCE_M),
+            "target_size_x_m": float(self.C5_TARGET_SIZE_X_M),
             "samples": [],
             "first_frame_diagnostics": {},
         }
@@ -1154,12 +1226,22 @@ class DepthProfileBase(DepthCamera):
             raise RuntimeError(f"Model not spawned: {self.C5_RANGE_CUBE_NAME}")
 
         first_frame_diagnostics: Optional[Dict[str, Any]] = None
+        last_depth_stamp_s: Optional[float] = None
         for x in metrics["x_values_m"]:
             self._move_and_settle(simulator, self.C5_RANGE_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.3)
-            depth_msg = self._wait_depth(timeout=2.0)
+            depth_msg = self._wait_depth_after(
+                prev_stamp_s=last_depth_stamp_s,
+                timeout=3.0,
+                stage=f"c5_x_{str(x).replace('.', '_')}",
+            )
+            last_depth_stamp_s = self._msg_stamp_s(depth_msg)
             self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
             depth_m = self._depth_msg_to_meters(depth_msg)
-            color_msg = self._try_wait_color(timeout=1.0)
+            color_msg = self._wait_color_after(
+                prev_stamp_s=last_depth_stamp_s - 1e-6,
+                timeout=2.0,
+                stage=f"c5_color_x_{str(x).replace('.', '_')}",
+            )
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
             z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr, color_hint="green")
 
@@ -1170,14 +1252,18 @@ class DepthProfileBase(DepthCamera):
                 self._set_test_diagnostics(c5_first_frame=first_frame_diagnostics)
 
             roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
+            expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M))
+            expected_in_sensor_range = bool(self.clip_near <= expected_depth <= self.clip_far)
 
             finite_ok = bool(z is not None and np.isfinite(z))
-            abs_err = float(abs(float(z) - float(x))) if finite_ok else float("inf")
-            sample_ok = bool(finite_ok and abs_err <= self.C5_DEPTH_TOLERANCE_M)
+            abs_err = float(abs(float(z) - float(expected_depth))) if finite_ok else float("inf")
+            sample_ok = bool(finite_ok and expected_in_sensor_range and abs_err <= self.C5_DEPTH_TOLERANCE_M)
 
             metrics["samples"].append(
                 {
                     "x_m": float(x),
+                    "expected_front_face_depth_m": float(expected_depth),
+                    "expected_in_sensor_range": bool(expected_in_sensor_range),
                     "depth_m": None if z is None else float(z),
                     "measurement_roi": roi_meta,
                     "roi_depth_stats": roi_stats,
@@ -1234,6 +1320,11 @@ class DepthProfileBase(DepthCamera):
         if first_frame_diagnostics is not None:
             metrics["first_frame_diagnostics"] = first_frame_diagnostics
 
+        expected_ok_x_values = [
+            float(x)
+            for x in metrics["x_values_m"]
+            if self.clip_near <= self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M)) <= self.clip_far
+        ]
         best_start = None
         best_end = None
         cur_start = None
@@ -1254,22 +1345,33 @@ class DepthProfileBase(DepthCamera):
             if best_start is None or (cur_end - cur_start) > (best_end - best_start):
                 best_start, best_end = cur_start, cur_end
 
+        metrics["expected_ok_x_values_m"] = expected_ok_x_values
+        metrics["expected_x_min_ok_m"] = expected_ok_x_values[0] if expected_ok_x_values else None
+        metrics["expected_x_max_ok_m"] = expected_ok_x_values[-1] if expected_ok_x_values else None
+
+        if not expected_ok_x_values:
+            metrics_path = self._save_metrics_json("c5_working_range_metrics.json", metrics)
+            raise AssertionError("C5 failed: no sampled positions fall inside the sensor clip range")
+
         if best_start is None or best_end is None:
+            metrics_path = self._save_metrics_json("c5_working_range_metrics.json", metrics)
             raise AssertionError("C5 failed: no stable depth interval found")
 
         metrics["x_min_ok_m"] = float(best_start)
         metrics["x_max_ok_m"] = float(best_end)
         metrics["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
         metrics["selected_depth_topic"] = self._resolved_depth_topic
+        metrics["selected_image_topic"] = self._resolved_image_topic
         metrics["checks"] = {
-            "x_min_ok_le_0_5": bool(float(best_start) <= 0.5 + 1e-6),
-            "x_max_ok_ge_10_0": bool(float(best_end) >= 10.0 - 1e-6),
+            "x_min_ok_covers_expected": bool(float(best_start) <= float(expected_ok_x_values[0]) + 1e-6),
+            "x_max_ok_covers_expected": bool(float(best_end) >= float(expected_ok_x_values[-1]) - 1e-6),
         }
 
         metrics_path = self._save_metrics_json("c5_working_range_metrics.json", metrics)
-        if not (metrics["checks"]["x_min_ok_le_0_5"] and metrics["checks"]["x_max_ok_ge_10_0"]):
+        if not all(metrics["checks"].values()):
             raise AssertionError(
-                f"C5 failed: stable interval [{best_start:.2f}, {best_end:.2f}] does not cover [0.5, 10.0]"
+                f"C5 failed: stable interval [{best_start:.2f}, {best_end:.2f}] does not cover "
+                f"[{expected_ok_x_values[0]:.2f}, {expected_ok_x_values[-1]:.2f}]"
             )
 
         return {"id": "C5", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
@@ -1281,6 +1383,10 @@ class DepthProfileBase(DepthCamera):
             "x_values_m": x_values,
             "eps_m": float(self.C6_DEPTH_CHANGE_EPS_M),
             "required_ratio": float(self.C6_MIN_CHANGED_RATIO),
+            "target_size_x_m": float(self.C6_TARGET_SIZE_X_M),
+            "monotonic_tolerance_m": float(self.C6_MONOTONIC_TOLERANCE_M),
+            "delta_tolerance_m": float(self.C6_DELTA_TOLERANCE_M),
+            "abs_error_tolerance_m": float(self.C6_ABS_ERROR_TOLERANCE_M),
             "samples": [],
         }
 
@@ -1289,16 +1395,35 @@ class DepthProfileBase(DepthCamera):
             raise RuntimeError(f"Model not spawned: {self.C6_SHIFT_CUBE_NAME}")
 
         depths: List[Optional[float]] = []
+        last_depth_stamp_s: Optional[float] = None
         for x in x_values:
             self._move_and_settle(simulator, self.C6_SHIFT_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.16)
-            depth_msg = self._wait_depth(timeout=2.0)
+            depth_msg = self._wait_depth_after(
+                prev_stamp_s=last_depth_stamp_s,
+                timeout=3.0,
+                stage=f"c6_x_{str(x).replace('.', '_')}",
+            )
+            last_depth_stamp_s = self._msg_stamp_s(depth_msg)
             depth_m = self._depth_msg_to_meters(depth_msg)
-            color_msg = self._try_wait_color(timeout=1.0)
+            color_msg = self._wait_color_after(
+                prev_stamp_s=last_depth_stamp_s - 1e-6,
+                timeout=2.0,
+                stage=f"c6_color_x_{str(x).replace('.', '_')}",
+            )
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
             z, point = self._measure_depth(depth_m, bgr, color_hint="yellow")
             z_valid = bool(z is not None and np.isfinite(z))
             depths.append(float(z) if z_valid else None)
-            metrics["samples"].append({"x_m": float(x), "depth_m": None if not z_valid else float(z)})
+            expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C6_TARGET_SIZE_X_M))
+            abs_err = abs(float(z) - expected_depth) if z_valid else None
+            metrics["samples"].append(
+                {
+                    "x_m": float(x),
+                    "expected_front_face_depth_m": float(expected_depth),
+                    "depth_m": None if not z_valid else float(z),
+                    "abs_error_m": None if abs_err is None else float(abs_err),
+                }
+            )
 
             if abs(float(x) - self.C6_START_X) < 1e-9 or abs(float(x) - self.C6_END_X) < 1e-9:
                 dbg = self._draw_debug(
@@ -1323,19 +1448,43 @@ class DepthProfileBase(DepthCamera):
         changed = [d for d in deltas if d > self.C6_DEPTH_CHANGE_EPS_M]
         changed_ratio = float(len(changed) / len(deltas))
         median_delta = float(np.median(np.array(deltas, dtype=np.float64)))
+        monotonic_violations = 0
+        for i in range(1, len(depths)):
+            prev = depths[i - 1]
+            cur = depths[i]
+            if prev is None or cur is None:
+                continue
+            if float(cur) > float(prev) + float(self.C6_MONOTONIC_TOLERANCE_M):
+                monotonic_violations += 1
+
+        expected_step_m = float(self.C6_STEP)
+        abs_errors = [
+            float(sample["abs_error_m"])
+            for sample in metrics["samples"]
+            if sample.get("abs_error_m") is not None
+        ]
+        mean_abs_error = float(np.mean(abs_errors)) if abs_errors else float("inf")
 
         metrics["delta_abs_m"] = [float(d) for d in deltas]
         metrics["median_delta_m"] = median_delta
         metrics["changed_pairs"] = int(len(changed))
         metrics["pairs_total"] = int(len(deltas))
         metrics["changed_ratio"] = changed_ratio
-        metrics["checks"] = {"changed_ratio_ge_0_8": bool(changed_ratio >= self.C6_MIN_CHANGED_RATIO)}
+        metrics["expected_step_m"] = expected_step_m
+        metrics["monotonic_violations"] = int(monotonic_violations)
+        metrics["mean_abs_error_m"] = mean_abs_error
+        metrics["checks"] = {
+            "changed_ratio_ge_0_8": bool(changed_ratio >= self.C6_MIN_CHANGED_RATIO),
+            "monotonic_nonincreasing": bool(monotonic_violations == 0),
+            "median_delta_matches_step": bool(abs(median_delta - expected_step_m) <= self.C6_DELTA_TOLERANCE_M),
+            "mean_abs_error_ok": bool(mean_abs_error <= self.C6_ABS_ERROR_TOLERANCE_M),
+        }
 
         metrics_path = self._save_metrics_json("c6_small_displacement_sensitivity_metrics.json", metrics)
-        if changed_ratio < self.C6_MIN_CHANGED_RATIO:
+        if not all(metrics["checks"].values()):
             raise AssertionError(
-                f"C6 failed: changed_ratio={changed_ratio:.3f} < {self.C6_MIN_CHANGED_RATIO:.3f}, "
-                f"median_delta={median_delta:.4f}, eps={self.C6_DEPTH_CHANGE_EPS_M:.4f}"
+                f"C6 failed: changed_ratio={changed_ratio:.3f}, monotonic_violations={monotonic_violations}, "
+                f"median_delta={median_delta:.4f}, expected_step={expected_step_m:.4f}, mean_abs_error={mean_abs_error:.4f}"
             )
 
         return {"id": "C6", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
