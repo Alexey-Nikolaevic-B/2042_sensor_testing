@@ -93,7 +93,7 @@ class _TestWorker(QObject):
                 self.log_line.emit("--- Stopped by user ---")
                 break
 
-            self.log_line.emit(f"▶  {test_name}")
+            self.log_line.emit(f"Starting {test_name}")
             self.test_started.emit(test_name)
 
             t0 = time.time()
@@ -106,19 +106,18 @@ class _TestWorker(QObject):
 
                 passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
                 status = "Passed" if passed else "Failed"
-                mark   = "Suc" if passed else "✘"
 
-                self.log_line.emit(f"{mark}  {test_name}  {status}  ({duration:.1f}s)")
+                self.log_line.emit(f"{test_name}  {status}  ({duration:.1f}s)")
                 if isinstance(result, dict):
                     for k, v in result.items():
                         if k != "passed":
-                            self.log_line.emit(f"     {k}: {v}")
+                            self.log_line.emit(f"{k}: {v}")
 
                 self.test_finished.emit(test_name, result, status, duration)
 
             except Exception as exc:
                 duration = time.time() - t0
-                self.log_line.emit(f"✘  {test_name} raised {type(exc).__name__}: {exc}")
+                self.log_line.emit(f"{test_name} raised {type(exc).__name__}: {exc}")
                 self.log_line.emit(traceback.format_exc())
                 self.error.emit(test_name, str(exc))
                 self.test_finished.emit(test_name, {}, "Failed", duration)
