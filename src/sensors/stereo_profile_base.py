@@ -85,6 +85,9 @@ class StereoProfileBase(Sensor):
         self.update_rate = int(self.UPDATE_RATE)
         self.baseline = float(self.BASELINE_M)
         self._last_test_diagnostics: Dict[str, Any] = {}
+        self._last_scene_diag: Dict[str, Any] = {}
+        self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
+        self._resolved_right_topic = str(self.RIGHT_IMAGE_TOPIC)
 
     def _results_dir(self) -> str:
         path = os.path.join(self.CONFIG["ROOT_PATH"], "results", self.sensor_name)
@@ -111,8 +114,65 @@ class StereoProfileBase(Sensor):
         topics: List[str] = [str(self.LEFT_IMAGE_TOPIC), str(self.RIGHT_IMAGE_TOPIC)]
         return [topic for topic in topics if topic.strip()]
 
+    @staticmethod
+    def _scene_diag(simulator) -> Dict[str, Any]:
+        if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
+            try:
+                diag = simulator.get_last_scene_diagnostics()
+                if isinstance(diag, dict):
+                    return diag
+            except Exception:
+                pass
+        return {}
+
+    @staticmethod
+    def _ensure_render_display_env() -> Dict[str, str]:
+        applied: Dict[str, str] = {}
+        if os.environ.get("DISPLAY"):
+            return applied
+
+        xauthority = os.environ.get("XAUTHORITY", "").strip()
+        if not xauthority:
+            default_xauthority = os.path.expanduser("~/.Xauthority")
+            if os.path.exists(default_xauthority):
+                os.environ["XAUTHORITY"] = default_xauthority
+                applied["XAUTHORITY"] = default_xauthority
+
+        for display in (":0",):
+            display_socket = f"/tmp/.X11-unix/X{display.lstrip(':')}"
+            if os.path.exists(display_socket):
+                os.environ["DISPLAY"] = display
+                applied["DISPLAY"] = display
+                break
+
+        return applied
+
+    def _reset_resolved_stereo_topics(self) -> None:
+        self._last_scene_diag = {}
+        self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
+        self._resolved_right_topic = str(self.RIGHT_IMAGE_TOPIC)
+
+    def _update_resolved_stereo_topics(self, simulator) -> Dict[str, Any]:
+        scene_diag = self._scene_diag(simulator)
+        self._last_scene_diag = copy.deepcopy(scene_diag) if isinstance(scene_diag, dict) else {}
+
+        resolved_topics = scene_diag.get("resolved_topics", {}) if isinstance(scene_diag, dict) else {}
+        if isinstance(resolved_topics, dict):
+            left_candidate = str(resolved_topics.get(self.LEFT_IMAGE_TOPIC, "") or "").strip()
+            right_candidate = str(resolved_topics.get(self.RIGHT_IMAGE_TOPIC, "") or "").strip()
+            if left_candidate:
+                self._resolved_left_topic = left_candidate
+            if right_candidate:
+                self._resolved_right_topic = right_candidate
+
+        return scene_diag
+
     def _open_test_scene(self, simulator, test_name: str) -> None:
         self._last_test_diagnostics = {}
+        self._reset_resolved_stereo_topics()
+        display_env = self._ensure_render_display_env()
+        if display_env:
+            self._set_test_diagnostics(stereo_render_env={"display_env": dict(display_env)})
         world = self.test_to_world[test_name]
         if not simulator.open_scene(
             world,
@@ -120,14 +180,28 @@ class StereoProfileBase(Sensor):
             expected_topics=self.get_expected_topics(),
             sensor_name=self.sensor_name,
         ):
-            diag = {}
-            if hasattr(simulator, "get_last_scene_diagnostics") and callable(simulator.get_last_scene_diagnostics):
-                diag = simulator.get_last_scene_diagnostics()
+            diag = self._scene_diag(simulator)
+            self._last_scene_diag = copy.deepcopy(diag) if isinstance(diag, dict) else {}
             reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
             raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
         rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+        scene_diag = self._update_resolved_stereo_topics(simulator)
+        self._set_test_diagnostics(
+            stereo_scene={
+                "display_env": dict(display_env),
+                "scene_reason": str(scene_diag.get("reason", "")) if scene_diag else "",
+                "expected_left": str(self.LEFT_IMAGE_TOPIC),
+                "expected_right": str(self.RIGHT_IMAGE_TOPIC),
+                "resolved_left": str(self._resolved_left_topic),
+                "resolved_right": str(self._resolved_right_topic),
+                "topic_mapping_changed": bool(
+                    str(self._resolved_left_topic) != str(self.LEFT_IMAGE_TOPIC)
+                    or str(self._resolved_right_topic) != str(self.RIGHT_IMAGE_TOPIC)
+                ),
+            }
+        )
 
     @staticmethod
     def _msg_to_bgr(msg: Image) -> np.ndarray:
@@ -179,13 +253,21 @@ class StereoProfileBase(Sensor):
     def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
         expected_left = str(self.LEFT_IMAGE_TOPIC)
         expected_right = str(self.RIGHT_IMAGE_TOPIC)
+        cached_left = str(self._resolved_left_topic or "").strip()
+        cached_right = str(self._resolved_right_topic or "").strip()
         sensor_name = str(self.sensor_name)
 
-        preferred_pairs: List[Tuple[str, str, str]] = [
-            (expected_left, expected_right, "expected"),
-            (f"/{sensor_name}_left/image_raw", f"/{sensor_name}_right/image_raw", "name_underscore"),
-            (f"/{sensor_name}/left/image_raw", f"/{sensor_name}/right/image_raw", "name_namespace"),
-        ]
+        preferred_pairs: List[Tuple[str, str, str]] = []
+        if cached_left and cached_right:
+            preferred_pairs.append((cached_left, cached_right, "scene_resolved"))
+        if expected_left and expected_right and (expected_left, expected_right) != (cached_left, cached_right):
+            preferred_pairs.append((expected_left, expected_right, "expected"))
+        preferred_pairs.extend(
+            [
+                (f"/{sensor_name}_left/image_raw", f"/{sensor_name}_right/image_raw", "name_underscore"),
+                (f"/{sensor_name}/left/image_raw", f"/{sensor_name}/right/image_raw", "name_namespace"),
+            ]
+        )
 
         deadline = time.time() + float(warmup_timeout)
         last_topics: List[str] = []
@@ -243,15 +325,15 @@ class StereoProfileBase(Sensor):
         # Сначала ищем кандидаты в namespace профиля, затем общий fallback.
         ns_left = [t for t in left_candidates if token in t]
         ns_right = [t for t in right_candidates if token in t]
-        selected_left = self._choose_topic(ns_left) or self._choose_topic(left_candidates) or expected_left
-        selected_right = self._choose_topic(ns_right) or self._choose_topic(right_candidates) or expected_right
+        selected_left = self._choose_topic(ns_left) or cached_left or expected_left
+        selected_right = self._choose_topic(ns_right) or cached_right or expected_right
 
         return selected_left, selected_right, {
             "expected_left": expected_left,
             "expected_right": expected_right,
             "selected_left": selected_left,
             "selected_right": selected_right,
-            "selected_source": "heuristic_fallback",
+            "selected_source": "heuristic_sensor_namespace",
             "topics_found": last_topics,
             "topic_mapping_changed": bool(selected_left != expected_left or selected_right != expected_right),
         }
@@ -280,6 +362,15 @@ class StereoProfileBase(Sensor):
                 "attempts": [],
             }
         )
+
+        if not left_topic or not right_topic:
+            pair_diag["reason"] = "stereo_topics_unresolved"
+            self._set_test_diagnostics(stereo_pair_capture=pair_diag)
+            raise RuntimeError("Stereo topics could not be resolved")
+        if left_topic == right_topic:
+            pair_diag["reason"] = "stereo_topics_collapsed"
+            self._set_test_diagnostics(stereo_pair_capture=pair_diag)
+            raise RuntimeError(f"Stereo topics collapsed to one topic: {left_topic}")
 
         for attempt in range(1, int(retries) + 1):
             attempt_diag: Dict[str, Any] = {"attempt": int(attempt), "left_msgs": 0, "right_msgs": 0}
@@ -564,6 +655,10 @@ class StereoProfileBase(Sensor):
         convert2cv: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if world_path:
+            self._reset_resolved_stereo_topics()
+            display_env = self._ensure_render_display_env()
+            if display_env:
+                self._set_test_diagnostics(stereo_render_env={"display_env": dict(display_env)})
             if not simulator.open_scene(
                 world_path,
                 self.sensor_sdf_path,
@@ -573,6 +668,7 @@ class StereoProfileBase(Sensor):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
             rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+            self._update_resolved_stereo_topics(simulator)
 
         left_msg, right_msg = self._wait_pair(timeout=timeout)
         result: Dict[str, Any] = {
