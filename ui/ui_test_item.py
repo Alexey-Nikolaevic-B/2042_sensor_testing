@@ -15,12 +15,14 @@ class TestItem(QWidget):
         super().__init__(parent)
         uic.loadUi(os.path.join(QT_DIR, "test_item.ui"), self)
 
+        self.func_name        = ""
         self.is_running       = False
         self.is_selected      = False
         self.test_name        = ""
         self.test_status      = "Pending"
         self.test_description = ""
         self.test_result      = ""
+        self._progress        = 0
 
         self.setObjectName("TestItem")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -29,10 +31,12 @@ class TestItem(QWidget):
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
 
     def load(self, test_data: dict):
-        self.test_name        = test_data.get("name", "")
+        self.func_name        = test_data.get("name", "")
+        self.test_name        = test_data.get("display_name") or self.func_name
         self.test_status      = test_data.get("status", "Pending")
         self.test_description = test_data.get("description", "")
         self.test_result      = str(test_data.get("result", ""))
+        self._image_path      = test_data.get("image_path", "")
         self.is_running       = False
         self.is_selected      = False
         self.refresh()
@@ -53,9 +57,13 @@ class TestItem(QWidget):
         self.is_selected = selected
         self._refresh_bg()
 
+    def set_progress(self, value: int):
+        self._progress = max(0, min(100, value))
+        self.progress_bar.setValue(self._progress)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self.selected.emit(self.test_name)
+            self.selected.emit(self.func_name)
         super().mousePressEvent(event)
 
     def enterEvent(self, event):
@@ -70,9 +78,9 @@ class TestItem(QWidget):
 
     def _on_run_stop_clicked(self):
         if self.is_running:
-            self.stop_requested.emit(self.test_name)
+            self.stop_requested.emit(self.func_name)
         else:
-            self.run_requested.emit(self.test_name)
+            self.run_requested.emit(self.func_name)
 
     def _refresh_bg(self):
         if self.is_selected:
@@ -106,9 +114,12 @@ class TestItem(QWidget):
 
     def _refresh_progress(self):
         if self.is_running:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(self._progress)
             self.progress_bar.show()
             self.test_result_label.hide()
         else:
+            self._progress = 0
             self.progress_bar.hide()
             self.test_result_label.show()
             self.test_result_label.setText(self.test_result)

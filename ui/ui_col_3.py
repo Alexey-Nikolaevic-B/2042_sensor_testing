@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from PyQt5.QtWidgets import QWidget, QSizePolicy
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
@@ -38,7 +38,9 @@ class ColTests(QWidget):
         runner.all_finished.connect(self._on_all_finished)
         runner.error.connect(self._on_test_error)
         if self._runner_log_forward:
-            runner.log_line.connect(self._runner_log_forward)
+            runner.log_line.connect(
+                lambda text: self._runner_log_forward("info", "test_runner", text)
+            )
 
     def load_sensor(self, sensor_data: dict):
         self._sensor_data    = sensor_data
@@ -48,7 +50,6 @@ class ColTests(QWidget):
         self._populate_tests(sensor_data.get("tests", []))
 
     def clear(self):
-        """Reset column to empty state (called when sensor is deleted or deselected)."""
         self._sensor_data    = None
         self._sensor_id      = None
         self._sensor_backend = None
@@ -68,10 +69,6 @@ class ColTests(QWidget):
         w = self._test_widgets.get(test_name)
         if w:
             w.set_running(True)
-        else:
-            for widget in self._test_widgets.values():
-                if widget.is_running:
-                    widget.set_running(True)
 
     def _on_test_finished(self, test_name: str, result: dict, status: str, duration: float):
         w = self._test_widgets.get(test_name)
@@ -80,11 +77,6 @@ class ColTests(QWidget):
             w.test_status = status
             w.test_result = self._fmt_result(result)
             w.refresh()
-        else:
-            for widget in self._test_widgets.values():
-                if widget.is_running:
-                    widget.is_running = False
-                    widget.refresh()
         if self._repo and self._sensor_id:
             try:
                 self._repo.save_test_result(
@@ -94,14 +86,10 @@ class ColTests(QWidget):
                     result=result,
                     duration=duration,
                 )
-            except Exception:
+            except Exception as exc:
                 pass
 
     def _on_all_finished(self):
-        for w in self._test_widgets.values():
-            if w.is_running:
-                w.is_running = False
-                w.refresh()
         self.btn_run_all.setEnabled(True)
 
     def _on_test_error(self, test_name: str, message: str):
@@ -111,12 +99,16 @@ class ColTests(QWidget):
             w.test_status = "Failed"
             w.test_result = f"Error: {message}"
             w.refresh()
-        else:
-            for widget in self._test_widgets.values():
-                if widget.is_running:
-                    widget.is_running = False
-                    widget.test_status = "Failed"
-                    widget.refresh()
+
+    def _on_item_selected(self, func_name: str):
+        if self._selected_test and self._selected_test in self._test_widgets:
+            self._test_widgets[self._selected_test].set_selected(False)
+        self._selected_test = func_name
+        w = self._test_widgets.get(func_name)
+        if w:
+            w.set_selected(True)
+            self.lbl_selected_test_name.setText(w.test_name)
+            self.lbl_test_description.setText(w.test_description)
 
     def _on_item_run(self, test_name: str):
         if not self._can_run():
@@ -132,16 +124,6 @@ class ColTests(QWidget):
         if w:
             w.set_running(False)
 
-    def _on_item_selected(self, test_name: str):
-        if self._selected_test and self._selected_test in self._test_widgets:
-            self._test_widgets[self._selected_test].set_selected(False)
-        self._selected_test = test_name
-        w = self._test_widgets.get(test_name)
-        if w:
-            w.set_selected(True)
-            self.lbl_selected_test_name.setText(w.test_name)
-            self.lbl_test_description.setText(w.test_description)
-
     def _on_run_all(self):
         if not self._can_run():
             return
@@ -149,6 +131,82 @@ class ColTests(QWidget):
             w.set_running(True)
         self.btn_run_all.setEnabled(False)
         self._runner.run_tests(self._sensor_backend)
+
+    def _on_test_description_update(self):
+        pass
+
+    def _on_edit_tests(self):
+        if not self._sensor_data:
+            return
+        try:
+            self._open_edit_tests_dialog()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    def _open_edit_tests_dialog(self):
+        from .ui_edit_tests_dialog import EditTestsDialog
+        from .sensor_repository import SensorRepository
+
+        sensor_id   = self._sensor_id
+        sensor_name = self._sensor_data.get("name", "")
+        repo        = SensorRepository.instance()
+
+        live_funcs = {}
+        if self._runner and hasattr(self._runner, "_core") and self._sensor_backend is not None:
+            try:
+                live_funcs = self._runner._core.get_tests(self._sensor_backend)
+            except Exception as exc:
+                print(f"[EditTests] get_tests failed: {exc}")
+
+        saved_meta = repo.get_test_meta(sensor_id)
+
+        tests = []
+        for func_name in live_funcs:
+            meta = saved_meta.get(func_name, {})
+            tests.append({
+                "func_name":    func_name,
+                "display_name": meta.get("display_name") or func_name,
+                "description":  meta.get("description", ""),
+                "image_path":   meta.get("image_path", ""),
+                "missing":      False,
+            })
+        for func_name, meta in saved_meta.items():
+            if func_name not in live_funcs:
+                tests.append({
+                    "func_name":    func_name,
+                    "display_name": meta.get("display_name") or func_name,
+                    "description":  meta.get("description", ""),
+                    "image_path":   meta.get("image_path", ""),
+                    "missing":      True,
+                })
+
+        dlg = EditTestsDialog(sensor_id, sensor_name, tests, parent=self)
+        dlg.tests_saved.connect(self._on_tests_meta_saved)
+        dlg.exec_()
+
+    def _on_tests_meta_saved(self):
+        if not self._sensor_id:
+            return
+        from .sensor_repository import SensorRepository
+        repo   = SensorRepository.instance()
+        sensor = repo.get_sensor(self._sensor_id)
+        if not sensor:
+            return
+        self._sensor_data = sensor
+        meta  = repo.get_test_meta(self._sensor_id)
+        tests = sensor.get("tests", [])
+        for t in tests:
+            m = meta.get(t["name"], {})
+            t["display_name"] = m.get("display_name") or t["name"]
+            t["description"]  = m.get("description", "")
+            t["image_path"]   = m.get("image_path", "")
+        self._populate_tests(tests)
+        if self._selected_test and self._selected_test in self._test_widgets:
+            w = self._test_widgets[self._selected_test]
+            w.set_selected(True)
+            self.lbl_selected_test_name.setText(w.test_name)
+            self.lbl_test_description.setText(w.test_description)
 
     def _can_run(self) -> bool:
         return self._runner is not None and self._sensor_backend is not None
@@ -191,9 +249,6 @@ class ColTests(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._test_widgets.clear()
-        self._selected_test = None
-        self.lbl_selected_test_name.setText("")
-        self.lbl_test_description.setText("")
 
         for test_data in tests:
             w = TestItem(parent=self)
@@ -204,19 +259,16 @@ class ColTests(QWidget):
             layout.addWidget(w)
             self._test_widgets[test_data["name"]] = w
 
-        filler = QWidget()
-        filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        filler.setStyleSheet(f"background-color: {Colors.BG_COLUMN};")
-        layout.addWidget(filler)
+        layout.addStretch(1)
 
     @staticmethod
     def _fmt_result(result) -> str:
         if not result:
             return ""
         if isinstance(result, dict):
-            return " | ".join(f"{k}: {v}" for k, v in result.items() if k != "passed")
-        if isinstance(result, list):
-            return ", ".join(str(v) for v in result)
+            return " | ".join(
+                f"{k}: {v}" for k, v in result.items() if k != "passed"
+            )
         return str(result)
 
     def _enforce_heights(self):
@@ -227,6 +279,7 @@ class ColTests(QWidget):
 
     def _connect_signals(self):
         self.btn_run_all.clicked.connect(self._on_run_all)
+        self.btn_edit_tests.clicked.connect(self._on_edit_tests)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""

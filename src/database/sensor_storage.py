@@ -1,3 +1,14 @@
+"""
+sensor_storage.py
+
+SQLite persistence layer for sensors and their test results.
+
+Tables
+------
+Sensors     — one row per registered sensor
+TestResults — one row per test run, FK → Sensors.id
+"""
+
 import sqlite3
 import json
 from datetime import datetime
@@ -32,6 +43,8 @@ CREATE TABLE IF NOT EXISTS TestResults (
 """
 
 
+# ── Internal helpers (defined first so all functions below can use them) ──────
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
@@ -65,16 +78,33 @@ def _row_to_test_dict(row: sqlite3.Row) -> dict:
     except (json.JSONDecodeError, TypeError):
         pass
 
+    keys = row.keys()
     return {
-        "name":        row["test_name"],
-        "status":      row["status"],
-        "result":      result,
-        "description": row["description"] or "",
-        "date":        row["date"],
-        "duration":    row["duration"],
+        "name":         row["test_name"],
+        "display_name": (row["display_name"] if "display_name" in keys else None) or row["test_name"],
+        "status":       row["status"],
+        "result":       result,
+        "description":  (row["meta_description"] if "meta_description" in keys else None) or "",
+        "image_path":   (row["image_path"] if "image_path" in keys else "") or "",
+        "date":         row["date"],
+        "duration":     row["duration"],
     }
 
 
+def _meta_stub_dict(func_name: str, display_name: str, description: str, image_path: str) -> dict:
+    return {
+        "name":         func_name,
+        "display_name": display_name or func_name,
+        "status":       "Pending",
+        "result":       "",
+        "description":  description or "",
+        "image_path":   image_path or "",
+        "date":         "",
+        "duration":     0.0,
+    }
+
+
+# ── Init ──────────────────────────────────────────────────────────────────────
 
 def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
@@ -82,6 +112,7 @@ def init_db() -> None:
         conn.executescript(_SCHEMA)
 
 
+# ── Sensors ───────────────────────────────────────────────────────────────────
 
 def add_sensor(
     sensor_name: str,
@@ -186,6 +217,7 @@ def get_sensor_types() -> list[str]:
     return [r["sensor_type"] for r in rows]
 
 
+# ── Test results ──────────────────────────────────────────────────────────────
 
 def save_test_result(
     sensor_name: str,
@@ -223,12 +255,15 @@ def save_test_result(
 
 
 def get_latest_test_results(sensor_id) -> list[dict]:
-    """Return the most recent result for each test name for a given sensor."""
     init_db()
     with _connect() as conn:
-        rows = conn.execute(
+        # Latest result row per test, joined with SensorTests meta
+        result_rows = conn.execute(
             """
-            SELECT t1.*
+            SELECT t1.*,
+                   sm.display_name  AS display_name,
+                   sm.description   AS meta_description,
+                   sm.image_path    AS image_path
             FROM TestResults t1
             INNER JOIN (
                 SELECT test_name, MAX(id) AS max_id
@@ -236,11 +271,35 @@ def get_latest_test_results(sensor_id) -> list[dict]:
                 WHERE sensor_id = ?
                 GROUP BY test_name
             ) t2 ON t1.test_name = t2.test_name AND t1.id = t2.max_id
+            LEFT JOIN SensorTests sm
+                   ON sm.sensor_id = t1.sensor_id
+                  AND sm.func_name = t1.test_name
             ORDER BY t1.test_name
             """,
             (sensor_id,),
         ).fetchall()
-    return [_row_to_test_dict(r) for r in rows]
+
+        ran_names = {r["test_name"] for r in result_rows}
+
+        # Tests that have meta but have never been run — show as Pending
+        meta_only = conn.execute(
+            """
+            SELECT func_name, display_name, description, image_path
+            FROM SensorTests
+            WHERE sensor_id = ?
+            ORDER BY func_name
+            """,
+            (int(sensor_id),),
+        ).fetchall()
+
+    tests = [_row_to_test_dict(r) for r in result_rows]
+    for m in meta_only:
+        if m["func_name"] not in ran_names:
+            tests.append(_meta_stub_dict(
+                m["func_name"], m["display_name"],
+                m["description"], m["image_path"],
+            ))
+    return tests
 
 
 def get_test_history(sensor_name: str, test_name: str) -> list[dict]:
@@ -263,6 +322,8 @@ def get_test_history(sensor_name: str, test_name: str) -> list[dict]:
     return [_row_to_test_dict(r) for r in rows]
 
 
+# ── Backwards-compatible alias ────────────────────────────────────────────────
+
 def get_sensors() -> list[tuple]:
     """Original API: returns (id, sensor_name, sensor_type, sdf_path) tuples."""
     init_db()
@@ -271,3 +332,61 @@ def get_sensors() -> list[tuple]:
             "SELECT id, sensor_name, sensor_type, sdf_path FROM Sensors ORDER BY sensor_name"
         ).fetchall()
     return [(r["id"], r["sensor_name"], r["sensor_type"], r["sdf_path"]) for r in rows]
+
+
+# ── Test metadata ─────────────────────────────────────────────────────────────
+# Stores display name, description and image for each test function.
+# func_name  = the Python function name from core.get_tests()
+# display_name = what's shown in the UI (defaults to func_name)
+
+_SCHEMA_TEST_META = """
+CREATE TABLE IF NOT EXISTS SensorTests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_id    INTEGER NOT NULL REFERENCES Sensors(id) ON DELETE CASCADE,
+    func_name    TEXT    NOT NULL,
+    display_name TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    image_path   TEXT    NOT NULL DEFAULT '',
+    UNIQUE(sensor_id, func_name)
+);
+"""
+
+
+def init_test_meta_table() -> None:
+    """Extend schema with SensorTests table. Safe to call multiple times."""
+    with _connect() as conn:
+        conn.executescript(_SCHEMA_TEST_META)
+
+
+def get_test_meta(sensor_id: str) -> list[dict]:
+    """Return all test metadata rows for a sensor."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM SensorTests WHERE sensor_id = ?", (int(sensor_id),)
+        ).fetchall()
+    return [
+        {
+            "func_name":    r["func_name"],
+            "display_name": r["display_name"] or r["func_name"],
+            "description":  r["description"] or "",
+            "image_path":   r["image_path"]  or "",
+        }
+        for r in rows
+    ]
+
+
+def save_test_meta(sensor_id: str, func_name: str, display_name: str,
+                   description: str, image_path: str) -> None:
+    """Upsert a single test's metadata."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO SensorTests (sensor_id, func_name, display_name, description, image_path)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(sensor_id, func_name) DO UPDATE SET
+                display_name = excluded.display_name,
+                description  = excluded.description,
+                image_path   = excluded.image_path
+            """,
+            (int(sensor_id), func_name, display_name, description, image_path),
+        )

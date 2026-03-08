@@ -6,8 +6,8 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import src.database.sensor_storage as db
 
 
-
 class Sensor:
+
     REQUIRED_FIELDS = ("id", "name", "type")
 
     def __init__(self, data: dict):
@@ -71,6 +71,7 @@ class Sensor:
 
 
 class SensorRepository(QObject):
+
     sensor_added   = pyqtSignal(dict)
     sensor_updated = pyqtSignal(dict)
     sensor_deleted = pyqtSignal(str)
@@ -90,8 +91,8 @@ class SensorRepository(QObject):
         self._sensors: dict[str, Sensor] = {}
         SensorRepository._instance = self
         db.init_db()
+        db.init_test_meta_table()
         self.load()
-
 
     def load(self):
         self._sensors.clear()
@@ -101,8 +102,8 @@ class SensorRepository(QObject):
                 self._sensors[s.id] = s
             except (TypeError, ValueError) as exc:
                 print(f"[SensorRepository] Skipping invalid sensor: {exc}")
+        print(f"[SensorRepository] Loaded {len(self._sensors)} sensors from DB")
         self.sensors_loaded.emit()
-
 
     def all_sensors(self) -> list[dict]:
         return [s.to_dict() for s in self._sensors.values()]
@@ -123,7 +124,6 @@ class SensorRepository(QObject):
     def count(self) -> int:
         return len(self._sensors)
 
-
     def add_sensor(self, data: dict) -> dict:
         db.add_sensor(
             sensor_name = data["name"],
@@ -136,8 +136,26 @@ class SensorRepository(QObject):
         fresh = db.get_sensor_by_name(data["name"])
         s = Sensor(fresh)
         self._sensors[s.id] = s
+        self._seed_test_meta(s)
         self.sensor_added.emit(s.to_dict())
         return s.to_dict()
+
+    def _seed_test_meta(self, sensor: "Sensor") -> None:
+        try:
+            from src.sensors import REGISTRY, make_sensor
+            from config import CONFIG
+            SensorType = REGISTRY.get((sensor.sensor_type, sensor.name))
+            if SensorType is None:
+                return
+            instance = SensorType(CONFIG)
+            from src.test_utils import load_test_functions
+            funcs = load_test_functions(instance)
+            existing = {r["func_name"] for r in db.get_test_meta(sensor.id)}
+            for func_name in funcs:
+                if func_name not in existing:
+                    db.save_test_meta(sensor.id, func_name, func_name, "", "")
+        except Exception:
+            pass
 
     def update_sensor(self, sensor_id: str, fields: dict) -> dict:
         s = self._sensors.get(sensor_id)
@@ -198,3 +216,19 @@ class SensorRepository(QObject):
         updated_test = s.get_test(test_name)
         self.test_updated.emit(sensor_id, copy.deepcopy(updated_test))
         return copy.deepcopy(updated_test)
+
+    def get_test_meta(self, sensor_id: str) -> list[dict]:
+        rows = db.get_test_meta(sensor_id)
+        return {r["func_name"]: r for r in rows}
+
+    def save_test_meta(self, sensor_id: str, func_name: str,
+                       display_name: str, description: str,
+                       image_path: str) -> None:
+        db.save_test_meta(sensor_id, func_name, display_name, description, image_path)
+        s = self._sensors.get(sensor_id)
+        if s:
+            s.update_test(func_name, {
+                "display_name": display_name,
+                "description":  description,
+                "image_path":   image_path,
+            })

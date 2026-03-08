@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>EditTestsDialog</class>
+ <widget class="QDialog" name="EditTestsDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>760</width><height>540</height></rect>
+  </property>
+  <property name="windowTitle"><string>Edit tests</string></property>
+
+  <layout class="QVBoxLayout" name="layout_root">
+   <property name="spacing"><number>0</number></property>
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+
+   <!-- Title bar -->
+   <item>
+    <widget class="QWidget" name="wt_titlebar">
+     <property name="minimumHeight"><number>44</number></property>
+     <property name="maximumHeight"><number>44</number></property>
+     <layout class="QHBoxLayout" name="titlebar_layout">
+      <property name="leftMargin"><number>16</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>8</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+      <property name="spacing"><number>8</number></property>
+      <item>
+       <widget class="QLabel" name="lbl_title">
+        <property name="text"><string>Edit tests</string></property>
+       </widget>
+      </item>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_close">
+        <property name="text"><string/></property>
+        <property name="minimumWidth"><number>28</number></property>
+        <property name="maximumWidth"><number>28</number></property>
+        <property name="minimumHeight"><number>28</number></property>
+        <property name="maximumHeight"><number>28</number></property>
+        <property name="flat"><bool>true</bool></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- Body: list + editor side by side -->
+   <item>
+    <widget class="QWidget" name="wt_body">
+     <layout class="QHBoxLayout" name="body_layout">
+      <property name="spacing"><number>0</number></property>
+      <property name="leftMargin"><number>0</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+
+      <!-- Left: test list -->
+      <item>
+       <widget class="QWidget" name="wt_list_panel">
+        <property name="minimumWidth"><number>220</number></property>
+        <property name="maximumWidth"><number>260</number></property>
+        <layout class="QVBoxLayout" name="list_panel_layout">
+         <property name="spacing"><number>0</number></property>
+         <property name="leftMargin"><number>0</number></property>
+         <property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property>
+         <property name="bottomMargin"><number>0</number></property>
+         <item>
+          <widget class="QScrollArea" name="scroll_tests_list">
+           <property name="widgetResizable"><bool>true</bool></property>
+           <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+           <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+           <widget class="QWidget" name="scroll_tests_list_contents">
+            <layout class="QVBoxLayout" name="tests_list_layout">
+             <property name="spacing"><number>0</number></property>
+             <property name="leftMargin"><number>0</number></property>
+             <property name="topMargin"><number>0</number></property>
+             <property name="rightMargin"><number>0</number></property>
+             <property name="bottomMargin"><number>0</number></property>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
+
+      <!-- Right: editor -->
+      <item>
+       <widget class="QWidget" name="wt_editor_panel">
+        <layout class="QVBoxLayout" name="editor_panel_layout">
+         <property name="spacing"><number>12</number></property>
+         <property name="leftMargin"><number>20</number></property>
+         <property name="topMargin"><number>16</number></property>
+         <property name="rightMargin"><number>20</number></property>
+         <property name="bottomMargin"><number>16</number></property>
+
+         <!-- Empty state label -->
+         <item>
+          <widget class="QLabel" name="lbl_empty">
+           <property name="text"><string>Select a test on the left</string></property>
+           <property name="alignment"><set>Qt::AlignCenter</set></property>
+          </widget>
+         </item>
+
+         <!-- Editor panel (hidden until test selected) -->
+         <item>
+          <widget class="QWidget" name="wt_editor">
+            <layout class="QVBoxLayout" name="editor_layout">
+             <property name="spacing"><number>12</number></property>
+             <property name="leftMargin"><number>0</number></property>
+             <property name="topMargin"><number>0</number></property>
+             <property name="rightMargin"><number>0</number></property>
+             <property name="bottomMargin"><number>0</number></property>
+
+
+             <!-- Image section -->
+             <item>
+              <widget class="QLabel" name="lbl_section_image">
+               <property name="text"><string>IMAGE</string></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QWidget" name="wt_image_container">
+               <property name="minimumHeight"><number>160</number></property>
+               <property name="maximumHeight"><number>160</number></property>
+               <property name="cursor"><cursorShape>PointingHandCursor</cursorShape></property>
+               <layout class="QVBoxLayout" name="img_container_layout">
+                <property name="leftMargin"><number>0</number></property>
+                <property name="topMargin"><number>0</number></property>
+                <property name="rightMargin"><number>0</number></property>
+                <property name="bottomMargin"><number>0</number></property>
+                <item>
+                 <widget class="QLabel" name="lbl_image">
+                  <property name="text"><string>Click to choose image</string></property>
+                  <property name="alignment"><set>Qt::AlignCenter</set></property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+
+             <!-- Display name section -->
+             <item>
+              <widget class="QLabel" name="lbl_section_name">
+               <property name="text"><string>DISPLAY NAME</string></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="input_display_name">
+               <property name="placeholderText"><string>Display name shown in UI</string></property>
+              </widget>
+             </item>
+
+             <!-- Func name section -->
+             <item>
+              <widget class="QLabel" name="lbl_section_func">
+               <property name="text"><string>FUNCTION NAME</string></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="input_func_name">
+               <property name="readOnly"><bool>true</bool></property>
+              </widget>
+             </item>
+
+             <!-- Description section -->
+             <item>
+              <widget class="QLabel" name="lbl_section_desc">
+               <property name="text"><string>DESCRIPTION</string></property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPlainTextEdit" name="input_description">
+               <property name="minimumHeight"><number>90</number></property>
+               <property name="maximumHeight"><number>90</number></property>
+              </widget>
+             </item>
+
+             <!-- Missing warning -->
+             <item>
+              <widget class="QLabel" name="lbl_missing_warn">
+               <property name="text"><string>⚠  This test function was not found in core.get_tests(). It may have been renamed or removed.</string></property>
+               <property name="wordWrap"><bool>true</bool></property>
+               <property name="visible"><bool>false</bool></property>
+              </widget>
+             </item>
+
+             <!-- Spacer -->
+             <item>
+              <spacer>
+               <property name="orientation"><enum>Qt::Vertical</enum></property>
+               <property name="sizeHint" stdset="0"><size><width>1</width><height>8</height></size></property>
+              </spacer>
+             </item>
+
+            </layout>
+          </widget>
+         </item>
+
+        </layout>
+       </widget>
+      </item>
+
+     </layout>
+    </widget>
+   </item>
+
+   <!-- Footer -->
+   <item>
+    <widget class="QWidget" name="wt_footer">
+     <property name="minimumHeight"><number>52</number></property>
+     <property name="maximumHeight"><number>52</number></property>
+     <layout class="QHBoxLayout" name="footer_layout">
+      <property name="leftMargin"><number>16</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>16</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+      <property name="spacing"><number>8</number></property>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_cancel">
+        <property name="text"><string>Cancel</string></property>
+        <property name="minimumHeight"><number>34</number></property>
+        <property name="maximumHeight"><number>34</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_save">
+        <property name="text"><string>Save all</string></property>
+        <property name="minimumHeight"><number>34</number></property>
+        <property name="maximumHeight"><number>34</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

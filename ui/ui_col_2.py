@@ -108,7 +108,7 @@ class ColDetails(QWidget):
 
         filler = QWidget()
         filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        filler.setStyleSheet(f"background-color: {Colors.BG_COLUMN};")
+        filler.setStyleSheet(f"background-color: transparent;")
         layout.addWidget(filler)
 
     def _clear_params(self):
