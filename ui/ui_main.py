@@ -83,6 +83,7 @@ class Main_UI(QMainWindow):
         self.col_1.sensor_selected.connect(self._on_sensor_selected)
         self.col_1.add_requested.connect(self._on_add_sensor)
         self.col_1.delete_requested.connect(self._on_delete_sensor)
+        self.col_2.sensor_updated.connect(self._on_sensor_edited)
 
 
         self.col_3._runner_log_forward = self.col_4.append_log

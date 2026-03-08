@@ -55,7 +55,7 @@ class ColTests(QWidget):
         self._sensor_backend = None
         self.lbl_test_image.clear()
         self.lbl_test_image.setText("no test image")
-        self.lbl_selected_test_name.setText("—")
+        self.lbl_selected_test_name.setText("")
         self.lbl_test_description.setText("")
         self._populate_tests([])
 

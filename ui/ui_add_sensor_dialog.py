@@ -27,7 +27,7 @@ class AddSensorDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedSize(680, 520)
+        self.setFixedSize(680, 580)
 
         self._edit_mode    = sensor_data is not None
         self._sensor_data  = sensor_data or {}
@@ -51,6 +51,7 @@ class AddSensorDialog(QDialog):
         self.btn_save.setText("Save changes")
 
         self.input_name.setText(d.get("name", ""))
+        self.input_description.setPlainText(d.get("description", ""))
 
         img = d.get("image_path", "")
         if img and os.path.exists(img):
@@ -77,11 +78,15 @@ class AddSensorDialog(QDialog):
         self.image_container.mousePressEvent = lambda _: self._pick_image()
 
     def _pick_image(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose sensor image", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
-        )
-        if not path:
+        dlg = QFileDialog(self, "Choose sensor image", "",
+                          "Images (*.png *.jpg *.jpeg *.bmp *.webp)")
+        dlg.setStyleSheet("")
+        if dlg.exec_():
+            paths = dlg.selectedFiles()
+            if not paths:
+                return
+            path = paths[0]
+        else:
             return
         self._image_source = path
         px = QPixmap(path)
@@ -90,11 +95,15 @@ class AddSensorDialog(QDialog):
             self.image_label.setText("")
 
     def _pick_sdf(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Choose SDF file", "",
-            "SDF files (*.sdf);;All files (*)"
-        )
-        if not path:
+        dlg = QFileDialog(self, "Choose SDF file", "",
+                          "SDF files (*.sdf);;All files (*)")
+        dlg.setStyleSheet("")
+        if dlg.exec_():
+            paths = dlg.selectedFiles()
+            if not paths:
+                return
+            path = paths[0]
+        else:
             return
         self._sdf_source = path
         self.sdf_label.setText(os.path.basename(path))
@@ -199,7 +208,7 @@ class AddSensorDialog(QDialog):
             "type":        self._detected_type or "unknown",
             "sdf_path":    sdf_dest,
             "image_path":  image_dest,
-            "description": self._sensor_data.get("description", ""),
+            "description": self.input_description.toPlainText().strip(),
             "params":      dict(self._params),
         }
         if self._sensor_id:
@@ -238,6 +247,7 @@ class AddSensorDialog(QDialog):
                 color: {C.TEXT_WHITE};
                 font-size: 14px;
                 font-weight: bold;
+                background-color: {C.BG_TOOLBAR};
             }}
             QPushButton#btn_dialog_close {{
                 background: transparent; border: none; border-radius: 4px;
@@ -245,7 +255,7 @@ class AddSensorDialog(QDialog):
             QPushButton#btn_dialog_close:hover {{ background-color: {C.BG_CARD_HOVER}; }}
             QLabel#lbl_section_image, QLabel#lbl_section_name,
             QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
-            QLabel#lbl_section_params {{
+            QLabel#lbl_section_params, QLabel#lbl_section_description {{
                 color: {C.TEXT_SECONDARY};
                 font-size: 11px;
                 font-weight: bold;
@@ -271,6 +281,17 @@ class AddSensorDialog(QDialog):
                 font-size: 13px;
             }}
             QLineEdit#input_name:focus, QLineEdit#field_input:focus {{
+                border-color: {C.ACCENT};
+            }}
+            QPlainTextEdit#input_description {{
+                background-color: {C.BG_INPUT};
+                border: 1px solid {C.BORDER_LIGHT};
+                border-radius: 4px;
+                color: {C.TEXT_PRIMARY};
+                padding: 6px 10px;
+                font-size: 12px;
+            }}
+            QPlainTextEdit#input_description:focus {{
                 border-color: {C.ACCENT};
             }}
             QScrollArea#params_scroll {{

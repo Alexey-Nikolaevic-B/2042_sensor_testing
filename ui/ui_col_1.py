@@ -202,16 +202,16 @@ class ColSensors(QWidget):
             QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}
         """)
         self.lbl_filter_active.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
+            f"background-color: transparent; color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
         )
         self.lbl_filter_value.setStyleSheet(
-            f"color: {Colors.ACCENT}; font-size: 11px; font-weight: bold;"
+            f"background-color: transparent; color: {Colors.ACCENT}; font-size: 11px; font-weight: bold;"
         )
         for btn, icon in [
             (self.btn_filter,       Icons.FILTER()),
             (self.btn_add,          Icons.ADD()),
             (self.btn_delete,       Icons.CLEAR()),
-            (self.btn_clear_filter, Icons.CLOSE_BLK()),
+            (self.btn_clear_filter, Icons.CLOSE()),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)

@@ -3,7 +3,7 @@
  <class>AddSensorDialog</class>
  <widget class="QDialog" name="AddSensorDialog">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>680</width><height>520</height></rect>
+   <rect><x>0</x><y>0</y><width>680</width><height>580</height></rect>
   </property>
   <property name="windowTitle"><string>Add sensor</string></property>
 
@@ -57,7 +57,7 @@
       <property name="leftMargin"><number>20</number></property>
       <property name="topMargin"><number>16</number></property>
       <property name="rightMargin"><number>20</number></property>
-      <property name="bottomMargin"><number>0</number></property>
+      <property name="bottomMargin"><number>10</number></property>
       <property name="spacing"><number>20</number></property>
 
       <!-- LEFT column: image / name / sdf / detected type -->
@@ -213,6 +213,20 @@
              <property name="bottomMargin"><number>0</number></property>
             </layout>
            </widget>
+          </widget>
+         </item>
+
+         <!-- Description -->
+         <item>
+          <widget class="QLabel" name="lbl_section_description">
+           <property name="text"><string>DESCRIPTION</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPlainTextEdit" name="input_description">
+           <property name="placeholderText"><string>optional description…</string></property>
+           <property name="minimumHeight"><number>72</number></property>
+           <property name="maximumHeight"><number>72</number></property>
           </widget>
          </item>
 
