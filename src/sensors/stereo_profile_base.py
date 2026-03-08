@@ -46,6 +46,9 @@ class StereoProfileBase(Sensor):
     S1_MAX_REL_ERROR = 0.10
     S1_MIN_PASS_OBJECTS = 3
     S2_MIN_VALID_GAIN = 0.05
+    S2_CROP_BLOCK_SIZE = 21
+    S2_CROP_TEXTURE_THRESHOLD = 10
+    S2_CROP_UNIQUENESS_RATIO = 10
     # Первичный прогрев топиков/кадров для stereo делаем длиннее,
     # иначе на "холодном" запуске часто прилетают таймауты.
     PAIR_TIMEOUT_S = 25.0
@@ -572,6 +575,33 @@ class StereoProfileBase(Sensor):
         return float(np.count_nonzero(valid) / area)
 
     @staticmethod
+    def _crop_valid_ratio_bm(
+        gray_left: np.ndarray,
+        gray_right: np.ndarray,
+        block_size: int,
+        texture_threshold: int,
+        uniqueness_ratio: int,
+    ) -> float:
+        crop_h, crop_w = gray_left.shape[:2]
+        if crop_h <= 0 or crop_w <= 0:
+            return 0.0
+
+        num_disp = max(16, min(256, ((crop_w // 4) // 16) * 16))
+        if num_disp < 16:
+            num_disp = 16
+
+        matcher = cv2.StereoBM_create(numDisparities=int(num_disp), blockSize=int(block_size))
+        matcher.setTextureThreshold(int(texture_threshold))
+        matcher.setUniquenessRatio(int(uniqueness_ratio))
+        matcher.setSpeckleWindowSize(50)
+        matcher.setSpeckleRange(2)
+        matcher.setDisp12MaxDiff(1)
+
+        disparity = matcher.compute(gray_left, gray_right).astype(np.float32) / 16.0
+        valid = np.isfinite(disparity) & (disparity > 0.0)
+        return float(np.count_nonzero(valid) / max(1, valid.size))
+
+    @staticmethod
     def _clean_mask(mask: np.ndarray) -> np.ndarray:
         kernel = np.ones((5, 5), np.uint8)
         opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -1071,6 +1101,8 @@ class StereoProfileBase(Sensor):
         right = self._msg_to_bgr(right_msg)
         disparity, depth_map, _ = self._compute_disparity_and_depth(left, right)
         disparity_viz = self._disparity_to_viz(disparity)
+        gray = cv2.cvtColor(left, cv2.COLOR_BGR2GRAY)
+        gray_right = cv2.cvtColor(right, cv2.COLOR_BGR2GRAY)
 
         h, w = disparity.shape[:2]
         y0 = int(0.18 * h)
@@ -1102,12 +1134,28 @@ class StereoProfileBase(Sensor):
             left_wall = left_half_mask
             right_wall = right_half_mask
 
-        gray = cv2.cvtColor(left, cv2.COLOR_BGR2GRAY)
         left_texture = float(np.std(gray[left_wall])) if np.count_nonzero(left_wall) > 0 else 0.0
         right_texture = float(np.std(gray[right_wall])) if np.count_nonzero(right_wall) > 0 else 0.0
 
-        left_ratio = self._valid_ratio(disparity, left_wall)
-        right_ratio = self._valid_ratio(disparity, right_wall)
+        left_crop_left = gray[y0:y1, x0:xm]
+        left_crop_right = gray_right[y0:y1, x0:xm]
+        right_crop_left = gray[y0:y1, xm:x1]
+        right_crop_right = gray_right[y0:y1, xm:x1]
+
+        left_ratio = self._crop_valid_ratio_bm(
+            left_crop_left,
+            left_crop_right,
+            block_size=int(self.S2_CROP_BLOCK_SIZE),
+            texture_threshold=int(self.S2_CROP_TEXTURE_THRESHOLD),
+            uniqueness_ratio=int(self.S2_CROP_UNIQUENESS_RATIO),
+        )
+        right_ratio = self._crop_valid_ratio_bm(
+            right_crop_left,
+            right_crop_right,
+            block_size=int(self.S2_CROP_BLOCK_SIZE),
+            texture_threshold=int(self.S2_CROP_TEXTURE_THRESHOLD),
+            uniqueness_ratio=int(self.S2_CROP_UNIQUENESS_RATIO),
+        )
 
         if right_texture >= left_texture:
             textured_side = "right"
@@ -1132,6 +1180,13 @@ class StereoProfileBase(Sensor):
                 "right_std": float(right_texture),
                 "textured_side": textured_side,
                 "smooth_side": smooth_side,
+            },
+            "crop_matcher": {
+                "type": "StereoBM",
+                "block_size": int(self.S2_CROP_BLOCK_SIZE),
+                "texture_threshold": int(self.S2_CROP_TEXTURE_THRESHOLD),
+                "uniqueness_ratio": int(self.S2_CROP_UNIQUENESS_RATIO),
+                "crop_bounds": {"x0": int(x0), "x1": int(x1), "xm": int(xm), "y0": int(y0), "y1": int(y1)},
             },
             "valid_ratio": {
                 "left": float(left_ratio),
