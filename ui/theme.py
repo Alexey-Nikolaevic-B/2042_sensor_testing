@@ -200,7 +200,7 @@ class Icons:
     @classmethod
     def CLOSE_BLK(cls): return cls.get("close_black.png")
     @classmethod
-    def CLEAR(cls):     return cls.get("clear_logs.png")
+    def CLEAR(cls):     return cls.get("clear.png")
     @classmethod
     def COPY(cls):      return cls.get("copy.png")
     @classmethod

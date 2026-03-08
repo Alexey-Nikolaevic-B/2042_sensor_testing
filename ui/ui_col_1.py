@@ -157,7 +157,7 @@ class ColSensors(QWidget):
         for btn, icon in [
             (self.btn_filter,       Icons.FILTER()),
             (self.btn_add,          Icons.ADD()),
-            (self.btn_clear_filter, Icons.CLOSE_BLK()),
+            (self.btn_clear_filter, Icons.CLOSE()),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)
