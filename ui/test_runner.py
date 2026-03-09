@@ -9,6 +9,7 @@ class TestRunner(QObject):
     log_line      = pyqtSignal(str)
     test_started  = pyqtSignal(str)
     test_finished = pyqtSignal(str, dict, str, float)
+    test_progress = pyqtSignal(str, int)
     all_finished  = pyqtSignal()
     error         = pyqtSignal(str, str)
 
@@ -46,6 +47,7 @@ class TestRunner(QObject):
         self._worker.log_line.connect(self.log_line)
         self._worker.test_started.connect(self.test_started)
         self._worker.test_finished.connect(self.test_finished)
+        self._worker.test_progress.connect(self.test_progress)
         self._worker.all_finished.connect(self.all_finished)
         self._worker.error.connect(self.error)
 
@@ -71,6 +73,7 @@ class _TestWorker(QObject):
     log_line      = pyqtSignal(str)
     test_started  = pyqtSignal(str)
     test_finished = pyqtSignal(str, dict, str, float)
+    test_progress = pyqtSignal(str, int)
     all_finished  = pyqtSignal()
     error         = pyqtSignal(str, str)
 
@@ -93,12 +96,17 @@ class _TestWorker(QObject):
                 self.log_line.emit("--- Stopped by user ---")
                 break
 
-            self.log_line.emit(f"Starting {test_name}")
+            self.log_line.emit(f"▶  {test_name}")
             self.test_started.emit(test_name)
+
+            def make_progress_cb(name):
+                def cb(value: int):
+                    self.test_progress.emit(name, int(max(0, min(100, value))))
+                return cb
 
             t0 = time.time()
             try:
-                result   = test_func(self._core.simulator)
+                result   = test_func(self._core.simulator, progress_cb=make_progress_cb(test_name))
                 duration = time.time() - t0
 
                 if result is None:
@@ -106,18 +114,19 @@ class _TestWorker(QObject):
 
                 passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
                 status = "Passed" if passed else "Failed"
+                mark   = "Suc" if passed else "✘"
 
-                self.log_line.emit(f"{test_name}  {status}  ({duration:.1f}s)")
+                self.log_line.emit(f"{mark}  {test_name}  {status}  ({duration:.1f}s)")
                 if isinstance(result, dict):
                     for k, v in result.items():
                         if k != "passed":
-                            self.log_line.emit(f"{k}: {v}")
+                            self.log_line.emit(f"     {k}: {v}")
 
                 self.test_finished.emit(test_name, result, status, duration)
 
             except Exception as exc:
                 duration = time.time() - t0
-                self.log_line.emit(f"{test_name} raised {type(exc).__name__}: {exc}")
+                self.log_line.emit(f"✘  {test_name} raised {type(exc).__name__}: {exc}")
                 self.log_line.emit(traceback.format_exc())
                 self.error.emit(test_name, str(exc))
                 self.test_finished.emit(test_name, {}, "Failed", duration)

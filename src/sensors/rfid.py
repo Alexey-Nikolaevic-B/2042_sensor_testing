@@ -108,7 +108,7 @@ class Rfid(Sensor):
         return tags
 
 
-    def max_stable_read_distance_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def max_stable_read_distance_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """Тест для определения дальности считывания rfid антенны"""
         with open(self.rfid_map_path, 'w') as f:
             f.write(f'fix1 1 0.5 0 0\n')
@@ -116,7 +116,6 @@ class Rfid(Sensor):
         if not simulator.open_scene(self.test_to_world['max_stable_read_distance_test'], self.sensor_sdf_path):
             raise RuntimeError("failed to open gazebo scene")
 
-        # ждем спавна rfid_tag1
         tag_name = "rfid_tag1"
         is_tag_spawned = simulator.wait_for_model_spawn(tag_name, 30)
         if not is_tag_spawned:
@@ -126,19 +125,17 @@ class Rfid(Sensor):
         reset_distance = self.read_distance * 5
         max_dist = 0
 
+        total_steps = max(1, round((self.read_distance - 0.5) / 0.5) + 1)
+        step = 0
         start_test_time = time.time()
 
         while current_dist <= self.read_distance + 1e-9:
             detected = False
-
             try:
                 simulator.set_pose(tag_name, reset_distance, 0, 0)
                 time.sleep(0.005)
-
                 simulator.set_pose(tag_name, current_dist, 0, 0)
-
                 data = self.capture_data(simulator=simulator, world_path=None, window=3)
-
                 if data is not None and tag_name in data:
                     detected = True
             except Exception:
@@ -147,6 +144,9 @@ class Rfid(Sensor):
             if detected:
                 max_dist = current_dist
 
+            step += 1
+            if progress_cb:
+                progress_cb(int(step / total_steps * 100))
             current_dist = round(current_dist + 0.5, 1)
 
         test_duration_in_seconds = time.time() - start_test_time
@@ -158,7 +158,7 @@ class Rfid(Sensor):
         }
 
 
-    def min_stable_read_distance_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def min_stable_read_distance_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """Тест для определения минимальной дальности считывания rfid антенны"""
         with open(self.rfid_map_path, 'w') as f:
             f.write('fix1 1 0.5 0 0\n')
@@ -172,6 +172,8 @@ class Rfid(Sensor):
 
         min_dist = current_dist = 0.25
         reset_distance = 25
+        total_steps = max(1, round(0.25 / 0.01))
+        step = 0
         start_test_time = time.time()
 
         while current_dist >= 0:
@@ -179,10 +181,8 @@ class Rfid(Sensor):
             try:
                 simulator.set_pose(tag_name, reset_distance, 0, 0)
                 time.sleep(0.005)
-
                 simulator.set_pose(tag_name, current_dist, 0, 0)
                 data = self.capture_data(simulator=simulator, world_path=None, window=2)
-
                 if tag_name in data:
                     detected = True
             except Exception:
@@ -190,6 +190,10 @@ class Rfid(Sensor):
 
             if detected:
                 min_dist = current_dist
+
+            step += 1
+            if progress_cb:
+                progress_cb(int(step / total_steps * 100))
             current_dist = round(current_dist - 0.01, 5)
 
         test_duration_in_seconds = time.time() - start_test_time
@@ -201,7 +205,7 @@ class Rfid(Sensor):
         }
 
 
-    def mass_read_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def mass_read_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         # TODO: сейчас для дефолтного rfid датчика считывается только 13 меток из 75
         """Оценка корректности считывания большого количества меток"""
         tags_count = 75 # в условиии теста ровно 75 меток
@@ -221,9 +225,13 @@ class Rfid(Sensor):
         for i in range(tags_count):
             if not simulator.wait_for_model_spawn(f'rfid_tag{i + 1}', 30):
                 raise RuntimeError(f"tag {i + 1} not spawned")
+            if progress_cb:
+                progress_cb(int((i + 1) / tags_count * 50))  # spawn = first 50%
 
         test_start_time = time.time()
         tag_id2pose = self.capture_data(simulator=simulator, world_path=None, window=20)
+        if progress_cb:
+            progress_cb(100)
         test_duration_in_seconds = time.time() - test_start_time
 
         is_test_passed = bool(len(tag_id2pose) / tags_count >= 0.75)
@@ -234,7 +242,7 @@ class Rfid(Sensor):
         }
 
 
-    def overlap_tags_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def overlap_tags_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Считывание при частичном перекрытии меток
         Метки расположены на одной окружности на разных расстояниях друг от друга
@@ -242,15 +250,14 @@ class Rfid(Sensor):
         None - если на любом расстоянии не удавалось считать все метки
         """
         distances_between_tags = [0.2, 0.1, 0.05, 0.02]
-        radius = self.read_distance / 2 # радиус окружности, на которой расположены метки
-        tags_count = 5 # в условиии теста ровно 5 меток
+        radius = self.read_distance / 2
+        tags_count = 5
         dist_result = None
-
+        total_steps = len(distances_between_tags)
         start_test_time = time.time()
 
-        for distance in distances_between_tags:
+        for step, distance in enumerate(distances_between_tags):
             with open(self.rfid_map_path, 'w') as f:
-                "Создаем tags_count меток на окружности радиусом read_distance / 2 на расстоянии distance друг от друга"
                 for i in range(tags_count):
                     x = radius * math.cos(distance / radius * i)
                     y = radius * math.sin(distance / radius * i)
@@ -258,7 +265,7 @@ class Rfid(Sensor):
 
             if not simulator.open_scene(self.test_to_world['overlap_tags_test'], self.sensor_sdf_path):
                 raise RuntimeError("failed to open gazebo scene")
-        
+
             for i in range(tags_count):
                 if not simulator.wait_for_model_spawn(f'rfid_tag{i + 1}', 30):
                     raise RuntimeError(f"tag {i + 1} not spawned")
@@ -266,6 +273,9 @@ class Rfid(Sensor):
             tag_id2pose = self.capture_data(simulator=simulator, world_path=None, window=5)
             if len(tag_id2pose) == tags_count:
                 dist_result = distance
+
+            if progress_cb:
+                progress_cb(int((step + 1) / total_steps * 100))
 
         test_duration_in_seconds = time.time() - start_test_time
         is_test_passed = bool(dist_result is not None)
@@ -276,7 +286,7 @@ class Rfid(Sensor):
         }
 
 
-    def angle_dependence_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def angle_dependence_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Тест для определение зависимости успешности считывания от угла расположения меток
         Критерий прохождения теста: все метки были считаны антенной
@@ -285,7 +295,6 @@ class Rfid(Sensor):
         radius = self.read_distance / 2
 
         with open(self.rfid_map_path, 'w') as f:
-            # располагаем метки над считывателем
             for tag_num, angle in enumerate(angles):
                 x = radius * math.sin(angle)
                 z = radius * math.cos(angle)
@@ -297,9 +306,13 @@ class Rfid(Sensor):
         for i in range(len(angles)):
             if not simulator.wait_for_model_spawn(f'rfid_tag{i + 1}', 30):
                 raise RuntimeError(f"tag {i + 1} not spawned")
+            if progress_cb:
+                progress_cb(int((i + 1) / len(angles) * 50))  # spawn = first 50%
 
         test_start_time = time.time()
         tag_id2pose = self.capture_data(simulator=simulator, world_path=None, window=20)
+        if progress_cb:
+            progress_cb(100)
         duration_in_seconds = time.time() - test_start_time
         is_test_passed = bool(len(tag_id2pose) == len(angles))
         return {
@@ -308,7 +321,7 @@ class Rfid(Sensor):
             "tags_detected_count": len(tag_id2pose),
         }
 
-    def move_tags_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def move_tags_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Оценка устойчивости считывания при движении меток
         Критерий прохождения теста: хотя бы одна метка была считана антенной
@@ -320,7 +333,7 @@ class Rfid(Sensor):
         start_distance = -1 * self.read_distance * dist_in_antenna_radius
         start_test_time = time.time()
 
-        for velocity in velocities:
+        for step, velocity in enumerate(velocities):
             with open(self.rfid_map_path, 'w') as f:
                 f.write(f'fix1 1 {start_distance} 0 0\n')
             if not simulator.open_scene(self.test_to_world['move_tags_test'], self.sensor_sdf_path):
@@ -333,6 +346,10 @@ class Rfid(Sensor):
             time_to_reach_antenna = dist_in_antenna_radius * self.read_distance / velocity.x
             tag_id2pose = self.capture_data(simulator=simulator, world_path=None, window=time_to_reach_antenna * 2)
             result_velocity = velocity if len(tag_id2pose) == 1 else result_velocity
+
+            if progress_cb:
+                progress_cb(int((step + 1) / len(velocities) * 100))
+
             if result_velocity is None:
                 break
 
@@ -345,13 +362,13 @@ class Rfid(Sensor):
         }
 
 
-    def antenna_rotation_test(self, simulator) -> Optional[Dict[str, Any]]:
+    def antenna_rotation_test(self, simulator, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Оценка устойчивости считывания при вращении антенны
         Критерий прохождения теста: при ориентации 0 градусов все метки были считаны
         """
         angles = [0, math.pi / 6, math.pi / 3, math.pi / 2]
-        tags_count = 10 # в условии теста 10 меток
+        tags_count = 10
         radius = self.read_distance / 2
         is_test_passed = False
         angle2tags_count = {}
@@ -371,7 +388,7 @@ class Rfid(Sensor):
 
         test_start_time = time.time()
 
-        for angle in angles:
+        for step, angle in enumerate(angles):
             quaternion = Quaternion(0, 0, math.sin(angle / 2), math.cos(angle / 2))
             simulator.set_pose(f'rfid_antenna', x=0, y=0, z=0, quaternion=quaternion)
             time.sleep(0.01)
@@ -380,8 +397,10 @@ class Rfid(Sensor):
                 is_test_passed = True
             angle2tags_count[math.degrees(angle)] = len(tag_id2pose)
 
-        test_duration_in_seconds = time.time() - test_start_time
+            if progress_cb:
+                progress_cb(int((step + 1) / len(angles) * 100))
 
+        test_duration_in_seconds = time.time() - test_start_time
         return {
             'passed': is_test_passed,
             'duration': test_duration_in_seconds,

@@ -35,6 +35,7 @@ class ColTests(QWidget):
         runner.log_line.connect(self._on_log_line)
         runner.test_started.connect(self._on_test_started)
         runner.test_finished.connect(self._on_test_finished)
+        runner.test_progress.connect(self._on_test_progress)
         runner.all_finished.connect(self._on_all_finished)
         runner.error.connect(self._on_test_error)
         if self._runner_log_forward:
@@ -105,6 +106,11 @@ class ColTests(QWidget):
             w.test_status = "Failed"
             w.test_result = f"Error: {message}"
             w.refresh()
+
+    def _on_test_progress(self, test_name: str, value: int):
+        w = self._test_widgets.get(test_name)
+        if w:
+            w.set_progress(value)
 
     def _on_item_selected(self, func_name: str):
         if self._selected_test and self._selected_test in self._test_widgets:
