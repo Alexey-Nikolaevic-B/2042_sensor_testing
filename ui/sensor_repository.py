@@ -268,19 +268,10 @@ class SensorRepository(QObject):
         s = self._sensors.get(sensor_id)
         if s is None:
             return
-
-        db.upsert_type_test(s.sensor_type, func_name, display_name, description, image_path)
-        db.propagate_type_test_to_sensors(s.sensor_type, func_name, display_name, description, image_path)
-
-        s.update_test(func_name, {
-            "display_name": display_name,
-            "description":  description,
-            "image_path":   image_path,
-        })
-
-        for sibling in self._sensors.values():
-            if sibling.id != sensor_id and sibling.sensor_type == s.sensor_type:
-                sibling.update_test(func_name, {
+        sensor_type = s.sensor_type
+        for sensor in self._sensors.values():
+            if sensor.sensor_type == sensor_type:
+                sensor.update_test(func_name, {
                     "display_name": display_name,
                     "description":  description,
                     "image_path":   image_path,

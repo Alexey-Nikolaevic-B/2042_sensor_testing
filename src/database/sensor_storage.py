@@ -110,6 +110,18 @@ def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn) -> None:
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='SensorTests'"
+    ).fetchone()
+    if row and "sensor_type" in (row[0] or ""):
+        conn.execute("DROP TABLE SensorTests")
+
+    # Ensure SensorTypeTests exists (idempotent)
+    conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
 
 
 # ── Sensors ───────────────────────────────────────────────────────────────────
@@ -257,13 +269,13 @@ def save_test_result(
 def get_latest_test_results(sensor_id) -> list[dict]:
     init_db()
     with _connect() as conn:
-        # Latest result row per test, joined with SensorTests meta
+        # Latest result row per test, joined with SensorTypeTests for display info
         result_rows = conn.execute(
             """
             SELECT t1.*,
-                   sm.display_name  AS display_name,
-                   sm.description   AS meta_description,
-                   sm.image_path    AS image_path
+                   st.display_name  AS display_name,
+                   st.description   AS meta_description,
+                   st.image_path    AS image_path
             FROM TestResults t1
             INNER JOIN (
                 SELECT test_name, MAX(id) AS max_id
@@ -271,9 +283,10 @@ def get_latest_test_results(sensor_id) -> list[dict]:
                 WHERE sensor_id = ?
                 GROUP BY test_name
             ) t2 ON t1.test_name = t2.test_name AND t1.id = t2.max_id
-            LEFT JOIN SensorTests sm
-                   ON sm.sensor_id = t1.sensor_id
-                  AND sm.func_name = t1.test_name
+            LEFT JOIN Sensors s ON s.id = t1.sensor_id
+            LEFT JOIN SensorTypeTests st
+                   ON st.sensor_type = s.sensor_type
+                  AND st.func_name   = t1.test_name
             ORDER BY t1.test_name
             """,
             (sensor_id,),
@@ -281,16 +294,23 @@ def get_latest_test_results(sensor_id) -> list[dict]:
 
         ran_names = {r["test_name"] for r in result_rows}
 
-        # Tests that have meta but have never been run — show as Pending
-        meta_only = conn.execute(
-            """
-            SELECT func_name, display_name, description, image_path
-            FROM SensorTests
-            WHERE sensor_id = ?
-            ORDER BY func_name
-            """,
-            (int(sensor_id),),
-        ).fetchall()
+        # Tests that exist in SensorTypeTests but have never been run — show as Pending
+        sensor_row = conn.execute(
+            "SELECT sensor_type FROM Sensors WHERE id = ?", (int(sensor_id),)
+        ).fetchone()
+        sensor_type = sensor_row["sensor_type"] if sensor_row else None
+
+        meta_only = []
+        if sensor_type:
+            meta_only = conn.execute(
+                """
+                SELECT func_name, display_name, description, image_path
+                FROM SensorTypeTests
+                WHERE sensor_type = ?
+                ORDER BY func_name
+                """,
+                (sensor_type,),
+            ).fetchall()
 
     tests = [_row_to_test_dict(r) for r in result_rows]
     for m in meta_only:
@@ -340,7 +360,7 @@ def get_sensors() -> list[tuple]:
 # display_name = what's shown in the UI (defaults to func_name)
 
 _SCHEMA_SENSOR_TYPE_TESTS = """
-CREATE TABLE IF NOT EXISTS SensorTests (
+CREATE TABLE IF NOT EXISTS SensorTypeTests (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     sensor_type  TEXT    NOT NULL,
     func_name    TEXT    NOT NULL,
@@ -371,10 +391,16 @@ def init_test_meta_table() -> None:
 
 
 def get_test_meta(sensor_id: str) -> list[dict]:
-    """Return all test metadata rows for a sensor."""
+    """Return test display metadata for a sensor, sourced from SensorTypeTests."""
     with _connect() as conn:
+        sensor_row = conn.execute(
+            "SELECT sensor_type FROM Sensors WHERE id = ?", (int(sensor_id),)
+        ).fetchone()
+        if not sensor_row:
+            return []
         rows = conn.execute(
-            "SELECT * FROM SensorTests WHERE sensor_id = ?", (int(sensor_id),)
+            "SELECT * FROM SensorTypeTests WHERE sensor_type = ? ORDER BY func_name",
+            (sensor_row["sensor_type"],),
         ).fetchall()
     return [
         {
@@ -389,22 +415,27 @@ def get_test_meta(sensor_id: str) -> list[dict]:
 
 def save_test_meta(sensor_id: str, func_name: str, display_name: str,
                    description: str, image_path: str) -> None:
-    """Upsert a single test's metadata."""
+    """Write display metadata to SensorTypeTests (shared across all sensors of same type)."""
     with _connect() as conn:
+        sensor_row = conn.execute(
+            "SELECT sensor_type FROM Sensors WHERE id = ?", (int(sensor_id),)
+        ).fetchone()
+        if not sensor_row:
+            return
         conn.execute(
             """
-            INSERT INTO SensorTests (sensor_id, func_name, display_name, description, image_path)
+            INSERT INTO SensorTypeTests (sensor_type, func_name, display_name, description, image_path)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(sensor_id, func_name) DO UPDATE SET
+            ON CONFLICT(sensor_type, func_name) DO UPDATE SET
                 display_name = excluded.display_name,
                 description  = excluded.description,
                 image_path   = excluded.image_path
             """,
-            (int(sensor_id), func_name, display_name, description, image_path),
+            (sensor_row["sensor_type"], func_name, display_name, description, image_path),
         )
 
 def init_sensor_type_tests_table() -> None:
-    """Create SensorTests table. Safe to call multiple times."""
+    """Create SensorTypeTests table. Safe to call multiple times."""
     with _connect() as conn:
         conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
 
@@ -413,7 +444,7 @@ def get_type_tests(sensor_type: str) -> list[dict]:
     """Return canonical test definitions for a sensor type."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM SensorTests WHERE sensor_type = ? ORDER BY func_name",
+            "SELECT * FROM SensorTypeTests WHERE sensor_type = ? ORDER BY func_name",
             (sensor_type,),
         ).fetchall()
     return [
@@ -433,7 +464,7 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO SensorTests (sensor_type, func_name, display_name, description, image_path)
+            INSERT INTO SensorTypeTests (sensor_type, func_name, display_name, description, image_path)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(sensor_type, func_name) DO UPDATE SET
                 display_name = excluded.display_name,
