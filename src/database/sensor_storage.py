@@ -340,7 +340,7 @@ def get_sensors() -> list[tuple]:
 # display_name = what's shown in the UI (defaults to func_name)
 
 _SCHEMA_SENSOR_TYPE_TESTS = """
-CREATE TABLE IF NOT EXISTS SensorTypeTests (
+CREATE TABLE IF NOT EXISTS SensorTests (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     sensor_type  TEXT    NOT NULL,
     func_name    TEXT    NOT NULL,
@@ -404,7 +404,7 @@ def save_test_meta(sensor_id: str, func_name: str, display_name: str,
         )
 
 def init_sensor_type_tests_table() -> None:
-    """Create SensorTypeTests table. Safe to call multiple times."""
+    """Create SensorTests table. Safe to call multiple times."""
     with _connect() as conn:
         conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
 
@@ -413,7 +413,7 @@ def get_type_tests(sensor_type: str) -> list[dict]:
     """Return canonical test definitions for a sensor type."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM SensorTypeTests WHERE sensor_type = ? ORDER BY func_name",
+            "SELECT * FROM SensorTests WHERE sensor_type = ? ORDER BY func_name",
             (sensor_type,),
         ).fetchall()
     return [
@@ -433,7 +433,7 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO SensorTypeTests (sensor_type, func_name, display_name, description, image_path)
+            INSERT INTO SensorTests (sensor_type, func_name, display_name, description, image_path)
             VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(sensor_type, func_name) DO UPDATE SET
                 display_name = excluded.display_name,
@@ -445,7 +445,7 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
 
 
 def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
-    """Copy SensorTypeTests entries for sensor_type into SensorTests for sensor_id.
+    """Copy SensorTests entries for sensor_type into SensorTests for sensor_id.
     Only inserts rows that don't already exist — never overwrites existing meta."""
     type_tests = get_type_tests(sensor_type)
     with _connect() as conn:

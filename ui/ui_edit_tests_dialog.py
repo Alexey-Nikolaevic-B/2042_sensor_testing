@@ -281,7 +281,7 @@ class EditTestsDialog(QDialog):
                 border-radius: 4px;
             }}
             QLabel#lbl_image {{
-                color: {C.TEXT_BLACK};
+                color: {C.TEXT_MUTED};
                 font-size: 12px;
                 background: transparent;
             }}

@@ -4,6 +4,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5 import uic
 
 from .theme import Styles, Icons, Layout, Colors, QT_DIR
+from .queue_manager import TestStatus
 
 
 class TestItem(QWidget):
@@ -16,13 +17,14 @@ class TestItem(QWidget):
         uic.loadUi(os.path.join(QT_DIR, "test_item.ui"), self)
 
         self.func_name        = ""
-        self.is_running       = False
-        self.is_selected      = False
         self.test_name        = ""
-        self.test_status      = "Pending"
         self.test_description = ""
         self.test_result      = ""
+        self._image_path      = ""
         self._progress        = 0
+        self._movie           = None
+        self.is_selected      = False
+        self.test_status      = TestStatus.IDLE
 
         self.setObjectName("TestItem")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -31,35 +33,42 @@ class TestItem(QWidget):
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
 
     def load(self, test_data: dict):
+        self._stop_movie()
         self.func_name        = test_data.get("name", "")
         self.test_name        = test_data.get("display_name") or self.func_name
-        self.test_status      = test_data.get("status", "Pending")
         self.test_description = test_data.get("description", "")
         self.test_result      = str(test_data.get("result", ""))
         self._image_path      = test_data.get("image_path", "")
-        self.is_running       = False
+        self._progress        = 0
         self.is_selected      = False
-        self.refresh()
+        self.test_status      = TestStatus.IDLE
+        self._refresh_all()
 
-    def refresh(self):
-        self.lbl_test_name.setText(self.test_name)
-        self._refresh_status_bar()
-        self._refresh_button()
-        self._refresh_progress()
-        self._refresh_icon()
-        self._refresh_bg()
+    def set_status(self, status: TestStatus) -> None:
+        old = self.test_status
+        self.test_status = status
 
-    def set_running(self, running: bool):
-        self.is_running = running
-        self.refresh()
+        # Movie (spinning gif) only while QUEUED
+        if status == TestStatus.QUEUED:
+            self._start_movie()
+        elif old == TestStatus.QUEUED:
+            self._stop_movie()
+
+        # Reset progress when leaving RUNNING
+        if old == TestStatus.RUNNING and status != TestStatus.RUNNING:
+            self._progress = 0
+
+        self._refresh_all()
+
+    def set_progress(self, value: int) -> None:
+        if self.test_status != TestStatus.RUNNING:
+            return
+        self._progress = max(0, min(100, value))
+        self.progress_bar.setValue(self._progress)
 
     def set_selected(self, selected: bool):
         self.is_selected = selected
         self._refresh_bg()
-
-    def set_progress(self, value: int):
-        self._progress = max(0, min(100, value))
-        self.progress_bar.setValue(self._progress)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -77,57 +86,78 @@ class TestItem(QWidget):
         super().leaveEvent(event)
 
     def _on_run_stop_clicked(self):
-        if self.is_running:
+        if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
             self.stop_requested.emit(self.func_name)
         else:
             self.run_requested.emit(self.func_name)
 
+    def _start_movie(self):
+        self._stop_movie()
+        self._movie = Icons.QUEUED(self.status_icon)
+        self.status_icon.setMovie(self._movie)
+        self._movie.start()
+
+    def _stop_movie(self):
+        if self._movie is not None:
+            self._movie.stop()
+            self._movie = None
+            self.status_icon.setMovie(None)
+
+    def _refresh_all(self):
+        self.lbl_test_name.setText(self.test_name)
+        self._refresh_status_bar()
+        self._refresh_button()
+        self._refresh_progress()
+        self._refresh_icon()
+        self._refresh_bg()
+
     def _refresh_bg(self):
-        if self.is_selected:
-            self.setStyleSheet(self._bg_style(Colors.BG_CARD_SEL))
+        bg = Colors.BG_CARD_SEL if self.is_selected else Colors.BG_CARD
+        self.setStyleSheet(self._bg_style(bg))
+
+    def _refresh_status_bar(self):
+        color = {
+            TestStatus.IDLE:    Colors.STATUS_YELLOW,
+            TestStatus.QUEUED:  Colors.STATUS_QUEUED,
+            TestStatus.RUNNING: Colors.STATUS_RUNNING,
+            TestStatus.PASSED:  Colors.STATUS_GREEN,
+            TestStatus.FAILED:  Colors.STATUS_RED,
+            TestStatus.STOPPED: Colors.STATUS_BLUE,
+        }.get(self.test_status, Colors.STATUS_BLUE)
+        self.frm_status_bar.setStyleSheet(
+            f"QFrame {{ background-color: {color}; border: none; }}"
+        )
+
+    def _refresh_button(self):
+        active = self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING)
+        self.btn_run_stop.setIcon(Icons.STOP() if active else Icons.RUN())
+        self.btn_run_stop.setIconSize(Layout.ICON_SIZE_MD)
+
+    def _refresh_progress(self):
+        if self.test_status == TestStatus.RUNNING:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(self._progress)
+            self.progress_bar.show()
+            self.test_result_label.hide()
         else:
-            self.setStyleSheet(self._bg_style(Colors.BG_CARD))
+            self.progress_bar.hide()
+            self.test_result_label.show()
+            self.test_result_label.setText(self.test_result)
+
+    def _refresh_icon(self):
+        if self.test_status == TestStatus.QUEUED:
+            return  # movie owns the label
+        is_running = (self.test_status == TestStatus.RUNNING)
+        self.status_icon.setPixmap(
+            Icons.for_status(self.test_status.value, is_running)
+            .pixmap(Layout.ICON_SIZE_MD)
+        )
 
     @staticmethod
     def _bg_style(bg: str) -> str:
         return (
             f"QWidget#TestItem {{ background-color: {bg};"
             f" border-bottom: 1px solid {Colors.DIVIDER}; }}"
-        )
-
-    def _refresh_status_bar(self):
-        color = {
-            "Passed":  Colors.STATUS_GREEN,
-            "Failed":  Colors.STATUS_RED,
-            "Pending": Colors.STATUS_YELLOW,
-        }.get(self.test_status, Colors.STATUS_BLUE)
-        if self.is_running:
-            color = Colors.STATUS_RUNNING
-        self.frm_status_bar.setStyleSheet(
-            f"QFrame {{ background-color: {color}; border: none; }}"
-        )
-
-    def _refresh_button(self):
-        icon = Icons.STOP() if self.is_running else Icons.RUN()
-        self.btn_run_stop.setIcon(icon)
-        self.btn_run_stop.setIconSize(Layout.ICON_SIZE_MD)
-
-    def _refresh_progress(self):
-        if self.is_running:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(self._progress)
-            self.progress_bar.show()
-            self.test_result_label.hide()
-        else:
-            self._progress = 0
-            self.progress_bar.hide()
-            self.test_result_label.show()
-            self.test_result_label.setText(self.test_result)
-
-    def _refresh_icon(self):
-        self.status_icon.setPixmap(
-            Icons.for_status(self.test_status, self.is_running)
-            .pixmap(Layout.ICON_SIZE_MD)
         )
 
     def _setup_styles(self):

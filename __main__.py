@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import QApplication
 from src.core import Core
 from ui.sensor_repository import SensorRepository
 from ui.test_runner import TestRunner
+from ui.queue_manager import QueueManager
 from ui.ui_main import Main_UI
 
 
@@ -66,14 +67,36 @@ def _start_simulator_init(core: Core, on_log, on_fail):
     _sim_init_thread.start()
 
 
+def _seed_db_from_registry(repo: SensorRepository) -> None:
+    try:
+        from src.sensors import REGISTRY, make_sensor
+        from config import CONFIG
+        for (sensor_type, sensor_name) in REGISTRY.keys():
+            if repo.get_sensor_by_name(sensor_name):
+                continue
+            try:
+                instance = make_sensor(sensor_type, sensor_name, CONFIG)
+                sdf_path = getattr(instance, "sensor_sdf_path", "")
+                repo.add_sensor({
+                    "name":     sensor_name,
+                    "type":     sensor_type,
+                    "sdf_path": sdf_path,
+                })
+            except Exception as exc:
+                print(f"[seed] Could not register {sensor_name}: {exc}")
+    except ImportError:
+        print("[seed] Backend not available")
+
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    core   = Core()
-    repo   = SensorRepository()
-    runner = TestRunner(core)
-    window = Main_UI()
-    window.test_page.set_runner(runner, repo)
+    core          = Core()
+    repo          = SensorRepository()
+    runner        = TestRunner(core)
+    queue_manager = QueueManager(runner)
+    window        = Main_UI()
+    window.test_page.set_runner(queue_manager, repo)
     window.show()
 
     def _sim_log(level: str, msg: str):
@@ -104,7 +127,7 @@ if __name__ == "__main__":
             except RuntimeError:
                 pass
         if runner._thread is not None:
-            runner._worker.request_stop() if runner._worker else None
+            runner.stop()
             try:
                 if runner._thread.isRunning():
                     runner._thread.wait(10000)

@@ -34,6 +34,7 @@ class Colors:
     STATUS_RED     = "#ef5350"
     STATUS_BLUE    = "#42a5f5"
     STATUS_RUNNING = "#ff9800"
+    STATUS_QUEUED  = "#7c4dff"
     # back-compat
     BG_WINDOW     = BG_APP
     BG_SIDEBAR    = BG_COLUMN
@@ -222,11 +223,21 @@ class Icons:
     def UNKNOWN(cls):   return cls.get("unknown_status.png")
 
     @classmethod
+    def QUEUED(cls, label=None):
+        """Returns a QMovie for the queued spinning animation."""
+        from PyQt5.QtGui import QMovie
+        movie = QMovie(f"{ICON_DIR}/pending.gif")
+        if label is not None:
+            movie.setScaledSize(Layout.ICON_SIZE_MD)
+        return movie
+
+    @classmethod
     def for_status(cls, status: str, is_running: bool = False) -> QIcon:
-        if is_running:          return cls.RUNNING()
-        if status == "Passed":  return cls.SUCCESS()
-        if status == "Failed":  return cls.FAIL()
-        if status == "Pending": return cls.PENDING()
+        if is_running:           return cls.RUNNING()
+        if status == "Passed":   return cls.SUCCESS()
+        if status == "Failed":   return cls.FAIL()
+        if status == "Idle":     return cls.PENDING()
+        if status == "Stopped":  return cls.UNKNOWN()
         return cls.UNKNOWN()
 
 
