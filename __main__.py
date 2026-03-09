@@ -4,7 +4,7 @@ import socket
 import threading
 import traceback
 
-from ui.log_bridge import setup_logging
+from ui.log_bridge import setup_logging, log_bridge
 setup_logging()
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -98,6 +98,12 @@ if __name__ == "__main__":
     window        = Main_UI()
     window.test_page.set_runner(queue_manager, repo)
     window.show()
+
+    # Wire Python logging → col_4
+    def _on_log_record(record: __import__("logging").LogRecord):
+        level = record.levelname.lower()
+        window.col_4.append_log(level, record.name, record.getMessage())
+    log_bridge.new_record.connect(_on_log_record)
 
     def _sim_log(level: str, msg: str):
         window.col_4.append_log(level, "src.gazebo_simulator", msg)

@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QColor, QTextCharFormat, QTextCursor
@@ -30,8 +28,7 @@ class ColCapture(QWidget):
 
     def append_log(self, level: str, source: str, message: str) -> None:
         prefix, color = _LEVEL_FMT.get(level.lower(), ("INF", "#9ca3af"))
-        ts   = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}]  {prefix}  {source}: {message}"
+        line = f"{prefix}  {source}: {message}"
         self._append_colored(line, color)
 
     def set_capture_image(self, pixmap: QPixmap) -> None:
