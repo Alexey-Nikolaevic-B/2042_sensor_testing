@@ -49,7 +49,7 @@ class TestMetaRow(QWidget):
         h.addStretch()
 
         if self.missing:
-            warn = QLabel("⚠ not in core")
+            warn = QLabel("not in core")
             warn.setObjectName("row_warn")
             h.addWidget(warn)
 
@@ -64,7 +64,7 @@ class TestMetaRow(QWidget):
 
     def _refresh_style(self):
         bar_color = Colors.STATUS_YELLOW if self.missing else Colors.ACCENT
-        bg        = Colors.TEXT_SECONDARY if self._selected else "transparent"
+        bg        = Colors.ACCENT_BLUE_TEXT if self._selected else "transparent"
         self._bar.setStyleSheet(f"background-color: {bar_color};")
         self.setStyleSheet(f"""
             QWidget#TestMetaRow {{
@@ -222,11 +222,6 @@ class EditTestsDialog(QDialog):
     def _setup_styles(self):
         C = Colors
         self.setStyleSheet(f"""
-            EditTestsDialog {{
-                background-color: {C.BG_COLUMN};
-                border: 1px solid {C.BORDER_LIGHT};
-                border-radius: 6px;
-            }}
             QWidget#wt_titlebar {{
                 background-color: {C.BG_COLUMN};
                 border-bottom: 1px solid {C.BORDER};
@@ -274,7 +269,7 @@ class EditTestsDialog(QDialog):
             QLabel#lbl_section_name,
             QLabel#lbl_section_func,
             QLabel#lbl_section_desc {{
-                color: {C.TEXT_SECONDARY};
+                color: {C.TEXT_MUTED};
                 font-size: 10px;
                 font-weight: bold;
                 letter-spacing: 1px;
@@ -286,29 +281,27 @@ class EditTestsDialog(QDialog):
                 border-radius: 4px;
             }}
             QLabel#lbl_image {{
-                color: {C.TEXT_WHITE};
+                color: {C.TEXT_BLACK};
                 font-size: 12px;
                 background: transparent;
             }}
             QLineEdit {{
-                background-color: {C.BG_INPUT};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_WHITE};
+                color: {C.TEXT_BLACK};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
             QLineEdit:focus {{ border-color: {C.ACCENT}; }}
             QLineEdit[readOnly="true"] {{
-                background-color: {C.BG_TOOLBAR};
-                color: {C.TEXT_WHITE};
+                color: {C.TEXT_BLACK};
                 border-color: {C.BORDER};
             }}
             QPlainTextEdit {{
-                background-color: {C.BG_INPUT};
+            background: transparent;
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_WHITE};
+                color: {C.TEXT_BLACK};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
@@ -329,7 +322,7 @@ class EditTestsDialog(QDialog):
                 background: transparent;
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_SECONDARY};
+                color: {C.TEXT_MUTED};
                 font-size: 13px;
                 padding: 0 16px;
             }}

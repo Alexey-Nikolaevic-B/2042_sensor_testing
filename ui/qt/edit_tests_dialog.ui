@@ -154,7 +154,7 @@
              </item>
              <item>
               <widget class="QLineEdit" name="input_display_name">
-               <property name="placeholderText"><string>Display name shown in UI</string></property>
+               <property name="placeholderText"><string>Display name</string></property>
               </widget>
              </item>
 
@@ -186,7 +186,7 @@
              <!-- Missing warning -->
              <item>
               <widget class="QLabel" name="lbl_missing_warn">
-               <property name="text"><string>⚠  This test function was not found in core.get_tests(). It may have been renamed or removed.</string></property>
+               <property name="text"><string>This test function was not found in core.get_tests(). It may have been renamed or removed.</string></property>
                <property name="wordWrap"><bool>true</bool></property>
                <property name="visible"><bool>false</bool></property>
               </widget>

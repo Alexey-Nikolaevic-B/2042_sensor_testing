@@ -339,6 +339,18 @@ def get_sensors() -> list[tuple]:
 # func_name  = the Python function name from core.get_tests()
 # display_name = what's shown in the UI (defaults to func_name)
 
+_SCHEMA_SENSOR_TYPE_TESTS = """
+CREATE TABLE IF NOT EXISTS SensorTypeTests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_type  TEXT    NOT NULL,
+    func_name    TEXT    NOT NULL,
+    display_name TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    image_path   TEXT    NOT NULL DEFAULT '',
+    UNIQUE(sensor_type, func_name)
+);
+"""
+
 _SCHEMA_TEST_META = """
 CREATE TABLE IF NOT EXISTS SensorTests (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -390,3 +402,85 @@ def save_test_meta(sensor_id: str, func_name: str, display_name: str,
             """,
             (int(sensor_id), func_name, display_name, description, image_path),
         )
+
+def init_sensor_type_tests_table() -> None:
+    """Create SensorTypeTests table. Safe to call multiple times."""
+    with _connect() as conn:
+        conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
+
+
+def get_type_tests(sensor_type: str) -> list[dict]:
+    """Return canonical test definitions for a sensor type."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM SensorTypeTests WHERE sensor_type = ? ORDER BY func_name",
+            (sensor_type,),
+        ).fetchall()
+    return [
+        {
+            "func_name":    r["func_name"],
+            "display_name": r["display_name"] or r["func_name"],
+            "description":  r["description"] or "",
+            "image_path":   r["image_path"] or "",
+        }
+        for r in rows
+    ]
+
+
+def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
+                     description: str, image_path: str) -> None:
+    """Upsert a canonical test definition for a sensor type."""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO SensorTypeTests (sensor_type, func_name, display_name, description, image_path)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(sensor_type, func_name) DO UPDATE SET
+                display_name = excluded.display_name,
+                description  = excluded.description,
+                image_path   = excluded.image_path
+            """,
+            (sensor_type, func_name, display_name, description, image_path),
+        )
+
+
+def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
+    """Copy SensorTypeTests entries for sensor_type into SensorTests for sensor_id.
+    Only inserts rows that don't already exist — never overwrites existing meta."""
+    type_tests = get_type_tests(sensor_type)
+    with _connect() as conn:
+        for t in type_tests:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO SensorTests (sensor_id, func_name, display_name, description, image_path)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(sensor_id), t["func_name"], t["display_name"], t["description"], t["image_path"]),
+            )
+
+
+def get_sensors_by_type(sensor_type: str) -> list[dict]:
+    """Return all sensor rows for a given sensor_type."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM Sensors WHERE sensor_type = ?", (sensor_type,)
+        ).fetchall()
+    return [_row_to_sensor_dict(r) for r in rows]
+
+
+def propagate_type_test_to_sensors(sensor_type: str, func_name: str,
+                                   display_name: str, description: str,
+                                   image_path: str) -> None:
+    """After editing a type-level test, push display_name and description to all
+    sensors of that type. image_path is NOT propagated — each sensor keeps its own."""
+    sensors = get_sensors_by_type(sensor_type)
+    with _connect() as conn:
+        for s in sensors:
+            conn.execute(
+                """
+                UPDATE SensorTests
+                SET display_name = ?, description = ?
+                WHERE sensor_id = ? AND func_name = ?
+                """,
+                (display_name, description, int(s["id"]), func_name),
+            )

@@ -4,7 +4,7 @@ import socket
 import threading
 import traceback
 
-from ui.log_bridge import setup_logging, log_bridge
+from ui.log_bridge import setup_logging
 setup_logging()
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -66,41 +66,19 @@ def _start_simulator_init(core: Core, on_log, on_fail):
     _sim_init_thread.start()
 
 
-def _seed_db_from_registry(repo: SensorRepository) -> None:
-    try:
-        from src.sensors import REGISTRY, make_sensor
-        from config import CONFIG
-        for (sensor_type, sensor_name) in REGISTRY.keys():
-            if repo.get_sensor_by_name(sensor_name):
-                continue
-            try:
-                instance = make_sensor(sensor_type, sensor_name, CONFIG)
-                sdf_path = getattr(instance, "sensor_sdf_path", "")
-                repo.add_sensor({
-                    "name":     sensor_name,
-                    "type":     sensor_type,
-                    "sdf_path": sdf_path,
-                })
-            except Exception as exc:
-                print(f"[seed] Could not register {sensor_name}: {exc}")
-    except ImportError:
-        print("[seed] Backend not available")
-
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
     core   = Core()
     repo   = SensorRepository()
-    _seed_db_from_registry(repo)
     runner = TestRunner(core)
     window = Main_UI()
     window.test_page.set_runner(runner, repo)
     window.show()
 
-    log_bridge.new_record.connect(lambda r: window.col_4.append_log(
-        r.levelname.lower(), r.name, r.getMessage()
-    ))
+    def _sim_log(level: str, msg: str):
+        window.col_4.append_log(level, "src.gazebo_simulator", msg)
+    core.simulator.on_log = _sim_log
 
     def _ui_log(t):
         window.col_4.append_log(t[0], t[1], t[2])

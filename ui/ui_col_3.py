@@ -43,11 +43,17 @@ class ColTests(QWidget):
             )
 
     def load_sensor(self, sensor_data: dict):
-        self._sensor_data    = sensor_data
-        self._sensor_id      = sensor_data["id"]
-        self._sensor_backend = self._make_backend(sensor_data)
-        self._load_test_image(sensor_data.get("test_image_path", ""))
-        self._populate_tests(sensor_data.get("tests", []))
+        from .sensor_repository import SensorRepository
+        fresh = SensorRepository.instance().get_sensor(sensor_data["id"]) or sensor_data
+        self._sensor_data    = fresh
+        self._sensor_id      = fresh["id"]
+        self._sensor_backend = self._make_backend(fresh)
+        self._selected_test  = None
+        self.lbl_test_image.clear()
+        self.lbl_test_image.setText("no test image")
+        self.lbl_selected_test_name.setText("")
+        self.lbl_test_description.setText("")
+        self._populate_tests(fresh.get("tests", []))
 
     def clear(self):
         self._sensor_data    = None
@@ -55,7 +61,7 @@ class ColTests(QWidget):
         self._sensor_backend = None
         self.lbl_test_image.clear()
         self.lbl_test_image.setText("no test image")
-        self.lbl_selected_test_name.setText("")
+        self.lbl_selected_test_name.setText("—")
         self.lbl_test_description.setText("")
         self._populate_tests([])
 
@@ -109,6 +115,7 @@ class ColTests(QWidget):
             w.set_selected(True)
             self.lbl_selected_test_name.setText(w.test_name)
             self.lbl_test_description.setText(w.test_description)
+            self._load_test_image(w._image_path)
 
     def _on_item_run(self, test_name: str):
         if not self._can_run():
@@ -189,24 +196,17 @@ class ColTests(QWidget):
         if not self._sensor_id:
             return
         from .sensor_repository import SensorRepository
-        repo   = SensorRepository.instance()
-        sensor = repo.get_sensor(self._sensor_id)
+        sensor = SensorRepository.instance().get_sensor(self._sensor_id)
         if not sensor:
             return
         self._sensor_data = sensor
-        meta  = repo.get_test_meta(self._sensor_id)
-        tests = sensor.get("tests", [])
-        for t in tests:
-            m = meta.get(t["name"], {})
-            t["display_name"] = m.get("display_name") or t["name"]
-            t["description"]  = m.get("description", "")
-            t["image_path"]   = m.get("image_path", "")
-        self._populate_tests(tests)
+        self._populate_tests(sensor.get("tests", []))
         if self._selected_test and self._selected_test in self._test_widgets:
             w = self._test_widgets[self._selected_test]
             w.set_selected(True)
             self.lbl_selected_test_name.setText(w.test_name)
             self.lbl_test_description.setText(w.test_description)
+            self._load_test_image(w._image_path)
 
     def _can_run(self) -> bool:
         return self._runner is not None and self._sensor_backend is not None
@@ -215,14 +215,17 @@ class ColTests(QWidget):
         try:
             from src.sensors import REGISTRY
             from config import CONFIG
-            SensorType = REGISTRY.get((sensor_data["type"], sensor_data["name"]))
-            if SensorType is None:
+            SensorClass = next(
+                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor_data["type"]),
+                None,
+            )
+            if SensorClass is None:
                 return None
             sdf_path = sensor_data.get("sdf_path") or None
             try:
-                return SensorType(CONFIG, sensor_sdf_path=sdf_path)
+                return SensorClass(CONFIG, sensor_sdf_path=sdf_path)
             except TypeError:
-                return SensorType(CONFIG)
+                return SensorClass(CONFIG)
         except Exception:
             return None
 

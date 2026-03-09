@@ -136,19 +136,26 @@ class SensorRepository(QObject):
         fresh = db.get_sensor_by_name(data["name"])
         s = Sensor(fresh)
         self._sensors[s.id] = s
+        self._extract_and_save_params(s)
         self._seed_test_meta(s)
-        self.sensor_added.emit(s.to_dict())
-        return s.to_dict()
+        self._reload_sensor_from_db(s.id)
+        self.sensor_added.emit(self._sensors[s.id].to_dict())
+        return self._sensors[s.id].to_dict()
 
     def _seed_test_meta(self, sensor: "Sensor") -> None:
         try:
-            from src.sensors import REGISTRY, make_sensor
+            from src.sensors import REGISTRY
             from config import CONFIG
-            SensorType = REGISTRY.get((sensor.sensor_type, sensor.name))
-            if SensorType is None:
-                return
-            instance = SensorType(CONFIG)
             from src.test_utils import load_test_functions
+
+            SensorClass = next(
+                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor.sensor_type),
+                None
+            )
+            if SensorClass is None:
+                return
+
+            instance = SensorClass(CONFIG)
             funcs = load_test_functions(instance)
             existing = {r["func_name"] for r in db.get_test_meta(sensor.id)}
             for func_name in funcs:
@@ -156,6 +163,38 @@ class SensorRepository(QObject):
                     db.save_test_meta(sensor.id, func_name, func_name, "", "")
         except Exception:
             pass
+
+    def _extract_and_save_params(self, sensor: "Sensor") -> None:
+        # TODO: replace mock param with real get_params() once backend is stable
+        try:
+            from src.sensors import REGISTRY
+            from config import CONFIG
+
+            SensorClass = next(
+                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor.sensor_type),
+                None
+            )
+            if SensorClass is None:
+                params = {"TODO": "get parameters from sensor"}
+            else:
+                try:
+                    instance = SensorClass(CONFIG)
+                    params = instance.get_params()
+                except Exception:
+                    params = {"TODO": "get parameters from sensor"}
+        except Exception:
+            params = {"TODO": "get parameters from sensor"}
+
+        db.update_sensor(sensor.name, params=params)
+        sensor.update_fields({"params": params})
+
+    def _reload_sensor_from_db(self, sensor_id: str) -> None:
+        s = self._sensors.get(sensor_id)
+        if s is None:
+            return
+        fresh = db.get_sensor_by_name(s.name)
+        if fresh:
+            self._sensors[sensor_id] = Sensor(fresh)
 
     def update_sensor(self, sensor_id: str, fields: dict) -> dict:
         s = self._sensors.get(sensor_id)
@@ -225,10 +264,24 @@ class SensorRepository(QObject):
                        display_name: str, description: str,
                        image_path: str) -> None:
         db.save_test_meta(sensor_id, func_name, display_name, description, image_path)
+
         s = self._sensors.get(sensor_id)
-        if s:
-            s.update_test(func_name, {
-                "display_name": display_name,
-                "description":  description,
-                "image_path":   image_path,
-            })
+        if s is None:
+            return
+
+        db.upsert_type_test(s.sensor_type, func_name, display_name, description, image_path)
+        db.propagate_type_test_to_sensors(s.sensor_type, func_name, display_name, description, image_path)
+
+        s.update_test(func_name, {
+            "display_name": display_name,
+            "description":  description,
+            "image_path":   image_path,
+        })
+
+        for sibling in self._sensors.values():
+            if sibling.id != sensor_id and sibling.sensor_type == s.sensor_type:
+                sibling.update_test(func_name, {
+                    "display_name": display_name,
+                    "description":  description,
+                    "image_path":   image_path,
+                })

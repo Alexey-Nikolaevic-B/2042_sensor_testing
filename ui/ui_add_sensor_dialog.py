@@ -27,7 +27,7 @@ class AddSensorDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedSize(680, 580)
+        self.setFixedSize(680, 520)
 
         self._edit_mode    = sensor_data is not None
         self._sensor_data  = sensor_data or {}
@@ -109,7 +109,7 @@ class AddSensorDialog(QDialog):
         #       return
         #   self._set_detected_type(result["type"])
         #   self._populate_params(result["params"])
-        self._set_detected_type("unknown")
+        self._set_detected_type("rfid")
         self._populate_params({})
 
     def _set_detected_type(self, sensor_type: str | None):
@@ -131,23 +131,22 @@ class AddSensorDialog(QDialog):
         )
 
     def _populate_params(self, params: dict):
-        layout = self.params_contents.layout()
-        while layout.count() > 1:
-            item = layout.takeAt(0)
+        while self.params_layout.count() > 1:
+            item = self.params_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._params = dict(params)
         if params:
             for key, value in params.items():
-                layout.insertWidget(
-                    layout.count() - 1,
+                self.params_layout.insertWidget(
+                    self.params_layout.count() - 1,
                     self._make_param_row(key, str(value))
                 )
         else:
             lbl = QLabel("No parameters detected.\nWill populate after backend SDF validation.")
             lbl.setObjectName("params_placeholder")
             lbl.setWordWrap(True)
-            layout.insertWidget(0, lbl)
+            self.params_layout.insertWidget(0, lbl)
 
     def _make_param_row(self, key: str, value: str) -> QWidget:
         row = QFrame()
@@ -201,7 +200,7 @@ class AddSensorDialog(QDialog):
             "type":        self._detected_type or "unknown",
             "sdf_path":    sdf_dest,
             "image_path":  image_dest,
-            "description": self._sensor_data.get("description", ""),
+            "description": self.input_description.toPlainText().strip(),
             "params":      dict(self._params),
         }
         if self._sensor_id:
@@ -227,11 +226,6 @@ class AddSensorDialog(QDialog):
     def _setup_styles(self):
         C = Colors
         self.setStyleSheet(f"""
-            AddSensorDialog {{
-                background-color: {C.BG_CARD};
-                border: 1px solid {C.BORDER_LIGHT};
-                border-radius: 6px;
-            }}
             QWidget#dialog_titlebar {{
                 background-color: {C.BG_TOOLBAR};
                 border-bottom: 1px solid {C.BORDER};
@@ -248,7 +242,7 @@ class AddSensorDialog(QDialog):
             QLabel#lbl_section_image, QLabel#lbl_section_name,
             QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
             QLabel#lbl_section_params, QLabel#lbl_section_description {{
-                color: {C.TEXT_SECONDARY};
+                color: {C.TEXT_MUTED};
                 font-size: 11px;
                 font-weight: bold;
                 background: transparent;
@@ -262,13 +256,12 @@ class AddSensorDialog(QDialog):
                 color: {C.TEXT_MUTED}; font-size: 12px; background: transparent;
             }}
             QLabel#sdf_label {{
-                color: {C.TEXT_SECONDARY}; font-size: 12px;
+                color: {C.TEXT_MUTED}; font-size: 12px;
             }}
             QLineEdit#input_name, QLineEdit#field_input {{
-                background-color: {C.BG_INPUT};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_PRIMARY};
+                color: {C.TEXT_BLACK};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
@@ -276,10 +269,10 @@ class AddSensorDialog(QDialog):
                 border-color: {C.ACCENT};
             }}
             QPlainTextEdit#input_description {{
-                background-color: {C.BG_INPUT};
+                background: transparent;
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_PRIMARY};
+                color: {C.TEXT_BLACK};
                 padding: 6px 10px;
                 font-size: 12px;
             }}
@@ -291,7 +284,7 @@ class AddSensorDialog(QDialog):
                 border-bottom: 1px solid {C.BORDER};
             }}
             QLabel#param_key {{
-                color: {C.TEXT_SECONDARY}; font-size: 12px; background: transparent;
+                color: {C.TEXT_MUTED}; font-size: 12px; background: transparent;
             }}
             QLabel#params_placeholder {{
                 color: {C.TEXT_MUTED}; font-size: 11px;
@@ -302,7 +295,7 @@ class AddSensorDialog(QDialog):
                 border-top: 1px solid {C.BORDER};
             }}
             QPushButton#btn_browse_sdf {{
-                background-color: {C.BG_CARD};
+                background-color: {C.TEXT_SECONDARY};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
                 color: {C.TEXT_PRIMARY};
@@ -314,7 +307,7 @@ class AddSensorDialog(QDialog):
                 background-color: transparent;
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_SECONDARY};
+                color: {C.TEXT_MUTED};
                 font-size: 13px;
                 padding: 0 16px;
             }}
@@ -336,8 +329,6 @@ class AddSensorDialog(QDialog):
                 color: #111111;
             }}
         """)
-
-
         self.btn_dialog_close.setIcon(Icons.CLOSE())
         self.btn_dialog_close.setIconSize(Layout.ICON_SIZE_SM)
         # Initial state: dot muted until SDF loaded

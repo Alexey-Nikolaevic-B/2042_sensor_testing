@@ -156,7 +156,7 @@
             <property name="bottomMargin"><number>0</number></property>
             <item>
              <widget class="QLabel" name="lbl_detected_type">
-              <property name="text"><string>—</string></property>
+              <property name="text"><string></string></property>
              </widget>
             </item>
             <item>
