@@ -174,7 +174,7 @@ class EditTestsDialog(QDialog):
             self._tests[self._selected]["description"] = self.input_description.toPlainText()
 
     def _on_save_all(self):
-        from .sensor_repository import SensorRepository
+        from .logic_sensor_repository import SensorRepository
         repo = SensorRepository.instance()
 
         asset_dir = os.path.join(ASSETS_DIR, self._sensor_name, "tests")

@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR
 
 
 class SensorCell(QFrame):

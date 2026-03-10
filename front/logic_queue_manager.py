@@ -198,7 +198,7 @@ class QueueManager(QObject):
             self.item_result.emit(entry.sensor_id, entry.func_name, result)
 
         try:
-            from .sensor_repository import SensorRepository
+            from .logic_sensor_repository import SensorRepository
             repo = SensorRepository.instance()
             passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
             repo.save_test_result(

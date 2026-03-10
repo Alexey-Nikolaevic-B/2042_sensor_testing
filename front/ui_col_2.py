@@ -3,8 +3,8 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
-from .ui_add_sensor_dialog import AddSensorDialog
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from .dialog_add_sensor import AddSensorDialog
 
 DESCRIPTION_STYLE = f"""
     QScrollArea {{

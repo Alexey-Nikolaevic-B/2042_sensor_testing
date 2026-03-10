@@ -3,10 +3,10 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
-from .ui_test_item import TestItem
-from .ui_col_2 import DESCRIPTION_STYLE, IMAGE_H, TOOLBAR_H, NAME_H, DESC_H
-from .queue_manager import TestStatus
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from .widget_test_item import TestItem
+from .widget_col_2 import DESCRIPTION_STYLE, IMAGE_H, TOOLBAR_H, NAME_H, DESC_H
+from .logic_queue_manager import TestStatus
 
 
 class ColTests(QWidget):
@@ -47,7 +47,7 @@ class ColTests(QWidget):
             print(f"[col_3/{level}] {msg}")
 
     def load_sensor(self, sensor_data: dict):
-        from .sensor_repository import SensorRepository
+        from .logic_sensor_repository import SensorRepository
         fresh = SensorRepository.instance().get_sensor(sensor_data["id"]) or sensor_data
         self._sensor_data = fresh
         self._sensor_id   = str(fresh["id"])
@@ -160,7 +160,7 @@ class ColTests(QWidget):
 
     def _open_edit_tests_dialog(self):
         from .ui_edit_tests_dialog import EditTestsDialog
-        from .sensor_repository import SensorRepository
+        from .logic_sensor_repository import SensorRepository
 
         repo        = SensorRepository.instance()
         sensor_id   = self._sensor_id
@@ -201,7 +201,7 @@ class ColTests(QWidget):
     def _on_tests_meta_saved(self):
         if not self._sensor_id:
             return
-        from .sensor_repository import SensorRepository
+        from .logic_sensor_repository import SensorRepository
         sensor = SensorRepository.instance().get_sensor(self._sensor_id)
         if not sensor:
             return

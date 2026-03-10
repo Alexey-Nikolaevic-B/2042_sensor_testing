@@ -3,8 +3,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QColor, QTextCharFormat, QTextCursor
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
-from .ui_col_2 import IMAGE_H, TOOLBAR_H
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from .widget_col_2 import IMAGE_H, TOOLBAR_H
 
 
 _LEVEL_FMT: dict[str, tuple[str, str]] = {

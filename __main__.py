@@ -4,16 +4,16 @@ import socket
 import logging
 import traceback
 
-from ui.log_bridge import setup_logging, log_bridge
+from front.logic_log_bridge import setup_logging, log_bridge
 setup_logging()
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication
 from src.core import Core
-from ui.sensor_repository import SensorRepository
-from ui.test_runner import TestRunner
-from ui.queue_manager import QueueManager
-from ui.ui_main import Main_UI
+from front.logic_sensor_repository import SensorRepository
+from front.logic_test_runner import TestRunner
+from front.logic_queue_manager import QueueManager
+from front.main import Main_UI
 
 
 class _SimInitThread(QThread):

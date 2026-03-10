@@ -1,9 +1,9 @@
 from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtCore import QSize
 
-ICON_DIR = "./ui/icon"
-IMAGE_DIR = "./ui/img"
-QT_DIR   = "./ui/qt"
+ICON_DIR = "./front/icon"
+IMAGE_DIR = "./front/img"
+QT_DIR   = "./front/qt"
 
 
 class Colors:

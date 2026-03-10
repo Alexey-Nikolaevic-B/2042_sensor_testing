@@ -3,13 +3,13 @@ from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
-from .ui_col_1 import ColSensors
-from .ui_col_2 import ColDetails
-from .ui_col_3 import ColTests
-from .ui_col_4 import ColCapture
-from .sensor_repository import SensorRepository
-from .ui_add_sensor_dialog import AddSensorDialog
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from .widget_col_1 import ColSensors
+from .widget_col_2 import ColDetails
+from .widget_col_3 import ColTests
+from .widget_col_4 import ColCapture
+from .logic_sensor_repository import SensorRepository
+from .dialog_add_sensor import AddSensorDialog
 
 
 class Main_UI(QMainWindow):

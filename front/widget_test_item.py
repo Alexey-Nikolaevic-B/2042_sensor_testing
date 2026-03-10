@@ -3,8 +3,8 @@ from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5 import uic
 
-from .theme import Styles, Icons, Layout, Colors, QT_DIR
-from .queue_manager import TestStatus
+from ._theme import Styles, Icons, Layout, Colors, QT_DIR
+from .logic_queue_manager import TestStatus
 
 
 class TestItem(QWidget):

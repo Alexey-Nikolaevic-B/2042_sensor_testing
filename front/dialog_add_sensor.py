@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from .theme import Colors, Styles, Icons, Layout, QT_DIR
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "sensors")
 IMAGE_W, IMAGE_H = 300, 200
