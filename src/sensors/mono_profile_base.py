@@ -66,12 +66,12 @@ class MonoProfileBase(MonoCamera):
         super().__init__(CONFIG)
 
         self.CONFIG = CONFIG
-        self.image_width = int(self.IMAGE_WIDTH)
-        self.image_height = int(self.IMAGE_HEIGHT)
-        self.horizontal_fov = float(self.HORIZONTAL_FOV_RAD)
-        self.clip_near = float(self.CLIP_NEAR)
-        self.clip_far = float(self.CLIP_FAR)
-        self.update_rate = int(self.UPDATE_RATE)
+        self.image_width = int(getattr(self, "image_width", self.IMAGE_WIDTH))
+        self.image_height = int(getattr(self, "image_height", self.IMAGE_HEIGHT))
+        self.horizontal_fov = float(getattr(self, "horizontal_fov", self.HORIZONTAL_FOV_RAD))
+        self.clip_near = float(getattr(self, "clip_near", self.CLIP_NEAR))
+        self.clip_far = float(getattr(self, "clip_far", self.CLIP_FAR))
+        self.update_rate = int(getattr(self, "update_rate", self.UPDATE_RATE))
 
         worlds_root = Path(CONFIG["WORLDS_PATH"])
         if not worlds_root.is_absolute():

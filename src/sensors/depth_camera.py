@@ -29,6 +29,13 @@ class DepthCamera(MonoCamera):
             sensors_root = root / sensors_root
 
         self.sensor_sdf_path = str((sensors_root / self.sensor_type / f"{self.sensor_name}.sdf").resolve())
+        profile = dict(getattr(self, "_sdf_profile", {}) or {})
+        image_topic = str(profile.get("image_topic", "") or "").strip()
+        depth_topic = str(profile.get("depth_topic", "") or "").strip()
+        if image_topic:
+            self.IMAGE_TOPIC = image_topic
+        if depth_topic:
+            self.DEPTH_TOPIC = depth_topic
 
         self.test_to_world = {
             'depth_perception_test': str(worlds_root / "depth_camera" / "depth_perception_test.world"),

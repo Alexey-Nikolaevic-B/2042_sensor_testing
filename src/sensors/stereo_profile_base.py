@@ -17,6 +17,7 @@ from geometry_msgs.msg import Point, Pose, Quaternion
 from sensor_msgs.msg import Image
 
 from .sensor import Sensor
+from .sdf_profile import load_sensor_profile
 
 
 class StereoProfileBase(Sensor):
@@ -75,6 +76,7 @@ class StereoProfileBase(Sensor):
             sensors_root = os.path.join(CONFIG["ROOT_PATH"], sensors_root)
 
         self.sensor_sdf_path = os.path.join(sensors_root, self.sensor_type, f"{self.sensor_name}.sdf")
+        profile = load_sensor_profile(self.sensor_sdf_path)
 
         self.test_to_world = {
             "stereo_topics_presence_test": str(worlds_root / "camera_c4_geometries.world"),
@@ -84,13 +86,15 @@ class StereoProfileBase(Sensor):
             "s2_texture_vs_smooth_stability_test": str(worlds_root / "camera_c8_stereo_complex.world"),
         }
 
-        self.image_width = int(self.IMAGE_WIDTH)
-        self.image_height = int(self.IMAGE_HEIGHT)
-        self.horizontal_fov = float(self.HORIZONTAL_FOV_RAD)
-        self.clip_near = float(self.CLIP_NEAR)
-        self.clip_far = float(self.CLIP_FAR)
-        self.update_rate = int(self.UPDATE_RATE)
-        self.baseline = float(self.BASELINE_M)
+        self.LEFT_IMAGE_TOPIC = str(profile.get("left_topic", "") or self.LEFT_IMAGE_TOPIC)
+        self.RIGHT_IMAGE_TOPIC = str(profile.get("right_topic", "") or self.RIGHT_IMAGE_TOPIC)
+        self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
+        self.image_height = int(profile.get("image_height") or self.IMAGE_HEIGHT)
+        self.horizontal_fov = float(profile.get("horizontal_fov") or self.HORIZONTAL_FOV_RAD)
+        self.clip_near = float(profile.get("clip_near") or self.CLIP_NEAR)
+        self.clip_far = float(profile.get("clip_far") or self.CLIP_FAR)
+        self.update_rate = int(profile.get("update_rate") or self.UPDATE_RATE)
+        self.baseline = float(profile.get("baseline") or self.BASELINE_M)
         self._last_test_diagnostics: Dict[str, Any] = {}
         self._last_scene_diag: Dict[str, Any] = {}
         self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
