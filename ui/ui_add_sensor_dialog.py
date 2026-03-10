@@ -172,15 +172,13 @@ class AddSensorDialog(QDialog):
         if not self._sdf_source:
             self._flash_error(self.sdf_label)
             return
-        if self._detected_type == "unknown":
-            self._flash_error(self.lbl_detected_type)
-            return
         
 
         asset_dir = os.path.join(ASSETS_DIR, name)
         os.makedirs(asset_dir, exist_ok=True)
 
-        sdf_dest = os.path.join(asset_dir, "model.sdf")
+        sdf_filename = os.path.basename(self._sdf_source)
+        sdf_dest = os.path.join(asset_dir, sdf_filename)
         if os.path.abspath(self._sdf_source) != os.path.abspath(sdf_dest):
             shutil.copy2(self._sdf_source, sdf_dest)
 

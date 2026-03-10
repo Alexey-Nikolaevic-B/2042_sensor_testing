@@ -81,14 +81,14 @@ class ColCapture(QWidget):
         self.log_view.ensureCursorVisible()
 
     def _enforce_heights(self):
-        self.lbl_capture_image.setFixedHeight(IMAGE_H)
-        self.wt_toolbar_top.setFixedHeight(TOOLBAR_H)
+        # self.lbl_capture_image.setFixedHeight(IMAGE_H)
+        # self.wt_toolbar_top.setFixedHeight(TOOLBAR_H)
         self.wt_toolbar_bottom.setFixedHeight(TOOLBAR_H)
 
     def _connect_signals(self):
         self.btn_clear_log.clicked.connect(self._on_clear)
         self.btn_copy_log.clicked.connect(self._on_copy)
-        self.btn_save_capture.clicked.connect(self._on_save)
+        # self.btn_save_capture.clicked.connect(self._on_save)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
@@ -117,9 +117,9 @@ class ColCapture(QWidget):
             }}
             {Styles.SCROLLBAR}
         """)
-        self.btn_capture.setStyleSheet(Styles.BUTTON_ACCENT)
+        # self.btn_capture.setStyleSheet(Styles.BUTTON_ACCENT)
         for btn, icon in [
-            (self.btn_save_capture, Icons.SAVE()),
+            # (self.btn_save_capture, Icons.SAVE()),
             (self.btn_clear_log,    Icons.CLEAR()),
             (self.btn_copy_log,     Icons.COPY()),
         ]:
