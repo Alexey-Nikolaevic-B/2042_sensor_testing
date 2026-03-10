@@ -1,16 +1,13 @@
 import os
 import json
+import socket
 import subprocess
-import rospy
 import threading
 import time
 
-import xml.etree.ElementTree as ET
+from PyQt5.QtCore import QThread, pyqtSignal
 
-from gazebo_msgs.srv import SetModelState, GetWorldProperties
-from sensor_msgs.msg import Image
-from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist
-from gazebo_msgs.msg import ModelState, ModelStates
+import xml.etree.ElementTree as ET
 
 import logging
 with open('log_config.json') as f_in:
@@ -18,6 +15,37 @@ with open('log_config.json') as f_in:
 logging.config.dictConfig(log_config)
 
 logger = logging.getLogger(__name__)
+
+ROSCORE_PORT         = 11311
+ROSCORE_POLL_INTERVAL = 0.5
+ROSCORE_TIMEOUT      = 30.0
+
+
+class _RoscoreWatcher(QThread):
+    ready  = pyqtSignal()
+    log    = pyqtSignal(str, str)   # level, message
+    error  = pyqtSignal(str)        # message
+
+    def __init__(self, simulator):
+        super().__init__()
+        self._sim = simulator
+
+    def run(self):
+        self.log.emit("info", "Starting roscore...")
+        self._sim.launch_ros()
+        self.log.emit("info", "Waiting for roscore...")
+        deadline = time.time() + ROSCORE_TIMEOUT
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(("localhost", ROSCORE_PORT), timeout=1.0):
+                    pass
+                self.log.emit("info", "roscore ready.")
+                self.ready.emit()
+                return
+            except OSError:
+                time.sleep(ROSCORE_POLL_INTERVAL)
+        self.error.emit(f"roscore did not become ready within {ROSCORE_TIMEOUT:.0f}s.")
+
 
 class Simulator():
     def __init__(self, CONFIG: dict = None):
@@ -55,55 +83,74 @@ class Simulator():
 
     def launch_node(self):
         if threading.current_thread() is not threading.main_thread():
-            logger.error("ROS node must be initialized in main thread")
-            return
-
+            logger.warning("launch_node called from non-main thread — signal handlers may fail")
         try:
+            import rospy
+            import rospy as _rospy
+            from gazebo_msgs.srv import SetModelState, GetWorldProperties
+            from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist
+            from gazebo_msgs.msg import ModelState, ModelStates
+
+            import sys
+            sys.modules[__name__]  # ensure module exists
+
+            # Make imports available to all methods via module-level injection
+            globals()["rospy"]              = rospy
+            globals()["SetModelState"]      = SetModelState
+            globals()["GetWorldProperties"] = GetWorldProperties
+            globals()["Pose"]               = Pose
+            globals()["Point"]              = Point
+            globals()["Quaternion"]         = Quaternion
+            globals()["Vector3"]            = Vector3
+            globals()["Twist"]              = Twist
+            globals()["ModelState"]         = ModelState
+            globals()["ModelStates"]        = ModelStates
+
             rospy.init_node('sensor_data_receiver', anonymous=True)
             self.node_is_running = True
             logger.info('ROS node initialized successfully')
         except Exception as e:
             logger.error(f'Failed to initialize ROS node: {str(e)}')
 
-    def launch(self) -> str:
-        self.launch_ros()
-        self.launch_node()
+    def start_async(self, on_ready, on_log, on_error):
+        self._watcher = _RoscoreWatcher(self)
+        self._watcher.ready.connect(on_ready)
+        self._watcher.log.connect(on_log)
+        self._watcher.error.connect(on_error)
+        self._watcher.start()
 
-
-    def receive_sensor_data(self, topic):
-        try:
-            msg = rospy.wait_for_message(topic, Image, timeout=self.TIMEOUT)
-            logger.info(f'Received sensor data from topic: {topic}')
-            return msg
-        except Exception as e:
-            logger.error(f'Failed to receive sensor data from topic: {str(e)}')
 
     def is_gazebo_running(self):
         try:
             from gazebo_msgs.srv import GetWorldProperties
-
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
-            get_world_properties = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
-            response = get_world_properties()
+            rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)()
             return True
-        except:
+        except Exception as exc:
+            logger.debug(f'is_gazebo_running: {exc}')
             return False
 
     def open_scene(self, world_path, camera_model_path) -> bool:
-        if self.is_gazebo_running():
+        logger.info(f'open_scene: world={world_path}')
+
+        gazebo_running = self.is_gazebo_running()
+        logger.info(f'open_scene: is_gazebo_running={gazebo_running}')
+        if gazebo_running:
             self.kill_gazebo()
             time.sleep(1.0)
 
         if not self.ros_is_running:
-            logger.error('Failed to start Gazebo: Ros is not running')
+            logger.error('open_scene: ros_is_running=False')
             return False
 
         if not self.node_is_running:
-            logger.error('Failed to start Gazebo: Node is not running')
+            logger.error('open_scene: node_is_running=False')
             return False
 
+        logger.info('open_scene: generating world file')
         self._generate_world(world_path, camera_model_path)
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
+        logger.info(f'open_scene: roslaunch_cmd={roslaunch_cmd}')
 
         try:
             self.gazebo_process = subprocess.Popen(
@@ -113,6 +160,7 @@ class Simulator():
                 text=True,
                 bufsize=1
             )
+            logger.info(f'open_scene: gazebo process pid={self.gazebo_process.pid}')
 
             stdout_thread = threading.Thread(
                 target=self._log_stdout_output,
@@ -128,24 +176,29 @@ class Simulator():
             stderr_thread.daemon = True
             stderr_thread.start()
 
+            logger.info('open_scene: waiting for gazebo services (30s timeout)')
             if not self.wait_gazebo_quiet(30.0):
-                logger.error("Gazebo services did not appear")
+                logger.error('open_scene: wait_gazebo_quiet timed out')
                 return False
 
+            logger.info('open_scene: wait_for_service get_world_properties')
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+            logger.info('open_scene: wait_for_service set_model_state')
             rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
 
             self.gazebo_is_running = True
 
             if self.is_gazebo_running():
-                logger.info('Gazebo started')
+                logger.info('open_scene: Gazebo started successfully')
                 return True
             else:
-                logger.error('Failed to start Gazebo')
+                logger.error('open_scene: is_gazebo_running() returned False after startup')
                 return False
 
-        except Exception as e:
-            logger.error(f'Failed to start Gazebo: {str(e)}')
+        except Exception as exc:
+            import traceback
+            logger.error(f'open_scene exception: {exc}{traceback.format_exc()}')
+            return False
             return False
 
     def _log_stdout_output(self, stdout_stream):

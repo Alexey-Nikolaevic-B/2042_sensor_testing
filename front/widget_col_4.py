@@ -1,10 +1,12 @@
-from PyQt5.QtWidgets import QWidget, QApplication, QFileDialog
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap, QColor, QTextCharFormat, QTextCursor
+from datetime import datetime
+
+from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot
+from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor
 from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
-from .widget_col_2 import IMAGE_H, TOOLBAR_H
+from .widget_col_2 import TOOLBAR_H
 
 
 _LEVEL_FMT: dict[str, tuple[str, str]] = {
@@ -14,7 +16,6 @@ _LEVEL_FMT: dict[str, tuple[str, str]] = {
     "error":    ("[ERRO]", "#ef4444"),
     "critical": ("[CRIT]", "#dc2626"),
 }
-
 
 
 class ColCapture(QWidget):
@@ -27,23 +28,24 @@ class ColCapture(QWidget):
         self._connect_signals()
 
     def append_log(self, level: str, source: str, message: str) -> None:
-        prefix, color = _LEVEL_FMT.get(level.lower(), ("INF", "#9ca3af"))
-        line = f"{prefix}  {source}: {message}"
-        self._append_colored(line, color)
-
-    def set_capture_image(self, pixmap: QPixmap) -> None:
-        if pixmap and not pixmap.isNull():
-            self.lbl_capture_image.setPixmap(
-                pixmap.scaled(
-                    self.lbl_capture_image.width(),
-                    self.lbl_capture_image.height(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation,
-                )
+        from PyQt5.QtCore import QThread
+        if QThread.currentThread() is not self.thread():
+            QMetaObject.invokeMethod(
+                self, "_append_log_main",
+                Qt.QueuedConnection,
+                Q_ARG(str, level),
+                Q_ARG(str, source),
+                Q_ARG(str, message),
             )
-        else:
-            self.lbl_capture_image.clear()
-            self.lbl_capture_image.setText("no data captured")
+            return
+        self._append_log_main(level, source, message)
+
+    @pyqtSlot(str, str, str)
+    def _append_log_main(self, level: str, source: str, message: str) -> None:
+        prefix, color = _LEVEL_FMT.get(level.lower(), ("[INFO]", "#9ca3af"))
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}]  {prefix}  {source}: {message}"
+        self._append_colored(line, color)
 
     def _on_clear(self):
         self.log_view.clear()
@@ -52,22 +54,6 @@ class ColCapture(QWidget):
         text = self.log_view.toPlainText()
         if text:
             QApplication.clipboard().setText(text)
-
-    def _on_save(self):
-        text = self.log_view.toPlainText()
-        if not text:
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save Log",
-            f"log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            "Text Files (*.txt);;All Files (*)",
-        )
-        if path:
-            try:
-                with open(path, "w") as f:
-                    f.write(text)
-            except OSError as e:
-                self.append_log("error", "ui.col_4", f"Error saving log: {e}")
 
     def _append_colored(self, text: str, hex_color: str) -> None:
         fmt = QTextCharFormat()
@@ -81,30 +67,18 @@ class ColCapture(QWidget):
         self.log_view.ensureCursorVisible()
 
     def _enforce_heights(self):
-        # self.lbl_capture_image.setFixedHeight(IMAGE_H)
-        # self.wt_toolbar_top.setFixedHeight(TOOLBAR_H)
         self.wt_toolbar_bottom.setFixedHeight(TOOLBAR_H)
 
     def _connect_signals(self):
         self.btn_clear_log.clicked.connect(self._on_clear)
         self.btn_copy_log.clicked.connect(self._on_copy)
-        # self.btn_save_capture.clicked.connect(self._on_save)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
             QWidget {{ background-color: {Colors.BG_COLUMN}; }}
-            QWidget#wt_toolbar_top {{
-                background-color: {Colors.BG_TOOLBAR};
-                border-bottom: 1px solid {Colors.BORDER};
-            }}
             QWidget#wt_toolbar_bottom {{
                 background-color: {Colors.BG_LOG};
                 border-top: 1px solid {Colors.BORDER};
-            }}
-            QLabel#lbl_capture_image {{
-                background-color: {Colors.BG_IMAGE};
-                color: {Colors.TEXT_MUTED};
-                font-size: 12px;
             }}
             QPlainTextEdit#log_view {{
                 background-color: {Colors.BG_LOG};
@@ -117,11 +91,9 @@ class ColCapture(QWidget):
             }}
             {Styles.SCROLLBAR}
         """)
-        # self.btn_capture.setStyleSheet(Styles.BUTTON_ACCENT)
         for btn, icon in [
-            # (self.btn_save_capture, Icons.SAVE()),
-            (self.btn_clear_log,    Icons.CLEAR()),
-            (self.btn_copy_log,     Icons.COPY()),
+            (self.btn_clear_log, Icons.CLEAR()),
+            (self.btn_copy_log,  Icons.COPY()),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)
