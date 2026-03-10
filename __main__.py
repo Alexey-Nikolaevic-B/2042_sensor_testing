@@ -1,7 +1,7 @@
 import sys
 import time
 import socket
-import threading
+import logging
 import traceback
 
 from ui.log_bridge import setup_logging, log_bridge
@@ -67,43 +67,49 @@ def _start_simulator_init(core: Core, on_log, on_fail):
     _sim_init_thread.start()
 
 
-def _seed_db_from_registry(repo: SensorRepository) -> None:
-    try:
-        from src.sensors import REGISTRY, make_sensor
-        from config import CONFIG
-        for (sensor_type, sensor_name) in REGISTRY.keys():
-            if repo.get_sensor_by_name(sensor_name):
-                continue
-            try:
-                instance = make_sensor(sensor_type, sensor_name, CONFIG)
-                sdf_path = getattr(instance, "sensor_sdf_path", "")
-                repo.add_sensor({
-                    "name":     sensor_name,
-                    "type":     sensor_type,
-                    "sdf_path": sdf_path,
-                })
-            except Exception as exc:
-                print(f"[seed] Could not register {sensor_name}: {exc}")
-    except ImportError:
-        print("[seed] Backend not available")
-
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    logger = logging.getLogger(__name__)
 
     core          = Core()
     repo          = SensorRepository()
     runner        = TestRunner(core)
     queue_manager = QueueManager(runner)
     window        = Main_UI()
+
+    window.test_page._runner_log_forward = window.col_4.append_log
     window.test_page.set_runner(queue_manager, repo)
     window.show()
 
-    # Wire Python logging → col_4
-    def _on_log_record(record: __import__("logging").LogRecord):
-        level = record.levelname.lower()
-        window.col_4.append_log(level, record.name, record.getMessage())
+
+    def _on_log_record(record: logging.LogRecord):
+        try:
+            level = record.levelname.lower()
+            window.col_4.append_log(level, record.name, record.getMessage())
+        except Exception:
+            pass
     log_bridge.new_record.connect(_on_log_record)
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        try:
+            window.col_4.append_log("error", "unhandled", msg)
+        except Exception:
+            pass
+        logger.error("Unhandled exception:\n%s", msg)
+
+    sys.excepthook = _excepthook
+
+    def _threading_excepthook(args):
+        msg = "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))
+        try:
+            window.col_4.append_log("error", "unhandled-thread", msg)
+        except Exception:
+            pass
+        logger.error("Unhandled thread exception:\n%s", msg)
+
+    import threading
+    threading.excepthook = _threading_excepthook
 
     def _sim_log(level: str, msg: str):
         window.col_4.append_log(level, "src.gazebo_simulator", msg)
@@ -132,11 +138,5 @@ if __name__ == "__main__":
                     _sim_init_thread.wait(5000)
             except RuntimeError:
                 pass
-        if runner._thread is not None:
-            runner.stop()
-            try:
-                if runner._thread.isRunning():
-                    runner._thread.wait(10000)
-            except RuntimeError:
-                pass
+        runner.shutdown()
         core.kill()

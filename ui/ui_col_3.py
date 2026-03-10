@@ -34,6 +34,7 @@ class ColTests(QWidget):
         self._repo = repo
         queue_manager.item_state_changed.connect(self._on_state_changed)
         queue_manager.item_progress_changed.connect(self._on_progress_changed)
+        queue_manager.item_result.connect(self._on_item_result)
         if self._runner_log_forward:
             queue_manager.log_line.connect(
                 lambda text: self._runner_log_forward("info", "test_runner", text)
@@ -64,19 +65,35 @@ class ColTests(QWidget):
         self._populate_tests([])
 
     def _on_state_changed(self, sensor_id: str, func_name: str, status: TestStatus):
-        if sensor_id != self._sensor_id:
-            return
-        w = self._widgets.get(func_name)
-        if w:
-            w.set_status(status)
-        self._sync_run_all_button()
+        try:
+            if sensor_id != self._sensor_id:
+                return
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_status(status)
+            self._sync_run_all_button()
+        except Exception as exc:
+            self._log("error", f"_on_state_changed error: {exc}")
 
     def _on_progress_changed(self, sensor_id: str, func_name: str, value: int):
-        if sensor_id != self._sensor_id:
-            return
-        w = self._widgets.get(func_name)
-        if w:
-            w.set_progress(value)
+        try:
+            if sensor_id != self._sensor_id:
+                return
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_progress(value)
+        except Exception as exc:
+            self._log("error", f"_on_progress_changed error: {exc}")
+
+    def _on_item_result(self, sensor_id: str, func_name: str, result: dict):
+        try:
+            if sensor_id != self._sensor_id:
+                return
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_result(result)
+        except Exception as exc:
+            self._log("error", f"_on_item_result error: {exc}")
 
 
     def _on_item_run(self, func_name: str):
@@ -87,7 +104,7 @@ class ColTests(QWidget):
             self._log("error", f"Cannot run '{func_name}': sensor backend failed to load. Check sensor type/SDF.")
             return
 
-        tests = self._qm.get_tests_for_backend(self._backend)
+        tests = self._qm.get_tests(self._backend)
         func  = tests.get(func_name)
 
         if func is None:
@@ -108,7 +125,7 @@ class ColTests(QWidget):
             self._log("error", "Cannot run tests: sensor backend failed to load. Check sensor type/SDF.")
             return
 
-        tests = self._qm.get_tests_for_backend(self._backend)
+        tests = self._qm.get_tests(self._backend)
         queued = 0
         skip_statuses = (TestStatus.QUEUED, TestStatus.RUNNING)
         for func_name, func in tests.items():
@@ -153,7 +170,7 @@ class ColTests(QWidget):
         live_funcs = {}
         if self._qm and self._backend:
             try:
-                live_funcs = self._qm.get_tests_for_backend(self._backend)
+                live_funcs = self._qm.get_tests(self._backend)
             except Exception as exc:
                 self._log("error", f"get_tests failed: {exc}")
 
@@ -199,7 +216,8 @@ class ColTests(QWidget):
 
 
     def _sync_run_all_button(self):
-        pass
+        pass  # btn_run_all is always enabled — clicking re-queues any idle tests
+
     def _make_backend(self, sensor_data: dict):
         try:
             from src.sensors import REGISTRY
@@ -246,7 +264,25 @@ class ColTests(QWidget):
             self._widgets[td["name"]] = w
 
         layout.addStretch(1)
+
+        if self._qm and self._sensor_id:
+            self._restore_live_states()
+
         self._sync_run_all_button()
+
+    def _restore_live_states(self):
+        running = self._qm.get_running()
+        queued  = self._qm.get_queued_for_sensor(self._sensor_id)
+
+        for func_name, status in queued.items():
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_status(status)
+
+        if running and running[0] == self._sensor_id:
+            w = self._widgets.get(running[1])
+            if w:
+                w.set_status(TestStatus.RUNNING)
 
     def _reset_detail_panel(self):
         self.lbl_test_image.clear()

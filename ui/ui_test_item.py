@@ -32,26 +32,46 @@ class TestItem(QWidget):
         self._setup_styles()
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
 
+    _DB_STATUS_MAP = {
+        "Passed":  TestStatus.PASSED,
+        "Failed":  TestStatus.FAILED,
+        "Stopped": TestStatus.IDLE,
+        "Pending": TestStatus.IDLE,
+        "Idle":    TestStatus.IDLE,
+    }
+
     def load(self, test_data: dict):
         self._stop_movie()
         self.func_name        = test_data.get("name", "")
         self.test_name        = test_data.get("display_name") or self.func_name
         self.test_description = test_data.get("description", "")
-        self.test_result      = str(test_data.get("result", ""))
         self._image_path      = test_data.get("image_path", "")
         self._progress        = 0
         self.is_selected      = False
-        self.test_status      = TestStatus.IDLE
+
+        db_status  = test_data.get("status", "Pending")
+        db_result  = test_data.get("result", "")
+        self.test_status = self._DB_STATUS_MAP.get(db_status, TestStatus.IDLE)
+
+        if isinstance(db_result, dict):
+            parts = [f"{k}: {v}" for k, v in db_result.items()
+                     if k not in ("passed", "duration")]
+            self.test_result = "  |  ".join(parts)
+        else:
+            self.test_result = str(db_result) if db_result else ""
+
         self._refresh_all()
 
     def set_status(self, status: TestStatus) -> None:
         old = self.test_status
         self.test_status = status
 
-        # Movie (spinning gif) only while QUEUED
+        # Gif: pending.gif while QUEUED, running.gif while RUNNING
         if status == TestStatus.QUEUED:
-            self._start_movie()
-        elif old == TestStatus.QUEUED:
+            self._start_movie(Icons.QUEUED)
+        elif status == TestStatus.RUNNING:
+            self._start_movie(Icons.RUNNING_MOVIE)
+        elif old in (TestStatus.QUEUED, TestStatus.RUNNING):
             self._stop_movie()
 
         # Reset progress when leaving RUNNING
@@ -65,6 +85,14 @@ class TestItem(QWidget):
             return
         self._progress = max(0, min(100, value))
         self.progress_bar.setValue(self._progress)
+
+    def set_result(self, result: dict) -> None:
+        if not isinstance(result, dict):
+            return
+        skip = {"passed", "duration"}
+        parts = [f"{k}: {v}" for k, v in result.items() if k not in skip]
+        self.test_result = "  |  ".join(parts) if parts else ""
+        self.test_result_label.setText(self.test_result)
 
     def set_selected(self, selected: bool):
         self.is_selected = selected
@@ -91,9 +119,9 @@ class TestItem(QWidget):
         else:
             self.run_requested.emit(self.func_name)
 
-    def _start_movie(self):
+    def _start_movie(self, factory):
         self._stop_movie()
-        self._movie = Icons.QUEUED(self.status_icon)
+        self._movie = factory(self.status_icon)
         self.status_icon.setMovie(self._movie)
         self._movie.start()
 
@@ -117,12 +145,11 @@ class TestItem(QWidget):
 
     def _refresh_status_bar(self):
         color = {
-            TestStatus.IDLE:    Colors.STATUS_YELLOW,
+            TestStatus.IDLE:    Colors.STATUS_GRAY,
             TestStatus.QUEUED:  Colors.STATUS_QUEUED,
             TestStatus.RUNNING: Colors.STATUS_RUNNING,
             TestStatus.PASSED:  Colors.STATUS_GREEN,
             TestStatus.FAILED:  Colors.STATUS_RED,
-            TestStatus.STOPPED: Colors.STATUS_BLUE,
         }.get(self.test_status, Colors.STATUS_BLUE)
         self.frm_status_bar.setStyleSheet(
             f"QFrame {{ background-color: {color}; border: none; }}"
@@ -139,15 +166,19 @@ class TestItem(QWidget):
             self.progress_bar.setValue(self._progress)
             self.progress_bar.show()
             self.test_result_label.hide()
+        elif self.test_status == TestStatus.IDLE:
+            self.progress_bar.hide()
+            self.test_result_label.show()
+            self.test_result_label.setText("")
         else:
             self.progress_bar.hide()
             self.test_result_label.show()
             self.test_result_label.setText(self.test_result)
 
     def _refresh_icon(self):
-        if self.test_status == TestStatus.QUEUED:
+        if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
             return  # movie owns the label
-        is_running = (self.test_status == TestStatus.RUNNING)
+        is_running = False
         self.status_icon.setPixmap(
             Icons.for_status(self.test_status.value, is_running)
             .pixmap(Layout.ICON_SIZE_MD)

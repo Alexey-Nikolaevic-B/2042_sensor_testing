@@ -1,28 +1,100 @@
-import os
-import signal
+import ctypes
 import time
 import traceback
 import threading
-import multiprocessing as mp
+import logging
 
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot, QMetaObject, Qt
+
+logger = logging.getLogger(__name__)
 
 
-def _run_test_in_process(func, simulator, func_name, result_queue):
-    try:
-        result = func(simulator, progress_cb=None)
-        result = result or {}
-        passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
-        result_queue.put({
-            "status": "Passed" if passed else "Failed",
-            "result": result,
-        })
-    except Exception as exc:
-        result_queue.put({
-            "status": "Failed",
-            "result": {},
-            "error": f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
-        })
+class _Worker(QObject):
+
+    log_line      = pyqtSignal(str)
+    test_finished = pyqtSignal(str, dict, str, float)
+    all_finished  = pyqtSignal()
+    error         = pyqtSignal(str, str)
+
+    def __init__(self, core, backend, func_name: str, func):
+        super().__init__()
+        self._core           = core
+        self._backend        = backend
+        self._func_name      = func_name
+        self._func           = func
+        self._stop_requested = False
+        self._thread_id: int | None = None
+
+    def request_stop(self):
+        self._stop_requested = True
+
+    def raise_in_thread(self, exc_type):
+        tid = self._thread_id
+        if tid is None:
+            self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: no thread_id")
+            return
+        try:
+            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(tid),
+                ctypes.py_object(exc_type),
+            )
+            if res == 0:
+                self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: tid {tid} not found")
+            elif res > 1:
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(tid), None)
+                self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: affected {res} threads — undone")
+            else:
+                self.log_line.emit(f"[Worker:{self._func_name}] {exc_type.__name__} injected into tid {tid}")
+        except Exception as exc:
+            self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread error: {exc}")
+
+    @pyqtSlot()
+    def run(self):
+        func_name = self._func_name
+        self._thread_id = threading.current_thread().ident
+        self.log_line.emit(f"{func_name}")
+
+        def progress_cb(value: int):
+            if self._stop_requested:
+                raise StopIteration
+
+        t0 = time.time()
+        try:
+            result = self._func(self._core.simulator, progress_cb=progress_cb)
+            duration = time.time() - t0
+
+            if result is None:
+                result = {}
+
+            passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
+            status = "Passed" if passed else "Failed"
+
+            self.log_line.emit(f"{func_name}  {status}  ({duration:.1f}s)")
+            if isinstance(result, dict):
+                for k, v in result.items():
+                    if k not in ("passed", "duration"):
+                        self.log_line.emit(f"     {k}: {v}")
+
+            self.test_finished.emit(func_name, result, status, duration)
+
+        except (StopIteration, SystemExit, KeyboardInterrupt):
+            duration = time.time() - t0
+            self.log_line.emit(f"{func_name}  Stopped  ({duration:.1f}s)")
+            self.test_finished.emit(func_name, {}, "Stopped", duration)
+
+        except Exception as exc:
+            duration = time.time() - t0
+            tb = traceback.format_exc()
+            self.log_line.emit(f"{func_name}  {type(exc).__name__}: {exc}")
+            self.log_line.emit(tb)
+            logger.error("Test %s raised exception:\n%s", func_name, tb)
+            self.error.emit(func_name, str(exc))
+            self.test_finished.emit(func_name, {}, "Failed", duration)
+
+        finally:
+            self._thread_id = None
+
+        self.all_finished.emit()
 
 
 class TestRunner(QObject):
@@ -36,50 +108,50 @@ class TestRunner(QObject):
 
     def __init__(self, core, parent=None):
         super().__init__(parent)
-        self._core   = core
-        self._thread = None
-        self._worker = None
+        self._core        = core
+        self._worker: _Worker | None = None
         self._worker_lock = threading.Lock()
 
-    def run_one(self, backend, func_name: str, func) -> None:
-        if self._thread is not None and self._thread.isRunning():
-            return
-
-        self._thread = QThread()
-        with self._worker_lock:
-            self._worker = _Worker(self._core, backend, func_name, func)
-        self._worker.moveToThread(self._thread)
-
-        self._worker.log_line.connect(self.log_line)
-        self._worker.test_started.connect(self.test_started)
-        self._worker.test_finished.connect(self.test_finished)
-        self._worker.test_progress.connect(self.test_progress)
-        self._worker.error.connect(self.error)
-
-        self._thread.started.connect(self._worker.run)
-        self._worker.test_finished.connect(lambda *_: self._thread.quit())
-        self._thread.finished.connect(self._on_thread_done)
-
+        self._thread = QThread(self)
         self._thread.start()
 
-    def stop(self) -> None:
-        with self._worker_lock:
-            w = self._worker
-        print(f"[TestRunner] stop() called, worker={w}")
-        if w is not None:
-            w.request_stop()
+    def run_one(self, backend, func_name: str, func):
+        worker = _Worker(
+            core      = self._core,
+            backend   = backend,
+            func_name = func_name,
+            func      = func,
+        )
+        worker.moveToThread(self._thread)
 
-    def force_kill(self) -> None:
+        worker.log_line.connect(self.log_line)
+        worker.test_finished.connect(self.test_finished)
+        worker.all_finished.connect(self.all_finished)
+        worker.error.connect(self.error)
+
+        with self._worker_lock:
+            self._worker = worker
+
+        self.test_started.emit(func_name)
+        QMetaObject.invokeMethod(worker, "run", Qt.QueuedConnection)
+
+    def stop(self):
+        with self._worker_lock:
+            worker = self._worker
+        self.log_line.emit(f"[TestRunner] stop() called, worker={worker}")
+        if worker is not None:
+            worker.request_stop()
+
+    def force_kill(self):
         import subprocess
-        print(f"[TestRunner] force_kill() called")
 
         with self._worker_lock:
-            w = self._worker
-        print(f"[TestRunner] force_kill: worker={w}")
-        if w is not None:
-            w.kill_child()
+            worker = self._worker
+        self.log_line.emit(f"[TestRunner] force_kill() called, worker={worker}")
 
-        # Kill Gazebo
+        if worker is not None:
+            worker.raise_in_thread(SystemExit)
+
         try:
             proc = getattr(self._core.simulator, "gazebo_process", None)
             if proc is not None:
@@ -89,124 +161,17 @@ class TestRunner(QObject):
                     pass
             subprocess.run(["pkill", "-9", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-9", "-f", "gzclient"], check=False)
-            self._core.simulator.gazebo_is_running = False
+            try:
+                self._core.simulator.gazebo_is_running = False
+            except Exception:
+                pass
         except Exception as exc:
-            print(f"[TestRunner] force_kill gazebo error: {exc}")
+            logger.error("force_kill gazebo error: %s", exc)
 
     def get_tests(self, backend) -> dict:
         return self._core.get_tests(backend)
 
-    def _on_thread_done(self):
-        with self._worker_lock:
-            self._worker = None
-        self._thread = None
-        self.all_finished.emit()
-
-
-class _Worker(QObject):
-
-    log_line      = pyqtSignal(str)
-    test_started  = pyqtSignal(str)
-    test_finished = pyqtSignal(str, dict, str, float)
-    test_progress = pyqtSignal(str, int)
-    error         = pyqtSignal(str, str)
-
-    _POLL_INTERVAL = 0.05
-
-    def __init__(self, core, backend, func_name: str, func):
-        super().__init__()
-        self._core      = core
-        self._backend   = backend
-        self._func_name = func_name
-        self._func      = func
-        self._stop      = threading.Event()
-        self._child_lock = threading.Lock()
-        self._child: mp.Process | None = None
-
-    def request_stop(self):
-        print(f"[Worker:{self._func_name}] request_stop called, already_set={self._stop.is_set()}")
-        self._stop.set()
-
-    def kill_child(self):
-        with self._child_lock:
-            child = self._child
-        print(f"[Worker:{self._func_name}] kill_child called, child={child}, alive={child.is_alive() if child else 'N/A'}")
-        if child is not None:
-            try:
-                os.kill(child.pid, signal.SIGKILL)
-                print(f"[Worker:{self._func_name}] SIGKILL sent to pid={child.pid}")
-            except (ProcessLookupError, OSError) as e:
-                print(f"[Worker:{self._func_name}] kill_child SIGKILL failed: {e}")
-
-    def run(self):
-        name = self._func_name
-        self.log_line.emit(f"Start {name}")
-        self.test_started.emit(name)
-
-        ctx          = mp.get_context("fork")
-        result_queue = ctx.Queue()
-        child        = ctx.Process(
-            target = _run_test_in_process,
-            args   = (self._func, self._core.simulator, name, result_queue),
-            daemon = True,
-        )
-
-        with self._child_lock:
-            self._child = child
-
-        t0 = time.time()
-        child.start()
-        print(f"[Worker:{name}] child started pid={child.pid}")
-
-        while child.is_alive():
-            if self._stop.is_set():
-                print(f"[Worker:{name}] stop event detected, joining child pid={child.pid} for 0.3s")
-                child.join(timeout=0.3)
-                if child.is_alive():
-                    print(f"[Worker:{name}] child still alive after 0.3s, sending SIGKILL to pid={child.pid}")
-                    try:
-                        os.kill(child.pid, signal.SIGKILL)
-                    except (ProcessLookupError, OSError) as e:
-                        print(f"[Worker:{name}] SIGKILL failed: {e}")
-                    child.join(timeout=2.0)
-                    print(f"[Worker:{name}] after SIGKILL join: alive={child.is_alive()} exitcode={child.exitcode}")
-                else:
-                    print(f"[Worker:{name}] child exited cleanly within 0.3s, exitcode={child.exitcode}")
-                break
-            child.join(timeout=self._POLL_INTERVAL)
-
-        duration = time.time() - t0
-        print(f"[Worker:{name}] poll loop done, duration={duration:.1f}s exitcode={child.exitcode} stop_set={self._stop.is_set()}")
-
-        with self._child_lock:
-            self._child = None
-
-        exitcode = child.exitcode
-
-        was_killed = (exitcode is not None and exitcode < 0)
-        print(f"[Worker:{name}] was_killed={was_killed} stop_set={self._stop.is_set()}")
-        if self._stop.is_set() or was_killed:
-            self.log_line.emit(f"{name}  Stopped  ({duration:.1f}s)")
-            self.test_finished.emit(name, {}, "Stopped", duration)
-            return
-
-        try:
-            data = result_queue.get(timeout=1.0)
-        except Exception:
-            self.log_line.emit(f"{name}  no result returned (exitcode={exitcode})  ({duration:.1f}s)")
-            self.test_finished.emit(name, {}, "Failed", duration)
-            return
-
-        if "error" in data:
-            self.log_line.emit(f"{name}  {data['error']}")
-            self.error.emit(name, data["error"])
-
-        status = data.get("status", "Failed")
-        result = data.get("result", {})
-        self.log_line.emit(f"{name}  {status}  ({duration:.1f}s)")
-        if isinstance(result, dict):
-            for k, v in result.items():
-                if k != "passed":
-                    self.log_line.emit(f"     {k}: {v}")
-
-        self.test_finished.emit(name, result, status, duration)
+    def shutdown(self):
+        self.stop()
+        self._thread.quit()
+        self._thread.wait(10000)

@@ -30,11 +30,12 @@ class Colors:
     ACCENT_DIM     = "#193040"
     ACCENT_HOVER   = "#29b6f6"
     STATUS_GREEN   = "#4caf50"
-    STATUS_YELLOW  = "#ffb300"
+    STATUS_GRAY    = "#757575"
     STATUS_RED     = "#ef5350"
     STATUS_BLUE    = "#42a5f5"
-    STATUS_RUNNING = "#ff9800"
-    STATUS_QUEUED  = "#7c4dff"
+    STATUS_RUNNING = "#ec27ab"   # magenta
+    STATUS_QUEUED  = "#7c4dff"   # purple
+    STATUS_YELLOW  = "#ffb300"   # kept for back-compat
     # back-compat
     BG_WINDOW     = BG_APP
     BG_SIDEBAR    = BG_COLUMN
@@ -221,6 +222,14 @@ class Icons:
     def RUNNING(cls):   return cls.get("running.png")
     @classmethod
     def UNKNOWN(cls):   return cls.get("unknown_status.png")
+
+    @classmethod
+    def RUNNING_MOVIE(cls, label=None):
+        from PyQt5.QtGui import QMovie
+        movie = QMovie(f"{ICON_DIR}/pending.gif")
+        if label is not None:
+            movie.setScaledSize(label.size())
+        return movie
 
     @classmethod
     def QUEUED(cls, label=None):

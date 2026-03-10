@@ -1,7 +1,10 @@
 import threading
+import logging
 from enum import Enum
 
 from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 
 class TestStatus(str, Enum):
@@ -10,26 +13,29 @@ class TestStatus(str, Enum):
     RUNNING = "Running"
     PASSED  = "Passed"
     FAILED  = "Failed"
-    STOPPED = "Stopped"
 
 
 class _Entry:
     __slots__ = ("sensor_id", "func_name", "backend", "func")
 
     def __init__(self, sensor_id, func_name, backend, func):
-        self.sensor_id = sensor_id
+        self.sensor_id = str(sensor_id)
         self.func_name = func_name
         self.backend   = backend
         self.func      = func
 
-    def matches(self, sensor_id, func_name):
-        return self.sensor_id == sensor_id and self.func_name == func_name
+    def matches(self, sensor_id, func_name) -> bool:
+        return self.sensor_id == str(sensor_id) and self.func_name == func_name
+
+    def __repr__(self):
+        return f"({self.sensor_id!r}, {self.func_name!r})"
 
 
 class QueueManager(QObject):
 
     item_state_changed    = pyqtSignal(str, str, TestStatus)
     item_progress_changed = pyqtSignal(str, str, int)
+    item_result           = pyqtSignal(str, str, dict)
     log_line              = pyqtSignal(str)
 
     _AMBIENT_INTERVAL_MS = 1500
@@ -39,17 +45,18 @@ class QueueManager(QObject):
         super().__init__(parent)
         self._runner   = runner
         self._lock     = threading.Lock()
-        self._queue    = []
-        self._running  = None
+        self._queue:   list[_Entry]  = []
+        self._running: _Entry | None = None
         self._progress = 0
+        self._stop_requested = False  # True after cancel() on running test
 
         self._ambient = QTimer(self)
         self._ambient.setInterval(self._AMBIENT_INTERVAL_MS)
         self._ambient.timeout.connect(self._on_ambient_tick)
 
         runner.test_finished.connect(self._on_runner_finished)
-        runner.all_finished.connect(self._try_advance)
         runner.test_progress.connect(self._on_runner_progress)
+        runner.all_finished.connect(self._on_all_finished)
         runner.log_line.connect(self.log_line)
 
 
@@ -65,9 +72,6 @@ class QueueManager(QObject):
 
     def cancel(self, sensor_id, func_name):
         sensor_id = str(sensor_id)
-        print(f"[QueueManager] cancel: sensor={sensor_id} func={func_name}")
-        print(f"[QueueManager] cancel: queue={[(e.sensor_id, e.func_name) for e in self._queue]}")
-        print(f"[QueueManager] cancel: running={( self._running.sensor_id, self._running.func_name) if self._running else None}")
 
         removed = False
         with self._lock:
@@ -78,20 +82,20 @@ class QueueManager(QObject):
                     break
 
         if removed:
-            print(f"[QueueManager] cancel: removed from queue → IDLE")
             self.log_line.emit(f"{func_name}  removed from queue")
             self.item_state_changed.emit(sensor_id, func_name, TestStatus.IDLE)
             return
 
         with self._lock:
             running = self._running
-        print(f"[QueueManager] cancel: not in queue, running matches={running and running.matches(sensor_id, func_name)}")
         if running and running.matches(sensor_id, func_name):
-            self.log_line.emit(f"{func_name}  stop requested, killing Gazebo")
+            if self._stop_requested:
+                return
+            self._stop_requested = True
+            self.log_line.emit(f"{func_name}  stop requested")
+            self.item_state_changed.emit(sensor_id, func_name, TestStatus.IDLE)
             self._runner.stop()
             self._runner.force_kill()
-        else:
-            print(f"[QueueManager] cancel: NOTHING TO CANCEL, not in queue and not running")
 
     def cancel_all_for_sensor(self, sensor_id):
         sensor_id = str(sensor_id)
@@ -112,18 +116,28 @@ class QueueManager(QObject):
         with self._lock:
             running = self._running
         if running and running.sensor_id == sensor_id:
-            self.log_line.emit(f"{running.func_name}  stop requested, killing Gazebo")
+            self.log_line.emit(f"{running.func_name}  stop requested")
             self._runner.stop()
             self._runner.force_kill()
 
-    def get_tests_for_backend(self, backend):
+    def get_tests(self, backend) -> dict:
         return self._runner.get_tests(backend)
 
     def is_active(self, sensor_id, func_name) -> bool:
         with self._lock:
             return self._is_active(str(sensor_id), func_name)
 
-    def _is_active(self, sensor_id, func_name):
+    def get_running(self) -> tuple[str, str] | None:
+        with self._lock:
+            r = self._running
+        return (r.sensor_id, r.func_name) if r else None
+
+    def get_queued_for_sensor(self, sensor_id: str) -> dict[str, TestStatus]:
+        sid = str(sensor_id)
+        with self._lock:
+            return {e.func_name: TestStatus.QUEUED for e in self._queue if e.sensor_id == sid}
+
+    def _is_active(self, sensor_id: str, func_name: str) -> bool:
         if self._running and self._running.matches(sensor_id, func_name):
             return True
         return any(e.matches(sensor_id, func_name) for e in self._queue)
@@ -138,6 +152,10 @@ class QueueManager(QObject):
         self._progress = 0
         self.item_state_changed.emit(entry.sensor_id, entry.func_name, TestStatus.RUNNING)
         self._ambient.start()
+
+        self.log_line.emit(
+            f"[QueueManager] starting {entry.func_name} for sensor {entry.sensor_id}"
+        )
         self._runner.run_one(entry.backend, entry.func_name, entry.func)
 
     def _on_ambient_tick(self):
@@ -150,25 +168,58 @@ class QueueManager(QObject):
             self._progress += 1
             self.item_progress_changed.emit(running.sensor_id, running.func_name, self._progress)
 
-    def _on_runner_progress(self, func_name, value):
+    def _on_runner_progress(self, func_name: str, value: int):
         with self._lock:
             running = self._running
         if running and running.func_name == func_name:
             self._progress = value
             self.item_progress_changed.emit(running.sensor_id, func_name, value)
 
-    def _on_runner_finished(self, func_name, result, status_str, duration):
+    def _on_runner_finished(self, func_name: str, result: dict, status_str: str, duration: float):
         self._ambient.stop()
-        self._progress = 0
 
         with self._lock:
             entry = self._running
-            self._running = None
 
-        if entry:
-            try:
-                ts = TestStatus(status_str)
-            except ValueError:
-                ts = TestStatus.STOPPED
-            self.item_progress_changed.emit(entry.sensor_id, entry.func_name, 0)
-            self.item_state_changed.emit(entry.sensor_id, entry.func_name, ts)
+        if entry is None or entry.func_name != func_name:
+            return
+
+        self.item_progress_changed.emit(entry.sensor_id, entry.func_name, 0)
+
+        status_map = {
+            "Passed":  TestStatus.PASSED,
+            "Failed":  TestStatus.FAILED,
+            "Stopped": TestStatus.IDLE,
+        }
+        ts = status_map.get(status_str, TestStatus.IDLE)
+        self.item_state_changed.emit(entry.sensor_id, entry.func_name, ts)
+
+        if result:
+            self.item_result.emit(entry.sensor_id, entry.func_name, result)
+
+        try:
+            from .sensor_repository import SensorRepository
+            repo = SensorRepository.instance()
+            passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
+            repo.save_test_result(
+                sensor_id   = entry.sensor_id,
+                test_name   = entry.func_name,
+                status      = ts.value,
+                result      = result,
+                duration    = duration,
+            )
+        except Exception as exc:
+            logger.error("Failed to save test result: %s", exc)
+
+    def _on_all_finished(self):
+        try:
+            with self._runner._worker_lock:
+                self._runner._worker = None
+        except Exception:
+            pass
+
+        with self._lock:
+            self._running = None
+        self._stop_requested = False
+        self.log_line.emit("[QueueManager] all_finished — advancing queue")
+        self._try_advance()
