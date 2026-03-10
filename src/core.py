@@ -32,4 +32,3 @@ class Core:
 
     def kill(self) -> None:
         self.simulator.kill()
-        sys.exit()
