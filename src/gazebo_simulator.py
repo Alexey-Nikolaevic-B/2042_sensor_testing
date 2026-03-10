@@ -49,9 +49,11 @@ class _RoscoreWatcher(QThread):
 
 class Simulator():
     def __init__(self, CONFIG: dict = None):
-        self.ros_is_running = False
-        self.node_is_running = False
+        self.ros_is_running    = False
+        self.node_is_running   = False
         self.gazebo_is_running = False
+        self.ros_process       = None
+        self.gazebo_process    = None
 
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
@@ -257,14 +259,18 @@ class Simulator():
         if not self.ros_is_running:
             return
         try:
-            result = subprocess.run(
-                ["bash", "-c", "pkill -f ros"],
-                capture_output=True,
-                timeout=10
-            )
-            logger.info('ROS processes killed')
+            if self.ros_process and self.ros_process.poll() is None:
+                self.ros_process.terminate()
+                try:
+                    self.ros_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.ros_process.kill()
+                    self.ros_process.wait()
+            self.ros_process = None
+            self.ros_is_running = False
+            logger.info('ROS core stopped')
         except Exception as e:
-            logger.error(f'Failed to kill ROS processes: {str(e)}')
+            logger.error(f'Failed to stop ROS core: {str(e)}')
 
     def _kill_node(self):
         if not self.node_is_running:
