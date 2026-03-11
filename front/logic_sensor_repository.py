@@ -145,23 +145,28 @@ class SensorRepository(QObject):
     def _seed_test_meta(self, sensor: "Sensor") -> None:
         try:
             from src.sensors import REGISTRY
-            from src.test_utils import load_test_functions
+            from src.tests import get_tests_for_sensor
 
             SensorClass = REGISTRY.get(sensor.sensor_type)
             if SensorClass is None:
                 return
 
-            instance = SensorClass(sensor.sdf_path)
-            funcs = load_test_functions(instance)
-            existing = {r["func_name"] for r in db.get_test_meta(sensor.id)}
-            for func_name in funcs:
+            try:
+                instance = SensorClass(sensor["sdf_path"])
+            except Exception:
+                return
+
+            func_names = get_tests_for_sensor(instance).keys()
+            existing   = {r["func_name"] for r in db.get_test_meta(sensor.id)}
+
+            for func_name in func_names:
                 if func_name not in existing:
                     db.save_test_meta(sensor.id, func_name, func_name, "", "")
-        except Exception:
-            pass
+
+        except Exception as exc:
+            print(f"[SensorRepository] _seed_test_meta failed: {exc}")
 
     def _extract_and_save_params(self, sensor: "Sensor") -> None:
-        # TODO: replace mock param with real get_params() once backend is stable
         try:
             from src.sensors import REGISTRY
 
@@ -170,12 +175,12 @@ class SensorRepository(QObject):
                 params = {}
             else:
                 try:
-                    instance = SensorClass(sensor.sdf_path)
-                    params = instance.get_params()
+                    instance = SensorClass(sensor["sdf_path"])
+                    params   = instance.get_params()
                 except Exception:
                     params = {}
         except Exception:
-            params = {"TODO": "get parameters from sensor"}
+            params = {}
 
         db.update_sensor(sensor.name, params=params)
         sensor.update_fields({"params": params})

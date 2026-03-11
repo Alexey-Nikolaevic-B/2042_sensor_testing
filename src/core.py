@@ -10,21 +10,18 @@ from config import CONFIG
 class Core:
     def __init__(self) -> None:
         self.simulator = Simulator(CONFIG)
-        self._load_builtin_detectors()
+        self._load_builtins()
 
-    def _load_builtin_detectors(self) -> None:
-        from .sensors import rfid_detector
+    def _load_builtins(self) -> None:
+        from .sensors import rfid_detector  # noqa: F401
+        import src.tests  # noqa: F401  — triggers all @register_test decorators
 
     def get_sensor_types(self) -> List[str]:
         return sorted(REGISTRY.keys())
 
     def get_tests(self, sensor: Sensor) -> Dict[str, Any]:
-        """Return {func_name: bound_method} for all *_test methods on sensor."""
-        return {
-            attr: getattr(sensor, attr)
-            for attr in dir(sensor)
-            if attr.endswith("_test") and callable(getattr(sensor, attr))
-        }
+        from .tests import get_tests_for_sensor
+        return get_tests_for_sensor(sensor)
 
     def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
         return _detect(sdf_path)
