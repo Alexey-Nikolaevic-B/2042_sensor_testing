@@ -5,8 +5,10 @@ SQLite persistence layer for sensors and their test results.
 
 Tables
 ------
-Sensors     — one row per registered sensor
-TestResults — one row per test run, FK → Sensors.id
+Sensors          — one row per registered sensor
+TestResults      — one row per test run, FK → Sensors.id
+SensorTypeTests  — canonical test definitions per sensor_type (display name, description, image)
+SensorTests      — per-sensor overrides of the above (unused display overrides, reserved for future)
 """
 
 import sqlite3
@@ -42,8 +44,32 @@ CREATE TABLE IF NOT EXISTS TestResults (
 );
 """
 
+_SCHEMA_SENSOR_TYPE_TESTS = """
+CREATE TABLE IF NOT EXISTS SensorTypeTests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_type  TEXT    NOT NULL,
+    func_name    TEXT    NOT NULL,
+    display_name TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    image_path   TEXT    NOT NULL DEFAULT '',
+    UNIQUE(sensor_type, func_name)
+);
+"""
 
-# ── Internal helpers (defined first so all functions below can use them) ──────
+_SCHEMA_TEST_META = """
+CREATE TABLE IF NOT EXISTS SensorTests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    sensor_id    INTEGER NOT NULL REFERENCES Sensors(id) ON DELETE CASCADE,
+    func_name    TEXT    NOT NULL,
+    display_name TEXT    NOT NULL DEFAULT '',
+    description  TEXT    NOT NULL DEFAULT '',
+    image_path   TEXT    NOT NULL DEFAULT '',
+    UNIQUE(sensor_id, func_name)
+);
+"""
+
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DATABASE)
@@ -110,18 +136,31 @@ def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
+        conn.executescript(_SCHEMA_TEST_META)
         _migrate(conn)
 
 
 def _migrate(conn) -> None:
+    """One-time migration: drop old SensorTests that used sensor_type as PK."""
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='SensorTests'"
     ).fetchone()
     if row and "sensor_type" in (row[0] or ""):
         conn.execute("DROP TABLE SensorTests")
+        conn.executescript(_SCHEMA_TEST_META)
 
-    # Ensure SensorTypeTests exists (idempotent)
-    conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
+
+def init_test_meta_table() -> None:
+    """Extend schema with SensorTests table. Safe to call multiple times."""
+    with _connect() as conn:
+        conn.executescript(_SCHEMA_TEST_META)
+
+
+def init_sensor_type_tests_table() -> None:
+    """Create SensorTypeTests table. Safe to call multiple times."""
+    with _connect() as conn:
+        conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
 
 
 # ── Sensors ───────────────────────────────────────────────────────────────────
@@ -354,41 +393,7 @@ def get_sensors() -> list[tuple]:
     return [(r["id"], r["sensor_name"], r["sensor_type"], r["sdf_path"]) for r in rows]
 
 
-# ── Test metadata ─────────────────────────────────────────────────────────────
-# Stores display name, description and image for each test function.
-# func_name  = the Python function name from core.get_tests()
-# display_name = what's shown in the UI (defaults to func_name)
-
-_SCHEMA_SENSOR_TYPE_TESTS = """
-CREATE TABLE IF NOT EXISTS SensorTypeTests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    sensor_type  TEXT    NOT NULL,
-    func_name    TEXT    NOT NULL,
-    display_name TEXT    NOT NULL DEFAULT '',
-    description  TEXT    NOT NULL DEFAULT '',
-    image_path   TEXT    NOT NULL DEFAULT '',
-    UNIQUE(sensor_type, func_name)
-);
-"""
-
-_SCHEMA_TEST_META = """
-CREATE TABLE IF NOT EXISTS SensorTests (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    sensor_id    INTEGER NOT NULL REFERENCES Sensors(id) ON DELETE CASCADE,
-    func_name    TEXT    NOT NULL,
-    display_name TEXT    NOT NULL DEFAULT '',
-    description  TEXT    NOT NULL DEFAULT '',
-    image_path   TEXT    NOT NULL DEFAULT '',
-    UNIQUE(sensor_id, func_name)
-);
-"""
-
-
-def init_test_meta_table() -> None:
-    """Extend schema with SensorTests table. Safe to call multiple times."""
-    with _connect() as conn:
-        conn.executescript(_SCHEMA_TEST_META)
-
+# ── Test metadata (SensorTypeTests) ──────────────────────────────────────────
 
 def get_test_meta(sensor_id: str) -> list[dict]:
     """Return test display metadata for a sensor, sourced from SensorTypeTests."""
@@ -434,11 +439,6 @@ def save_test_meta(sensor_id: str, func_name: str, display_name: str,
             (sensor_row["sensor_type"], func_name, display_name, description, image_path),
         )
 
-def init_sensor_type_tests_table() -> None:
-    """Create SensorTypeTests table. Safe to call multiple times."""
-    with _connect() as conn:
-        conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
-
 
 def get_type_tests(sensor_type: str) -> list[dict]:
     """Return canonical test definitions for a sensor type."""
@@ -475,8 +475,21 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
         )
 
 
+def delete_type_test(sensor_type: str, func_name: str) -> None:
+    """Remove a canonical test from SensorTypeTests.
+
+    Called by Core._sync_tests() when a @register_test class has been deleted.
+    Does NOT touch TestResults — historical run data is preserved.
+    """
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM SensorTypeTests WHERE sensor_type = ? AND func_name = ?",
+            (sensor_type, func_name),
+        )
+
+
 def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
-    """Copy SensorTests entries for sensor_type into SensorTests for sensor_id.
+    """Copy SensorTypeTests entries for sensor_type into SensorTests for sensor_id.
     Only inserts rows that don't already exist — never overwrites existing meta."""
     type_tests = get_type_tests(sensor_type)
     with _connect() as conn:
