@@ -83,7 +83,6 @@ class Main_UI(QMainWindow):
         self.col_1.sensor_selected.connect(self._on_sensor_selected)
         self.col_1.add_requested.connect(self._on_add_sensor)
         self.col_1.delete_requested.connect(self._on_delete_sensor)
-        self.col_2.sensor_updated.connect(self._on_sensor_edited)
 
 
         self.col_3._runner_log_forward = self.col_4.append_log
@@ -127,8 +126,12 @@ class Main_UI(QMainWindow):
         if sensor:
             self.col_1.refresh_sensor(sensor)
 
+    def set_core(self, core) -> None:
+        self._core = core
+
     def _on_add_sensor(self):
-        dlg = AddSensorDialog(parent=self)
+        core = getattr(self, '_core', None)
+        dlg = AddSensorDialog(parent=self, core=core)
         dlg.sensor_saved.connect(self._on_sensor_saved)
         dlg.exec_()
 

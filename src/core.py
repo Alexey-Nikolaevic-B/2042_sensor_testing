@@ -1,7 +1,8 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .gazebo_simulator import Simulator
 from .sensors import REGISTRY, Sensor
+from .sensors.detector import detect_sensor_type as _detect
 
 from config import CONFIG
 
@@ -9,6 +10,10 @@ from config import CONFIG
 class Core:
     def __init__(self) -> None:
         self.simulator = Simulator(CONFIG)
+        self._load_builtin_detectors()
+
+    def _load_builtin_detectors(self) -> None:
+        from .sensors import rfid_detector
 
     def get_sensor_types(self) -> List[str]:
         return sorted(REGISTRY.keys())
@@ -20,6 +25,9 @@ class Core:
             for attr in dir(sensor)
             if attr.endswith("_test") and callable(getattr(sensor, attr))
         }
+
+    def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
+        return _detect(sdf_path)
 
     def save_sensor_params(self, sensor_id: str, params: dict, repo) -> None:
         sensor_data = repo.get_sensor(sensor_id)

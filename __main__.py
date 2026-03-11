@@ -21,6 +21,7 @@ if __name__ == "__main__":
     queue_manager = QueueManager(runner)
     window        = Main_UI()
 
+    window.set_core(core)
     window.test_page._runner_log_forward = window.col_4.append_log
     window.test_page.set_runner(queue_manager, repo)
     window.show()

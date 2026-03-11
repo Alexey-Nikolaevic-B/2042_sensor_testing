@@ -19,12 +19,14 @@ class AddSensorDialog(QDialog):
 
     sensor_saved = pyqtSignal(dict)
 
-    def __init__(self, parent=None, sensor_data: dict | None = None):
+    def __init__(self, parent=None, sensor_data: dict | None = None, core=None):
         """
         Pass sensor_data to open in edit mode (fields pre-filled).
         Pass None  to open in add mode (empty fields).
+        Pass core  to enable SDF type auto-detection.
         """
         super().__init__(parent)
+        self._core = core
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(680, 520)
@@ -51,7 +53,6 @@ class AddSensorDialog(QDialog):
         self.btn_save.setText("Save changes")
 
         self.input_name.setText(d.get("name", ""))
-        self.input_description.setPlainText(d.get("description", ""))
 
         img = d.get("image_path", "")
         if img and os.path.exists(img):
@@ -102,15 +103,28 @@ class AddSensorDialog(QDialog):
         self._on_sdf_selected(path)
 
     def _on_sdf_selected(self, path: str):
-        # TODO:
-        #   result = core.validate_sdf(path)
-        #   if not result["valid"]:
-        #       self._set_detected_type(None)
-        #       return
-        #   self._set_detected_type(result["type"])
-        #   self._populate_params(result["params"])
-        self._set_detected_type("rfid")
-        self._populate_params({})
+        if self._core is None:
+            self._set_detected_type("unknown")
+            self._populate_params({})
+            return
+
+        sensor_type = self._core.detect_sensor_type(path)
+
+        if sensor_type is None:
+            self._set_detected_type("unknown")
+            self._populate_params({})
+            return
+
+        self._set_detected_type(sensor_type)
+
+        try:
+            from src.sensors import REGISTRY
+            SensorClass = REGISTRY.get(sensor_type)
+            if SensorClass:
+                params = SensorClass(path).get_params()
+                self._populate_params(params)
+        except Exception:
+            self._populate_params({})
 
     def _set_detected_type(self, sensor_type: str | None):
         self._detected_type = sensor_type
@@ -172,13 +186,15 @@ class AddSensorDialog(QDialog):
         if not self._sdf_source:
             self._flash_error(self.sdf_label)
             return
+        if self._detected_type == "unknown":
+            self._flash_error(self.lbl_detected_type)
+            return
         
 
         asset_dir = os.path.join(ASSETS_DIR, name)
         os.makedirs(asset_dir, exist_ok=True)
 
-        sdf_filename = os.path.basename(self._sdf_source)
-        sdf_dest = os.path.join(asset_dir, sdf_filename)
+        sdf_dest = os.path.join(asset_dir, "model.sdf")
         if os.path.abspath(self._sdf_source) != os.path.abspath(sdf_dest):
             shutil.copy2(self._sdf_source, sdf_dest)
 
@@ -198,7 +214,7 @@ class AddSensorDialog(QDialog):
             "type":        self._detected_type or "unknown",
             "sdf_path":    sdf_dest,
             "image_path":  image_dest,
-            "description": self.input_description.toPlainText().strip(),
+            "description": self._sensor_data.get("description", ""),
             "params":      dict(self._params),
         }
         if self._sensor_id:
@@ -224,6 +240,11 @@ class AddSensorDialog(QDialog):
     def _setup_styles(self):
         C = Colors
         self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {C.BG_CARD};
+                border: 1px solid {C.BORDER_LIGHT};
+                border-radius: 6px;
+            }}
             QWidget#dialog_titlebar {{
                 background-color: {C.BG_TOOLBAR};
                 border-bottom: 1px solid {C.BORDER};
@@ -239,8 +260,8 @@ class AddSensorDialog(QDialog):
             QPushButton#btn_dialog_close:hover {{ background-color: {C.BG_CARD_HOVER}; }}
             QLabel#lbl_section_image, QLabel#lbl_section_name,
             QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
-            QLabel#lbl_section_params, QLabel#lbl_section_description {{
-                color: {C.TEXT_MUTED};
+            QLabel#lbl_section_params {{
+                color: {C.TEXT_SECONDARY};
                 font-size: 11px;
                 font-weight: bold;
                 background: transparent;
@@ -254,35 +275,31 @@ class AddSensorDialog(QDialog):
                 color: {C.TEXT_MUTED}; font-size: 12px; background: transparent;
             }}
             QLabel#sdf_label {{
-                color: {C.TEXT_MUTED}; font-size: 12px;
+                color: {C.TEXT_SECONDARY}; font-size: 12px;
             }}
             QLineEdit#input_name, QLineEdit#field_input {{
+                background-color: {C.BG_INPUT};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_BLACK};
+                color: {C.TEXT_PRIMARY};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
             QLineEdit#input_name:focus, QLineEdit#field_input:focus {{
                 border-color: {C.ACCENT};
             }}
-            QPlainTextEdit#input_description {{
-                background: transparent;
-                border: 1px solid {C.BORDER_LIGHT};
+            QScrollArea#params_scroll {{
+                background-color: {C.BG_COLUMN};
+                border: 1px solid {C.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_BLACK};
-                padding: 6px 10px;
-                font-size: 12px;
             }}
-            QPlainTextEdit#input_description:focus {{
-                border-color: {C.ACCENT};
-            }}
+            QWidget#params_contents {{ background-color: {C.BG_COLUMN}; }}
             QFrame#param_row {{
                 background-color: transparent;
                 border-bottom: 1px solid {C.BORDER};
             }}
             QLabel#param_key {{
-                color: {C.TEXT_MUTED}; font-size: 12px; background: transparent;
+                color: {C.TEXT_SECONDARY}; font-size: 12px; background: transparent;
             }}
             QLabel#params_placeholder {{
                 color: {C.TEXT_MUTED}; font-size: 11px;
@@ -293,7 +310,7 @@ class AddSensorDialog(QDialog):
                 border-top: 1px solid {C.BORDER};
             }}
             QPushButton#btn_browse_sdf {{
-                background-color: {C.TEXT_SECONDARY};
+                background-color: {C.BG_CARD};
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
                 color: {C.TEXT_PRIMARY};
@@ -305,7 +322,7 @@ class AddSensorDialog(QDialog):
                 background-color: transparent;
                 border: 1px solid {C.BORDER_LIGHT};
                 border-radius: 4px;
-                color: {C.TEXT_MUTED};
+                color: {C.TEXT_SECONDARY};
                 font-size: 13px;
                 padding: 0 16px;
             }}
@@ -319,13 +336,9 @@ class AddSensorDialog(QDialog):
                 font-weight: bold;
                 padding: 0 20px;
             }}
-            QPushButton#btn_save:hover {{ background-color: white; }}
+            QPushButton#btn_save:hover {{ background-color: #1e3d50; }}
             QPushButton#btn_save:pressed {{ background-color: {C.BG_APP}; }}
-            QScrollArea#params_scroll QLineEdit#field_input {{
-                background-color: #f5f5f5;
-                border: 1px solid #cccccc;
-                color: #111111;
-            }}
+            {Styles.SCROLLBAR}
         """)
         self.btn_dialog_close.setIcon(Icons.CLOSE())
         self.btn_dialog_close.setIconSize(Layout.ICON_SIZE_SM)
