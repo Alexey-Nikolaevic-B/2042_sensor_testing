@@ -54,6 +54,7 @@ class Simulator():
         self.gazebo_is_running = False
         self.ros_process       = None
         self.gazebo_process    = None
+        self.on_log            = None   # set by __main__: col_4.append_log
 
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
@@ -183,11 +184,6 @@ class Simulator():
                 logger.error('open_scene: wait_gazebo_quiet timed out')
                 return False
 
-            logger.info('open_scene: wait_for_service get_world_properties')
-            rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
-            logger.info('open_scene: wait_for_service set_model_state')
-            rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
-
             self.gazebo_is_running = True
 
             if self.is_gazebo_running():
@@ -224,15 +220,18 @@ class Simulator():
     def _process_output_line(self, line, stream_type):
         line_lower = line.lower()
         if line.startswith('bash:') or 'command not found' in line_lower:
+            level = 'warning'
             logger.warning(f"[Gazebo/bash] {line}")
         elif any(word in line_lower for word in ['error', 'exception', 'fail', 'cannot', 'invalid']):
+            level = 'error'
             logger.error(f"[Gazebo] {line}")
         elif 'warning' in line_lower:
+            level = 'warning'
             logger.warning(f"[Gazebo] {line}")
         else:
-            if any(keyword in line_lower for keyword in ['start', 'complete', 'ready', 'initializ']):
-                # logger.info(f"[Gazebo] {line}")
-                pass
+            level = 'info'
+        if self.on_log:
+            self.on_log(level, f"[Gazebo] {line}")
 
 
     def _generate_world(self, world_path, camera_model_path):

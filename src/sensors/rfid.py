@@ -8,38 +8,30 @@ from .sensor import Sensor, register_sensor
 from geometry_msgs.msg import PoseStamped, Quaternion, Vector3
 
 
-@register_sensor("rfid", "rfid_antenna")
+@register_sensor("rfid")
 class Rfid(Sensor):
     """Во всех тестах предполагаем, что антенна находится в начале координат!"""
     DETECTED_TOPIC = "/detected_tags"
     DEFAULT_READ_DISTANCE = 3
 
     """"Rfid антенна"""
-    def __init__(self, CONFIG, sensor_sdf_path : Optional[str] = None):
+    def __init__(self, sdf_path: str):
         super().__init__()
+        from config import CONFIG
+        self.sensor_sdf_path = sdf_path
+        self.rfid_map_path   = CONFIG['RFID_MAP_PATH']
+        self.read_distance   = self.read_distance_from_sdf(sdf_path)
 
-        WORLDS_PATH = CONFIG["WORLDS_PATH"]
-        SENSORS_PATH = CONFIG["SENSORS_PATH"]
-
-        self.sensor_sdf_path = sensor_sdf_path if sensor_sdf_path else f'{SENSORS_PATH}{self.sensor_type}/{self.sensor_name}.sdf'
-
+        WORLDS_PATH = CONFIG['WORLDS_PATH']
         self.test_to_world = {
             'max_stable_read_distance_test': f'{WORLDS_PATH}rfid/change_distance.world',
             'min_stable_read_distance_test': f'{WORLDS_PATH}rfid/change_distance.world',
-            'mass_read_test': f'{WORLDS_PATH}rfid/mass_read.world',
-            'overlap_tags_test': f'{WORLDS_PATH}rfid/overlap_tags.world',
-            'angle_dependence_test': f'{WORLDS_PATH}rfid/angle_dependence.world',
-            'move_tags_test': f'{WORLDS_PATH}rfid/move_tags.world',
-            'antenna_rotation_test': f'{WORLDS_PATH}rfid/antenna_rotation.world',
+            'mass_read_test':                f'{WORLDS_PATH}rfid/mass_read.world',
+            'overlap_tags_test':             f'{WORLDS_PATH}rfid/overlap_tags.world',
+            'angle_dependence_test':         f'{WORLDS_PATH}rfid/angle_dependence.world',
+            'move_tags_test':                f'{WORLDS_PATH}rfid/move_tags.world',
+            'antenna_rotation_test':         f'{WORLDS_PATH}rfid/antenna_rotation.world',
         }
-
-        self.rfid_map_path = CONFIG['RFID_MAP_PATH']
-
-        if sensor_sdf_path is None:
-            # если не передан явно путь к sdf, то мы записываем дефолтное значение дальности считывания
-            self.set_read_distance(self.DEFAULT_READ_DISTANCE)
-        else:
-            self.read_distance = self.read_distance_from_sdf(self.sensor_sdf_path)
 
 
     @staticmethod
@@ -74,12 +66,21 @@ class Rfid(Sensor):
         return {"read_distance": self.read_distance}
 
 
-    def set_params(self, **params) -> None:
+    def save_params_to_sdf(self, sdf_path: str, params: dict) -> None:
+        """Write params into the SDF file at sdf_path."""
         if "read_distance" in params:
             read_distance = int(params["read_distance"])
             if read_distance <= 0:
                 raise ValueError("read_distance must be > 0")
-            self.set_read_distance(read_distance)
+            self.read_distance = read_distance
+            import re
+            with open(sdf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            content, n = re.subn(r"<rzero>.*?</rzero>", f"<rzero>{read_distance}</rzero>", content, count=1, flags=re.S)
+            if n == 0:
+                raise RuntimeError(f"rzero not found in {sdf_path}")
+            with open(sdf_path, "w", encoding="utf-8") as f:
+                f.write(content)
 
 
     def capture_data(

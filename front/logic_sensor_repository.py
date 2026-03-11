@@ -145,17 +145,13 @@ class SensorRepository(QObject):
     def _seed_test_meta(self, sensor: "Sensor") -> None:
         try:
             from src.sensors import REGISTRY
-            from config import CONFIG
             from src.test_utils import load_test_functions
 
-            SensorClass = next(
-                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor.sensor_type),
-                None
-            )
+            SensorClass = REGISTRY.get(sensor.sensor_type)
             if SensorClass is None:
                 return
 
-            instance = SensorClass(CONFIG)
+            instance = SensorClass(sensor.sdf_path)
             funcs = load_test_functions(instance)
             existing = {r["func_name"] for r in db.get_test_meta(sensor.id)}
             for func_name in funcs:
@@ -168,20 +164,16 @@ class SensorRepository(QObject):
         # TODO: replace mock param with real get_params() once backend is stable
         try:
             from src.sensors import REGISTRY
-            from config import CONFIG
 
-            SensorClass = next(
-                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor.sensor_type),
-                None
-            )
+            SensorClass = REGISTRY.get(sensor.sensor_type)
             if SensorClass is None:
-                params = {"TODO": "get parameters from sensor"}
+                params = {}
             else:
                 try:
-                    instance = SensorClass(CONFIG)
+                    instance = SensorClass(sensor.sdf_path)
                     params = instance.get_params()
                 except Exception:
-                    params = {"TODO": "get parameters from sensor"}
+                    params = {}
         except Exception:
             params = {"TODO": "get parameters from sensor"}
 
@@ -268,10 +260,19 @@ class SensorRepository(QObject):
         s = self._sensors.get(sensor_id)
         if s is None:
             return
-        sensor_type = s.sensor_type
-        for sensor in self._sensors.values():
-            if sensor.sensor_type == sensor_type:
-                sensor.update_test(func_name, {
+
+        db.upsert_type_test(s.sensor_type, func_name, display_name, description, image_path)
+        db.propagate_type_test_to_sensors(s.sensor_type, func_name, display_name, description, image_path)
+
+        s.update_test(func_name, {
+            "display_name": display_name,
+            "description":  description,
+            "image_path":   image_path,
+        })
+
+        for sibling in self._sensors.values():
+            if sibling.id != sensor_id and sibling.sensor_type == s.sensor_type:
+                sibling.update_test(func_name, {
                     "display_name": display_name,
                     "description":  description,
                     "image_path":   image_path,

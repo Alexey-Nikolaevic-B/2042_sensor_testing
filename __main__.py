@@ -38,6 +38,7 @@ if __name__ == "__main__":
         else:
             window.col_4.append_log("error", "simulator", "ROS node failed to initialise.")
 
+    core.simulator.on_log = on_sim_log
     core.simulator.start_async(
         on_ready = on_sim_ready,
         on_log   = on_sim_log,

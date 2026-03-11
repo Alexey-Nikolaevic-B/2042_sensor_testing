@@ -51,7 +51,7 @@ class ColTests(QWidget):
         fresh = SensorRepository.instance().get_sensor(sensor_data["id"]) or sensor_data
         self._sensor_data = fresh
         self._sensor_id   = str(fresh["id"])
-        self._backend     = self._make_backend(fresh)   # may be None; errors logged
+        self._backend     = self._make_backend(fresh)
         self._selected    = None
         self._reset_detail_panel()
         self._populate_tests(fresh.get("tests", []))
@@ -95,22 +95,17 @@ class ColTests(QWidget):
         except Exception as exc:
             self._log("error", f"_on_item_result error: {exc}")
 
-
     def _on_item_run(self, func_name: str):
         if not self._qm:
             return
-
         if not self._backend:
             self._log("error", f"Cannot run '{func_name}': sensor backend failed to load. Check sensor type/SDF.")
             return
-
         tests = self._qm.get_tests(self._backend)
         func  = tests.get(func_name)
-
         if func is None:
             self._log("error", f"Cannot run '{func_name}': test function not found. Available: {list(tests.keys())}")
             return
-
         self._qm.enqueue(self._sensor_id, func_name, self._backend, func)
 
     def _on_item_stop(self, func_name: str):
@@ -120,11 +115,9 @@ class ColTests(QWidget):
     def _on_run_all(self):
         if not self._qm:
             return
-
         if not self._backend:
             self._log("error", "Cannot run tests: sensor backend failed to load. Check sensor type/SDF.")
             return
-
         tests = self._qm.get_tests(self._backend)
         queued = 0
         skip_statuses = (TestStatus.QUEUED, TestStatus.RUNNING)
@@ -133,7 +126,6 @@ class ColTests(QWidget):
             if w and w.test_status not in skip_statuses:
                 self._qm.enqueue(self._sensor_id, func_name, self._backend, func)
                 queued += 1
-
         if queued == 0:
             self._log("info", "All tests are already queued or running.")
 
@@ -148,7 +140,6 @@ class ColTests(QWidget):
             self.lbl_test_description.setText(w.test_description)
             self._load_test_image(w._image_path)
 
-
     def _on_edit_tests(self):
         if not self._sensor_data:
             return
@@ -159,7 +150,7 @@ class ColTests(QWidget):
             traceback.print_exc()
 
     def _open_edit_tests_dialog(self):
-        from .ui_edit_tests_dialog import EditTestsDialog
+        from .dialog_edit_tests import EditTestsDialog
         from .logic_sensor_repository import SensorRepository
 
         repo        = SensorRepository.instance()
@@ -214,33 +205,28 @@ class ColTests(QWidget):
             self.lbl_test_description.setText(w.test_description)
             self._load_test_image(w._image_path)
 
-
     def _sync_run_all_button(self):
-        pass  # btn_run_all is always enabled — clicking re-queues any idle tests
+        pass  # btn_run_all is always enabled
 
     def _make_backend(self, sensor_data: dict):
         try:
             from src.sensors import REGISTRY
-            from config import CONFIG
 
             sensor_type = sensor_data.get("type")
-            SensorClass = next(
-                (cls for (stype, _), cls in REGISTRY.items() if stype == sensor_type),
-                None,
-            )
+            SensorClass = REGISTRY.get(sensor_type)
             if SensorClass is None:
                 self._log("error",
                     f"No sensor class registered for type={sensor_type!r}. "
-                    f"Known types: {sorted({k[0] for k in REGISTRY})}"
+                    f"Known types: {sorted(REGISTRY)}"
                 )
                 return None
 
-            sdf = sensor_data.get("sdf_path") or None
-            try:
-                return SensorClass(CONFIG, sensor_sdf_path=sdf)
-            except TypeError:
-                return SensorClass(CONFIG)
+            sdf = sensor_data.get("sdf_path") or ""
+            return SensorClass(sdf)
 
+        except FileNotFoundError as exc:
+            self._log("error", f"SDF file not found: {exc}")
+            return None
         except Exception as exc:
             import traceback
             self._log("error", f"Backend init failed: {exc}\n{traceback.format_exc()}")

@@ -1,6 +1,6 @@
 from .sensor import Sensor, register_sensor, make_sensor, REGISTRY
 
-from . import rfid, mono_camera, depth_camera
+from . import rfid
 
 __all__ = [
     'rfid',

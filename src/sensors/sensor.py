@@ -1,54 +1,37 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Type, Optional, Tuple, Any
+from typing import Dict, Type, Optional, Any
 
 
 class Sensor(ABC):
-    sensor_name: str
     sensor_type: str
-    sensor_sdf_path: str
-    test_to_world: Dict[str, str]
-
+    sdf_path:    str
 
     @abstractmethod
-    def capture_data(self, simulator, world_path : Optional[str] = None, **kwargs) -> Optional[Dict[str, Any]]:
-        """
-        Сделать одно измерение датчика
-        Если вызывается внутри теста - world_path = None
-        Если из ui - нужно передать корректный world_path
-        """
+    def get_params(self) -> Dict[str, Any]:
+        """Return current sensor parameters as a dict."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_params_to_sdf(self, sdf_path: str, params: dict) -> None:
+        """Write params into the SDF file at sdf_path."""
         raise NotImplementedError
 
 
-    @abstractmethod
-    def set_params(self, **params) -> None:
-        """Принять новые параметры"""
-        raise NotImplementedError
+# Registry key is sensor_type only
+REGISTRY: Dict[str, Type["Sensor"]] = {}
 
 
-    @abstractmethod
-    def get_params(self) -> None:
-        """Вернуть текущие параметры"""
-        raise NotImplementedError
-
-
-REGISTRY: Dict[Tuple[str, str], Type[Sensor]] = {}
-
-
-def register_sensor(sensor_type: str, sensor_name: str):
-    """Декоратор для добавления датчика в фабрику"""
-    def deco(SensorType: Type[Sensor]) -> Type[Sensor]:
-        key = (sensor_type, sensor_name)
-        REGISTRY[key] = SensorType
-
-        SensorType.sensor_type = sensor_type
-        SensorType.sensor_name = sensor_name
-
-        return SensorType
+def register_sensor(sensor_type: str):
+    """Decorator to register a sensor class by type."""
+    def deco(SensorClass: Type[Sensor]) -> Type[Sensor]:
+        SensorClass.sensor_type = sensor_type
+        REGISTRY[sensor_type] = SensorClass
+        return SensorClass
     return deco
 
 
-def make_sensor(sensor_type: str, sensor_name: str, CONFIG) -> Optional[Sensor]:
-    SensorType = REGISTRY.get((sensor_type, sensor_name))
-    if SensorType == None:
+def make_sensor(sensor_type: str, sdf_path: str) -> Optional[Sensor]:
+    SensorClass = REGISTRY.get(sensor_type)
+    if SensorClass is None:
         return None
-    return SensorType(CONFIG)
+    return SensorClass(sdf_path)
