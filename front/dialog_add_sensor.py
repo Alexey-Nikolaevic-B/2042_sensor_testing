@@ -224,7 +224,7 @@ class AddSensorDialog(QDialog):
         image_dest = self._sensor_data.get("image_path", "")
         if self._image_source:
             ext = os.path.splitext(self._image_source)[1].lower() or ".png"
-            image_dest = os.path.join(asset_dir, f"image{ext}")
+            image_dest = os.path.abspath(os.path.join(asset_dir, f"image{ext}"))
             if os.path.abspath(self._image_source) != os.path.abspath(image_dest):
                 px = QPixmap(self._image_source)
                 if not px.isNull():
