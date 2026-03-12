@@ -118,11 +118,14 @@ class AddSensorDialog(QDialog):
         self._set_detected_type(sensor_type)
 
         try:
-            from src.sensors import REGISTRY
-            SensorClass = REGISTRY.get(sensor_type)
-            if SensorClass:
-                params = SensorClass(path).get_params()
-                self._populate_params(params)
+            from src.sensors.sensor import Sensor as SensorModel
+            instance = SensorModel(
+                sensor_type = sensor_type,
+                sensor_name = "",
+                sdf_path    = path,
+            )
+            params = self._core.read_sensor_params(instance)
+            self._populate_params(params)
         except Exception:
             self._populate_params({})
 

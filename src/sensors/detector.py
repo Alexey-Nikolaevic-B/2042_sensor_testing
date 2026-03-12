@@ -1,26 +1,42 @@
-from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Type
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-class SensorDetector(ABC):
-    sensor_type: str
-    priority:    int = 0
+# ── Custom detector functions ─────────────────────────────────────────────────
+#
+# A detector is a plain function:
+#
+#     def my_detector(sdf_content: str) -> bool:
+#         return "my_plugin.so" in sdf_content
+#
+# Add it to the CUSTOM_DETECTORS dict below and it will appear in the
+# "Add Sensor Type" dialog under Custom detector.
+#
+# When selected, the detector name is stored in the DB and called automatically
+# every time an SDF file is loaded to identify the sensor type.
+#
+# Example:
+#
+# def rfid_detector(sdf_content: str) -> bool:
+#     return "libRFID_antenna_plugin.so" in sdf_content
+#
+# CUSTOM_DETECTORS = {
+#     "rfid_detector": rfid_detector,
+# }
 
-    @abstractmethod
-    def detect(self, sdf_content: str) -> bool:
-        raise NotImplementedError
+CUSTOM_DETECTORS: dict[str, callable] = {
+    # "my_detector": my_detector_fn,
+}
 
 
-DETECTOR_REGISTRY: Dict[str, SensorDetector] = {}
+# ── Runtime detectors (sensor_type → fn) ─────────────────────────────────────
+#
+# Populated automatically from DB at detection time. You don't need to touch
+# this unless you want to hard-code a detector outside the DB.
 
-
-def register_detector(cls: Type[SensorDetector]) -> Type[SensorDetector]:
-    instance = cls()
-    DETECTOR_REGISTRY[cls.sensor_type] = instance
-    return cls
+DETECTORS: dict[str, callable] = {}
 
 
 def detect_sensor_type(sdf_path: str) -> Optional[str]:
@@ -28,26 +44,43 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
         with open(sdf_path, "r", encoding="utf-8") as f:
             content = f.read()
     except OSError as e:
-        logger.error(f"detect_sensor_type: cannot read {sdf_path!r}: {e}")
+        logger.error("detect_sensor_type: cannot read %r: %s", sdf_path, e)
         return None
 
-    detectors = sorted(
-        DETECTOR_REGISTRY.values(),
-        key=lambda d: d.priority,
-        reverse=True,
-    )
+    for sensor_type, detect_fn in DETECTORS.items():
+        try:
+            if detect_fn(content):
+                return sensor_type
+        except Exception as e:
+            logger.error("detector %r raised: %s", sensor_type, e)
 
-    matches = [d for d in detectors if d.detect(content)]
+    return _detect_from_db(content)
 
-    if not matches:
-        return None
 
-    if len(matches) > 1:
-        names = [d.sensor_type for d in matches]
-        logger.warning(
-            f"SDF matched multiple sensor types: {names}. "
-            f"Using {matches[0].sensor_type!r} (highest priority). "
-            "Detection may be incomplete."
-        )
+def _detect_from_db(content: str) -> Optional[str]:
+    try:
+        import src.database.sensor_storage as db
+        for type_def in db.get_all_sensor_types():
+            detection = type_def.get("detection", {})
+            mode = detection.get("mode", "simple")
+            if mode == "simple":
+                plugin = detection.get("plugin", "")
+                if plugin and plugin in content:
+                    return type_def["sensor_type"]
+            elif mode == "custom":
+                fn_name = detection.get("detector_fn", "")
+                fn = CUSTOM_DETECTORS.get(fn_name)
+                if fn:
+                    try:
+                        if fn(content):
+                            return type_def["sensor_type"]
+                    except Exception as e:
+                        logger.error("custom detector %r raised: %s", fn_name, e)
+    except Exception as e:
+        logger.error("_detect_from_db failed: %s", e)
+    return None
 
-    return matches[0].sensor_type
+
+def get_custom_detector_names() -> list[str]:
+    """Return sorted list of names available for selection in the UI."""
+    return sorted(CUSTOM_DETECTORS.keys())

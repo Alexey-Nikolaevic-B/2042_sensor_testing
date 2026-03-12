@@ -9,6 +9,92 @@ from PyQt5 import uic
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR
 
 
+# ── Sensor type cell ──────────────────────────────────────────────────────────
+
+class SensorTypeCell(QFrame):
+    clicked        = pyqtSignal(str)   # sensor_type
+    delete_clicked = pyqtSignal(str)   # sensor_type
+
+    def __init__(self, sensor_type: str, builtin: bool = False, parent=None):
+        super().__init__(parent)
+        self._type     = sensor_type
+        self._builtin  = builtin   # builtin types cannot be deleted
+        self._selected    = False
+        self._delete_mode = False
+        self.setFixedHeight(32)
+        self.setCursor(Qt.PointingHandCursor)
+        self._build()
+        self._apply_style(False)
+
+    def _build(self):
+        h = QHBoxLayout(self)
+        h.setContentsMargins(10, 0, 4, 0)
+        h.setSpacing(6)
+
+        self._dot = QFrame()
+        self._dot.setFixedSize(6, 6)
+        self._dot.setStyleSheet(
+            f"background-color: {Colors.ACCENT}; border-radius: 3px; border: none;"
+        )
+        h.addWidget(self._dot)
+
+        self._lbl = QLabel(self._type)
+        self._lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        h.addWidget(self._lbl)
+
+        self._btn_trash = QPushButton()
+        self._btn_trash.setFixedSize(22, 22)
+        self._btn_trash.setIcon(QIcon(f"{ICON_DIR}/clear.png"))
+        self._btn_trash.setIconSize(Layout.ICON_SIZE_SM)
+        self._btn_trash.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none; border-radius: 3px;
+            }}
+            QPushButton:hover {{ background-color: rgba(239,68,68,0.20); }}
+            QPushButton:pressed {{ background-color: rgba(239,68,68,0.40); }}
+        """)
+        self._btn_trash.setVisible(False)
+        self._btn_trash.clicked.connect(lambda: self.delete_clicked.emit(self._type))
+        h.addWidget(self._btn_trash)
+
+    def set_delete_mode(self, active: bool):
+        self._delete_mode = active
+        # Builtins cannot be deleted
+        self._btn_trash.setVisible(active and not self._builtin)
+
+    def set_selected(self, selected: bool):
+        self._apply_style(selected)
+
+    def _apply_style(self, selected: bool):
+        self._selected = selected
+        bg = Colors.ACCENT_DIM if selected else "transparent"
+        self.setStyleSheet(f"""
+            SensorTypeCell {{
+                background-color: {bg};
+                border-bottom: 1px solid {Colors.DIVIDER};
+            }}
+            SensorTypeCell:hover {{
+                background-color: {Colors.BG_CARD_HOVER if not selected else Colors.ACCENT_DIM};
+            }}
+        """)
+        self._lbl.setStyleSheet(
+            f"color: {Colors.ACCENT if selected else Colors.TEXT_SECONDARY};"
+            f" font-size: 11px; font-weight: {'600' if selected else 'normal'};"
+            f" background: transparent;"
+        )
+        self._dot.setStyleSheet(
+            f"background-color: {Colors.ACCENT if selected else Colors.TEXT_MUTED};"
+            f" border-radius: 3px; border: none;"
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self._type)
+        super().mousePressEvent(event)
+
+
+# ── Sensor instance cell (unchanged logic, kept here) ─────────────────────────
+
 class SensorCell(QFrame):
     clicked        = pyqtSignal(str)
     delete_clicked = pyqtSignal(str)
@@ -22,8 +108,8 @@ class SensorCell(QFrame):
 
     def __init__(self, sensor_data: dict, parent=None):
         super().__init__(parent)
-        self._data     = sensor_data
-        self._selected = False
+        self._data        = sensor_data
+        self._selected    = False
         self._delete_mode = False
         self.setFixedHeight(Layout.SENSOR_CELL_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
@@ -50,16 +136,10 @@ class SensorCell(QFrame):
         self._btn_trash.setIconSize(Layout.ICON_SIZE_SM)
         self._btn_trash.setStyleSheet(f"""
             QPushButton {{
-                background: transparent;
-                border: none;
-                border-radius: 4px;
+                background: transparent; border: none; border-radius: 4px;
             }}
-            QPushButton:hover {{
-                background-color: rgba(239, 68, 68, 0.20);
-            }}
-            QPushButton:pressed {{
-                background-color: rgba(239, 68, 68, 0.40);
-            }}
+            QPushButton:hover {{ background-color: rgba(239,68,68,0.20); }}
+            QPushButton:pressed {{ background-color: rgba(239,68,68,0.40); }}
         """)
         self._btn_trash.setVisible(False)
         self._btn_trash.clicked.connect(lambda: self.delete_clicked.emit(self._data["id"]))
@@ -105,9 +185,7 @@ class SensorCell(QFrame):
                 background-color: {bg};
                 border-bottom: 1px solid {Colors.DIVIDER};
             }}
-            SensorCell:hover {{
-                background-color: {Colors.BG_CARD_HOVER};
-            }}
+            SensorCell:hover {{ background-color: {Colors.BG_CARD_HOVER}; }}
         """)
         self._lbl.setStyleSheet(
             f"color: {Colors.TEXT_WHITE if selected else Colors.TEXT_PRIMARY};"
@@ -120,30 +198,60 @@ class SensorCell(QFrame):
         super().mousePressEvent(event)
 
 
+# ── ColSensors ────────────────────────────────────────────────────────────────
+
 class ColSensors(QWidget):
-    sensor_selected  = pyqtSignal(str)
-    add_requested    = pyqtSignal()
-    delete_requested = pyqtSignal(str)   # sensor_id
+    sensor_selected       = pyqtSignal(str)
+    add_requested         = pyqtSignal()
+    delete_requested      = pyqtSignal(str)    # sensor_id
+    add_type_requested    = pyqtSignal()
+    delete_type_requested = pyqtSignal(str)    # sensor_type
+
+    # Sensor types that ship with the app — cannot be deleted from the UI
+    BUILTIN_TYPES: set = set()   # empty — all types are user-managed
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_1.ui", self)
 
-        self._cells:          dict[str, SensorCell] = {}
-        self._selected_id:    str | None = None
-        self._current_filter: str | None = None
-        self._all_sensors:    list[dict] = []
-        self._delete_mode:    bool       = False
+        self._cells:            dict[str, SensorCell]     = {}
+        self._type_cells:       dict[str, SensorTypeCell] = {}
+        self._selected_id:      str | None = None
+        self._selected_type:    str | None = None
+        self._current_filter:   str | None = None
+        self._all_sensors:      list[dict] = []
+        self._delete_mode:      bool = False
+        self._delete_type_mode: bool = False
 
         self._setup_styles()
         self._setup_filter_menu()
         self._connect_signals()
 
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def load_sensors(self, sensors: list[dict], types: list[str]):
         self._all_sensors = sensors
         self._rebuild_filter_menu(types)
         self._rebuild_cells(sensors)
+
+    def load_types(self, types: list[str]):
+        """Populate the sensor-type list at the top of the column."""
+        layout = self.scroll_types_contents.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._type_cells.clear()
+
+        for t in sorted(types):
+            cell = SensorTypeCell(t, builtin=(t in self.BUILTIN_TYPES), parent=self)
+            cell.set_delete_mode(self._delete_type_mode)
+            cell.clicked.connect(self._on_type_clicked)
+            cell.delete_clicked.connect(self.delete_type_requested)
+            layout.addWidget(cell)
+            self._type_cells[t] = cell
+
+        layout.addStretch(1)
 
     def refresh_sensor(self, sensor_data: dict):
         cell = self._cells.get(sensor_data["id"])
@@ -164,20 +272,72 @@ class ColSensors(QWidget):
         if self._selected_id == sensor_id:
             self._selected_id = None
 
+    # ── Private ───────────────────────────────────────────────────────────────
+
+    def _open_add_type_dialog(self):
+        from .dialog_add_sensor_type import AddSensorTypeDialog
+        try:
+            from src.tests import TESTS
+            existing_tests = sorted(TESTS.keys())
+        except Exception:
+            existing_tests = []
+        dlg = AddSensorTypeDialog(existing_tests=existing_tests, mode="add", parent=self)
+        dlg.type_saved.connect(self._on_type_saved)
+        dlg.exec_()
+
+    def _on_type_saved(self, definition: dict):
+        """Reload type list from DB so display always matches persisted state."""
+        try:
+            import src.database.sensor_storage as db
+            self.load_types(db.get_sensor_type_names())
+        except Exception as exc:
+            import traceback
+            print(f"[ColSensors] _on_type_saved error: {exc}\n{traceback.format_exc()}")
+
+    def _on_type_clicked(self, sensor_type: str):
+        if self._delete_type_mode:
+            return
+        # Deselect previous
+        if self._selected_type and self._selected_type in self._type_cells:
+            self._type_cells[self._selected_type].set_selected(False)
+        # Toggle off if same
+        if self._selected_type == sensor_type:
+            self._selected_type = None
+            self._current_filter = None
+            self.wt_filter_badge.setVisible(False)
+            self._apply_search()
+            return
+        self._selected_type = sensor_type
+        self._type_cells[sensor_type].set_selected(True)
+        self._apply_filter(sensor_type)
 
     def _toggle_delete_mode(self, active: bool):
         self._delete_mode = active
         for cell in self._cells.values():
             cell.set_delete_mode(active)
-        checked_style = (
+        checked = (
             Styles.BUTTON_ICON +
             f"QPushButton {{ background-color: {Colors.ACCENT_DIM}; border-radius: 4px; }}"
         )
-        self.btn_delete.setStyleSheet(checked_style if active else Styles.BUTTON_ICON)
+        self.btn_delete.setStyleSheet(checked if active else Styles.BUTTON_ICON)
+
+    def _toggle_delete_type_mode(self, active: bool):
+        self._delete_type_mode = active
+        for cell in self._type_cells.values():
+            cell.set_delete_mode(active)
+        checked = (
+            Styles.BUTTON_ICON +
+            f"QPushButton {{ background-color: {Colors.ACCENT_DIM}; border-radius: 4px; }}"
+        )
+        self.btn_delete_type.setStyleSheet(checked if active else Styles.BUTTON_ICON)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
             QWidget {{ background-color: {Colors.BG_COLUMN}; }}
+            QWidget#wt_types_toolbar {{
+                background-color: {Colors.BG_TOOLBAR};
+                border-bottom: 1px solid {Colors.BORDER};
+            }}
             QWidget#wt_toolbar {{
                 background-color: {Colors.BG_TOOLBAR};
                 border-bottom: 1px solid {Colors.BORDER};
@@ -186,35 +346,45 @@ class ColSensors(QWidget):
                 background-color: {Colors.BG_TOOLBAR};
                 border-bottom: 1px solid {Colors.BORDER};
             }}
+            QFrame#divider_line {{ background-color: {Colors.BORDER}; border: none; }}
             QScrollArea {{ border: none; background-color: {Colors.BG_CARD}; }}
             QWidget#scroll_sensors_contents {{ background-color: {Colors.BG_CARD}; }}
+            QWidget#scroll_types_contents   {{ background-color: {Colors.BG_COLUMN}; }}
             {Styles.SCROLLBAR}
         """)
-        self.input_search.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {Colors.BG_INPUT};
-                border: 1px solid {Colors.BORDER};
-                border-radius: 4px;
-                color: {Colors.TEXT_PRIMARY};
-                padding: 3px 8px;
-                font-size: 12px;
-            }}
-            QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}
-        """)
+        for inp, placeholder in [
+            (self.input_search,       "Search sensors..."),
+            (self.input_types_search, "Search types..."),
+        ]:
+            inp.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {Colors.BG_INPUT};
+                    border: 1px solid {Colors.BORDER};
+                    border-radius: 4px;
+                    color: {Colors.TEXT_PRIMARY};
+                    padding: 2px 6px;
+                    font-size: 11px;
+                }}
+                QLineEdit:focus {{ border-color: {Colors.ACCENT}; }}
+            """)
+
         self.lbl_filter_active.setStyleSheet(
             f"background-color: transparent; color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
         )
         self.lbl_filter_value.setStyleSheet(
             f"background-color: transparent; color: {Colors.ACCENT}; font-size: 11px; font-weight: bold;"
         )
+
         for btn, icon in [
             (self.btn_filter,       Icons.FILTER()),
             (self.btn_add,          Icons.ADD()),
             (self.btn_delete,       Icons.CLEAR()),
             (self.btn_clear_filter, Icons.CLOSE()),
+            (self.btn_add_type,     Icons.ADD()),
+            (self.btn_delete_type,  Icons.CLEAR()),
         ]:
             btn.setIcon(icon)
-            btn.setIconSize(Layout.ICON_SIZE_MD)
+            btn.setIconSize(Layout.ICON_SIZE_SM)
             btn.setStyleSheet(Styles.BUTTON_ICON)
 
     def _setup_filter_menu(self):
@@ -241,9 +411,12 @@ class ColSensors(QWidget):
 
     def _connect_signals(self):
         self.input_search.textChanged.connect(self._apply_search)
+        self.input_types_search.textChanged.connect(self._apply_type_search)
         self.btn_clear_filter.clicked.connect(self._remove_filter)
         self.btn_add.clicked.connect(self.add_requested)
         self.btn_delete.toggled.connect(self._toggle_delete_mode)
+        self.btn_add_type.clicked.connect(self._open_add_type_dialog)
+        self.btn_delete_type.toggled.connect(self._toggle_delete_type_mode)
 
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()
@@ -280,6 +453,10 @@ class ColSensors(QWidget):
     def _remove_filter(self):
         self._current_filter = None
         self.wt_filter_badge.setVisible(False)
+        # Also deselect the type cell
+        if self._selected_type and self._selected_type in self._type_cells:
+            self._type_cells[self._selected_type].set_selected(False)
+        self._selected_type = None
         self._apply_search()
 
     def _apply_search(self):
@@ -292,3 +469,8 @@ class ColSensors(QWidget):
                 or data.get("type", "").lower() == self._current_filter.lower()
             )
             cell.setVisible(name_match and type_match)
+
+    def _apply_type_search(self):
+        text = self.input_types_search.text().lower()
+        for sensor_type, cell in self._type_cells.items():
+            cell.setVisible(text in sensor_type.lower())

@@ -1,3 +1,1 @@
-from . import rfid
-
-from .sensor_test import TEST_REGISTRY, get_tests_for_sensor
+from .tests import TESTS, get_test, get_tests_for_type

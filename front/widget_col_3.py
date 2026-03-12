@@ -210,20 +210,14 @@ class ColTests(QWidget):
 
     def _make_backend(self, sensor_data: dict):
         try:
-            from src.sensors import REGISTRY
-
-            sensor_type = sensor_data.get("type")
-            SensorClass = REGISTRY.get(sensor_type)
-            if SensorClass is None:
-                self._log("error",
-                    f"No sensor class registered for type={sensor_type!r}. "
-                    f"Known types: {sorted(REGISTRY)}"
-                )
-                return None
-
-            sdf = sensor_data.get("sdf_path") or ""
-            return SensorClass(sdf)
-
+            from src.sensors.sensor import Sensor as SensorModel
+            return SensorModel(
+                sensor_type = sensor_data.get("type", ""),
+                sensor_name = sensor_data.get("name", ""),
+                sdf_path    = sensor_data.get("sdf_path", ""),
+                topic       = sensor_data.get("topic", ""),
+                params      = sensor_data.get("params", {}),
+            )
         except FileNotFoundError as exc:
             self._log("error", f"SDF file not found: {exc}")
             return None

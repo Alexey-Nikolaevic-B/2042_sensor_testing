@@ -9,6 +9,80 @@
    <property name="topMargin"><number>0</number></property>
    <property name="rightMargin"><number>0</number></property>
    <property name="bottomMargin"><number>0</number></property>
+
+   <!-- ── Sensor Types toolbar ───────────────────────────────────────────── -->
+   <item>
+    <widget class="QWidget" name="wt_types_toolbar">
+     <property name="minimumHeight"><number>36</number></property>
+     <property name="maximumHeight"><number>36</number></property>
+     <layout class="QHBoxLayout" name="types_toolbar_layout">
+      <property name="spacing"><number>4</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>3</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>3</number></property>
+      <item>
+       <widget class="QLineEdit" name="input_types_search">
+        <property name="placeholderText"><string>Search types...</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_add_type">
+        <property name="text"><string/></property>
+        <property name="toolTip"><string>Add new sensor type</string></property>
+        <property name="minimumWidth"><number>28</number></property>
+        <property name="maximumWidth"><number>28</number></property>
+        <property name="minimumHeight"><number>28</number></property>
+        <property name="maximumHeight"><number>28</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_delete_type">
+        <property name="text"><string/></property>
+        <property name="toolTip"><string>Delete sensor type</string></property>
+        <property name="checkable"><bool>true</bool></property>
+        <property name="minimumWidth"><number>28</number></property>
+        <property name="maximumWidth"><number>28</number></property>
+        <property name="minimumHeight"><number>28</number></property>
+        <property name="maximumHeight"><number>28</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- ── Sensor Types list (fixed height, compact) ─────────────────────── -->
+   <item>
+    <widget class="QScrollArea" name="scroll_types">
+     <property name="minimumHeight"><number>80</number></property>
+     <property name="maximumHeight"><number>140</number></property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+     <property name="verticalScrollBarPolicy"><enum>Qt::ScrollBarAsNeeded</enum></property>
+     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+     <widget class="QWidget" name="scroll_types_contents">
+      <layout class="QVBoxLayout" name="types_list_layout">
+       <property name="spacing"><number>0</number></property>
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+
+   <!-- ── Divider ────────────────────────────────────────────────────────── -->
+   <item>
+    <widget class="QFrame" name="divider_line">
+     <property name="minimumHeight"><number>1</number></property>
+     <property name="maximumHeight"><number>1</number></property>
+     <property name="frameShape"><enum>QFrame::HLine</enum></property>
+     <property name="frameShadow"><enum>QFrame::Plain</enum></property>
+    </widget>
+   </item>
+
+   <!-- ── Sensors toolbar (existing) ────────────────────────────────────── -->
    <item>
     <widget class="QWidget" name="wt_toolbar">
      <property name="minimumHeight"><number>44</number></property>
@@ -58,6 +132,8 @@
      </layout>
     </widget>
    </item>
+
+   <!-- ── Filter badge (existing) ───────────────────────────────────────── -->
    <item>
     <widget class="QWidget" name="wt_filter_badge">
      <property name="visible"><bool>false</bool></property>
@@ -97,6 +173,8 @@
      </layout>
     </widget>
    </item>
+
+   <!-- ── Sensors scroll list (existing) ────────────────────────────────── -->
    <item>
     <widget class="QScrollArea" name="scroll_sensors">
      <property name="widgetResizable"><bool>true</bool></property>
@@ -114,6 +192,7 @@
      </widget>
     </widget>
    </item>
+
   </layout>
  </widget>
  <resources/>

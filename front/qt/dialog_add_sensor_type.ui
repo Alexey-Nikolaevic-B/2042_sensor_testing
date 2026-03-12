@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>AddSensorTypeDialog</class>
+ <widget class="QDialog" name="AddSensorTypeDialog">
+  <property name="windowTitle"><string>Add Sensor Type</string></property>
+  <property name="minimumWidth"><number>920</number></property>
+  <property name="minimumHeight"><number>680</number></property>
+  <!-- frameless is set in Python via Qt.FramelessWindowHint -->
+
+  <layout class="QVBoxLayout" name="layout_root">
+   <property name="spacing"><number>0</number></property>
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+
+   <!-- ═══ CUSTOM TITLE BAR ═══ -->
+   <item>
+    <widget class="QWidget" name="title_bar">
+     <property name="minimumHeight"><number>44</number></property>
+     <property name="maximumHeight"><number>44</number></property>
+     <layout class="QHBoxLayout" name="layout_title">
+      <property name="leftMargin"><number>16</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>8</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+      <property name="spacing"><number>8</number></property>
+      <item>
+       <widget class="QLabel" name="lbl_title">
+        <property name="text"><string>Add Sensor Type</string></property>
+       </widget>
+      </item>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_close">
+        <property name="text"><string></string></property>
+        <property name="fixedWidth"><number>32</number></property>
+        <property name="fixedHeight"><number>32</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- ═══ BODY ═══ -->
+   <item stretch="1">
+    <layout class="QHBoxLayout" name="layout_body">
+     <property name="spacing"><number>0</number></property>
+     <property name="leftMargin"><number>0</number></property>
+     <property name="topMargin"><number>0</number></property>
+     <property name="rightMargin"><number>0</number></property>
+     <property name="bottomMargin"><number>0</number></property>
+
+     <!-- ════════════════════════════════════════
+          LEFT PANEL — name / desc / params / detection
+          ════════════════════════════════════════ -->
+     <item>
+      <widget class="QWidget" name="panel_left">
+       <property name="minimumWidth"><number>400</number></property>
+       <layout class="QVBoxLayout" name="layout_left">
+        <property name="spacing"><number>6</number></property>
+        <property name="leftMargin"><number>24</number></property>
+        <property name="topMargin"><number>16</number></property>
+        <property name="rightMargin"><number>20</number></property>
+        <property name="bottomMargin"><number>20</number></property>
+
+        <!-- NAME -->
+        <item>
+         <widget class="QLabel" name="lbl_name_section">
+          <property name="text"><string>SENSOR TYPE NAME</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="inp_name">
+          <property name="placeholderText"><string>e.g. stereo_camera</string></property>
+         </widget>
+        </item>
+
+        <item><widget class="QLabel" name="lbl_gap1"><property name="text"><string/></property><property name="maximumHeight"><number>4</number></property></widget></item>
+
+        <!-- DESCRIPTION -->
+        <item>
+         <widget class="QLabel" name="lbl_desc_section">
+          <property name="text"><string>DESCRIPTION</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QTextEdit" name="inp_desc">
+          <property name="placeholderText"><string>What this sensor does, where it is used…</string></property>
+          <property name="maximumHeight"><number>144</number></property>
+         </widget>
+        </item>
+
+        <item><widget class="QFrame" name="line_1"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
+
+        <!-- PARAMETERS — scroll expands to fill space -->
+        <item>
+         <widget class="QLabel" name="lbl_params_section">
+          <property name="text"><string>PARAMETERS</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="lbl_params_hint">
+          <property name="text"><string>Each name is used as the XML tag to read the value from the SDF, e.g. &lt;width&gt;.</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+
+        <item>
+         <widget class="QPushButton" name="btn_add_param">
+          <property name="text"><string>+ Add parameter</string></property>
+         </widget>
+        </item>
+
+        <!-- stretch=1 makes this scroll grow to fill leftover space -->
+        <item stretch="1">
+         <widget class="QScrollArea" name="scroll_params">
+          <property name="widgetResizable"><bool>true</bool></property>
+          <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+          <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+          <property name="minimumHeight"><number>36</number></property>
+          <widget class="QWidget" name="scroll_params_contents">
+           <layout class="QVBoxLayout" name="layout_params">
+            <property name="spacing"><number>3</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+
+        <item><widget class="QFrame" name="line_2"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
+
+        <!-- DETECTION -->
+        <item>
+         <widget class="QLabel" name="lbl_detect_section">
+          <property name="text"><string>DETECTION</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="lbl_detect_hint">
+          <property name="text"><string>How should the app identify an SDF file as this sensor type?</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+
+        <!-- Segmented toggle -->
+        <item>
+         <layout class="QHBoxLayout" name="layout_detect_toggle">
+          <property name="spacing"><number>0</number></property>
+          <item>
+           <widget class="QPushButton" name="btn_mode_simple">
+            <property name="text"><string>Simple — plugin filename</string></property>
+            <property name="checkable"><bool>true</bool></property>
+            <property name="checked"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="btn_mode_custom">
+            <property name="text"><string>Custom detector .py</string></property>
+            <property name="checkable"><bool>true</bool></property>
+            <property name="checked"><bool>false</bool></property>
+           </widget>
+          </item>
+          <item>
+           <spacer><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property></spacer>
+          </item>
+         </layout>
+        </item>
+
+        <!-- Simple mode -->
+        <item>
+         <widget class="QWidget" name="widget_simple">
+          <layout class="QVBoxLayout" name="layout_simple">
+           <property name="spacing"><number>4</number></property>
+           <property name="leftMargin"><number>0</number></property>
+           <property name="topMargin"><number>4</number></property>
+           <property name="rightMargin"><number>0</number></property>
+           <property name="bottomMargin"><number>0</number></property>
+           <item><widget class="QLabel" name="lbl_plugin_hint"><property name="text"><string>Plugin .so filename from the SDF &lt;plugin&gt; tag:</string></property></widget></item>
+           <item><widget class="QLineEdit" name="inp_plugin"><property name="placeholderText"><string>e.g. libgazebo_ros_camera.so</string></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+
+        <!-- Custom mode (hidden by default) -->
+        <item>
+         <widget class="QWidget" name="widget_custom">
+          <property name="visible"><bool>false</bool></property>
+          <layout class="QVBoxLayout" name="layout_custom">
+           <property name="spacing"><number>6</number></property>
+           <property name="leftMargin"><number>0</number></property>
+           <property name="topMargin"><number>4</number></property>
+           <property name="rightMargin"><number>0</number></property>
+           <property name="bottomMargin"><number>0</number></property>
+           <item>
+            <widget class="QLabel" name="lbl_custom_hint">
+             <property name="text"><string>Select a detector function from the list. To add a new one, add it to CUSTOM_DETECTORS in detector.py and restart.</string></property>
+             <property name="wordWrap"><bool>true</bool></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="lbl_detector_file">
+             <property name="text"><string>src/sensors/detector.py</string></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLineEdit" name="inp_detector_search">
+             <property name="placeholderText"><string>Search detectors…</string></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QListWidget" name="list_existing_detectors">
+             <property name="maximumHeight"><number>120</number></property>
+             <property name="selectionMode"><enum>QAbstractItemView::SingleSelection</enum></property>
+            </widget>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="layout_detector_actions">
+             <property name="spacing"><number>8</number></property>
+             <item><widget class="QPushButton" name="btn_add_selected_detector"><property name="text"><string>Use selected</string></property></widget></item>
+             <item><spacer><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property></spacer></item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QLabel" name="lbl_selected_detector">
+             <property name="text"><string>None selected</string></property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+
+       </layout>
+      </widget>
+     </item>
+
+     <!-- Vertical separator -->
+     <item>
+      <widget class="QFrame" name="sep_vertical">
+       <property name="frameShape"><enum>QFrame::VLine</enum></property>
+       <property name="frameShadow"><enum>QFrame::Plain</enum></property>
+      </widget>
+     </item>
+
+     <!-- ════════════════════════════════════════
+          RIGHT PANEL — tests with world assignment
+          ════════════════════════════════════════ -->
+     <item>
+      <widget class="QWidget" name="panel_right">
+       <property name="minimumWidth"><number>400</number></property>
+       <layout class="QVBoxLayout" name="layout_right">
+        <property name="spacing"><number>6</number></property>
+        <property name="leftMargin"><number>20</number></property>
+        <property name="topMargin"><number>16</number></property>
+        <property name="rightMargin"><number>24</number></property>
+        <property name="bottomMargin"><number>20</number></property>
+
+        <!-- TESTS heading -->
+        <item>
+         <widget class="QLabel" name="lbl_tests_section">
+          <property name="text"><string>TESTS</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="lbl_tests_hint">
+          <property name="text"><string>Select from registered tests and add them to this sensor type.</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+
+        <!-- Tests file hint -->
+        <item>
+         <widget class="QLabel" name="lbl_tests_file">
+          <property name="text"><string>src/tests/tests.py</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+
+        <!-- Search + list of existing tests -->
+        <item>
+         <widget class="QLineEdit" name="inp_test_search">
+          <property name="placeholderText"><string>Search registered tests…</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QListWidget" name="list_existing_tests">
+          <property name="maximumHeight"><number>240</number></property>
+          <property name="selectionMode"><enum>QAbstractItemView::MultiSelection</enum></property>
+         </widget>
+        </item>
+
+        <!-- Actions row -->
+        <item>
+         <layout class="QHBoxLayout" name="layout_test_actions">
+          <property name="spacing"><number>8</number></property>
+          <item><widget class="QPushButton" name="btn_add_selected_tests"><property name="text"><string>Add selected</string></property></widget></item>
+          <item><spacer><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property></spacer></item>
+         </layout>
+        </item>
+
+        <item><widget class="QFrame" name="line_3"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
+
+        <!-- Added tests label -->
+        <item>
+         <widget class="QLabel" name="lbl_added_tests">
+          <property name="text"><string>Added tests:</string></property>
+         </widget>
+        </item>
+
+        <!-- stretch=1 makes this grow to fill available space -->
+        <item stretch="1">
+         <widget class="QScrollArea" name="scroll_tests">
+          <property name="widgetResizable"><bool>true</bool></property>
+          <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+          <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+          <property name="minimumHeight"><number>80</number></property>
+          <widget class="QWidget" name="scroll_tests_contents">
+           <layout class="QVBoxLayout" name="layout_tests">
+            <property name="spacing"><number>4</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+           </layout>
+          </widget>
+         </widget>
+        </item>
+
+       </layout>
+      </widget>
+     </item>
+
+    </layout>
+   </item>
+
+   <!-- ═══ FOOTER ═══ -->
+   <item>
+    <widget class="QWidget" name="panel_footer">
+     <property name="minimumHeight"><number>52</number></property>
+     <property name="maximumHeight"><number>52</number></property>
+     <layout class="QHBoxLayout" name="layout_footer">
+      <property name="leftMargin"><number>20</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>20</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+      <property name="spacing"><number>10</number></property>
+      <item>
+       <widget class="QLabel" name="lbl_status">
+        <property name="text"><string/></property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item><spacer><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>1</width><height>1</height></size></property></spacer></item>
+      <item>
+       <widget class="QPushButton" name="btn_cancel">
+        <property name="text"><string>Cancel</string></property>
+        <property name="minimumWidth"><number>90</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_save">
+        <property name="text"><string>Save</string></property>
+        <property name="minimumWidth"><number>90</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
