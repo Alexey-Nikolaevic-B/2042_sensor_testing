@@ -7,9 +7,9 @@ import time
 
 import xml.etree.ElementTree as ET
 
-from gazebo_msgs.srv import SetModelState, GetWorldProperties
+from gazebo_msgs.srv import SetModelState, GetWorldProperties, ApplyBodyWrench
 from sensor_msgs.msg import Image
-from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist
+from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist, Wrench
 from gazebo_msgs.msg import ModelState, ModelStates
 
 import logging
@@ -259,6 +259,43 @@ class Simulator():
         response = set_state(state)
         if not response.success:
             raise RuntimeError(response.status_message)
+
+
+    def apply_body_wrench(
+        self,
+        body_name: str,
+        force_x: float = 0.0,
+        force_y: float = 0.0,
+        force_z: float = 0.0,
+        duration_sec: float = 1.0,
+        reference_frame: str = "",
+        reference_point: Point = None,
+    ) -> None:
+        """Приложить силу к телу (body_name в формате model_name::link_name)."""
+        try:
+            apply_wrench = rospy.ServiceProxy("/gazebo/apply_body_wrench", ApplyBodyWrench)
+        except rospy.ServiceException as e:
+            raise RuntimeError(f"apply_body_wrench service not available: {e}")
+        ref_point = reference_point if reference_point is not None else Point(0, 0, 0)
+        wrench = Wrench()
+        wrench.force.x = force_x
+        wrench.force.y = force_y
+        wrench.force.z = force_z
+        wrench.torque.x = 0.0
+        wrench.torque.y = 0.0
+        wrench.torque.z = 0.0
+        start_time = rospy.Time(0)
+        duration = rospy.Duration(duration_sec)
+        resp = apply_wrench(
+            body_name=body_name,
+            reference_frame=reference_frame,
+            reference_point=ref_point,
+            wrench=wrench,
+            start_time=start_time,
+            duration=duration,
+        )
+        if not resp.success:
+            raise RuntimeError(resp.status_message)
 
 
     def kill_gazebo(self) -> None:

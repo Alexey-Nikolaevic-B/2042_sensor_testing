@@ -12,7 +12,6 @@ from geometry_msgs.msg import PoseStamped, Quaternion, Vector3
 class Rfid(Sensor):
     """Во всех тестах предполагаем, что антенна находится в начале координат!"""
     DETECTED_TOPIC = "/detected_tags"
-    DEFAULT_READ_DISTANCE = 3
 
     """"Rfid антенна"""
     def __init__(self, CONFIG, sensor_sdf_path : Optional[str] = None):
@@ -35,11 +34,7 @@ class Rfid(Sensor):
 
         self.rfid_map_path = CONFIG['RFID_MAP_PATH']
 
-        if sensor_sdf_path is None:
-            # если не передан явно путь к sdf, то мы записываем дефолтное значение дальности считывания
-            self.set_read_distance(self.DEFAULT_READ_DISTANCE)
-        else:
-            self.read_distance = self.read_distance_from_sdf(self.sensor_sdf_path)
+        self.read_distance = self.read_distance_from_sdf(self.sensor_sdf_path)
 
 
     @staticmethod
