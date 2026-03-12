@@ -144,6 +144,13 @@ def _migrate(conn) -> None:
     if "topics" not in cols:
         conn.execute("ALTER TABLE Sensors ADD COLUMN topics TEXT DEFAULT '[]'")
 
+    # Rename TestResults.func_name -> test_name if DB was created with old schema
+    tr_cols = {r[1] for r in conn.execute("PRAGMA table_info(TestResults)").fetchall()}
+    if tr_cols and "func_name" in tr_cols and "test_name" not in tr_cols:
+        conn.executescript("""
+            ALTER TABLE TestResults RENAME COLUMN func_name TO test_name;
+        """)
+
 
 # ── Sensors ───────────────────────────────────────────────────────────────────
 
