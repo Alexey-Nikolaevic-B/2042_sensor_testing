@@ -14,17 +14,19 @@ class Core:
     def get_sensor_types(self) -> List[str]:
         return sorted(REGISTRY.keys())
 
-    def get_tests(self, sensor: Sensor) -> Dict[str, Any]:
-        return {
-            attr: getattr(sensor, attr)
-            for attr in dir(sensor)
-            if attr.endswith("_test") and callable(getattr(sensor, attr))
-        }
+    def get_tests(self, sensor) -> Dict[str, Any]:
+        """Return {func_name: callable} for all tests registered for this sensor's type."""
+        from src.tests.tests import get_tests_for_type
+        sensor_type = getattr(sensor, "sensor_type", None)
+        if not sensor_type:
+            return {}
+        return get_tests_for_type(sensor_type)
 
     def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
         return _detect(sdf_path)
 
     def read_sensor_params(self, sensor) -> dict:
+        """Read param values from SDF using tag names stored in the sensor type DB definition."""
         import re
         import src.database.sensor_storage as db
 

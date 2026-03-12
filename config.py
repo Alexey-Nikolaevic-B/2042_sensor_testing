@@ -6,6 +6,7 @@ from pathlib import Path
 
 class Config:
     EXPECTED_TYPES = {
+        'OBSERVER_SDF_PATH': str,
         'BASE_WORLD_PATH': str,
         'CATKIN_SETUP_DIR': str,
         'SENSOR_PKG': str,
@@ -45,6 +46,7 @@ class Config:
 
     def _get_hardcoded_defaults(self) -> Dict[str, Any]:
         return {
+            'OBSERVER_SDF_PATH': 'resources/observer_camera.sdf', 
             'BASE_WORLD_PATH': 'catkin_ws/scenario_test_pkg/worlds/base_world.world',
             'CATKIN_SETUP_DIR': 'catkin_ws/devel/setup.bash',
             'SENSOR_PKG': 'scenario_test_pkg',

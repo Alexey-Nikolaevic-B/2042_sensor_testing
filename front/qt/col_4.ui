@@ -10,8 +10,60 @@
    <property name="rightMargin"><number>0</number></property>
    <property name="bottomMargin"><number>0</number></property>
 
+   <!-- Capture image panel -->
+   <item>
+    <widget class="QLabel" name="lbl_capture_image">
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="text"><string>no capture data</string></property>
+     <property name="minimumHeight"><number>220</number></property>
+     <property name="maximumHeight"><number>220</number></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
 
-   <!-- QPlainTextEdit: built for logs — fast, scrollable, selectable -->
+   <!-- Capture view toolbar: sensor data / observer toggle -->
+   <item>
+    <widget class="QWidget" name="wt_toolbar_capture">
+     <layout class="QHBoxLayout" name="toolbar_capture_layout">
+      <property name="spacing"><number>4</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>4</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>4</number></property>
+      <item>
+       <spacer>
+        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+       </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_view_sensor">
+        <property name="text"><string></string></property>
+        <property name="toolTip"><string>Show sensor data</string></property>
+        <property name="checkable"><bool>true</bool></property>
+        <property name="checked"><bool>true</bool></property>
+        <property name="minimumWidth"><number>32</number></property>
+        <property name="maximumWidth"><number>32</number></property>
+        <property name="minimumHeight"><number>32</number></property>
+        <property name="maximumHeight"><number>32</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_view_observer">
+        <property name="text"><string></string></property>
+        <property name="toolTip"><string>Show observer camera</string></property>
+        <property name="checkable"><bool>true</bool></property>
+        <property name="minimumWidth"><number>32</number></property>
+        <property name="maximumWidth"><number>32</number></property>
+        <property name="minimumHeight"><number>32</number></property>
+        <property name="maximumHeight"><number>32</number></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- Log -->
    <item>
     <widget class="QPlainTextEdit" name="log_view">
      <property name="readOnly"><bool>true</bool></property>
@@ -20,6 +72,7 @@
     </widget>
    </item>
 
+   <!-- Log toolbar -->
    <item>
     <widget class="QWidget" name="wt_toolbar_bottom">
      <layout class="QHBoxLayout" name="toolbar_bottom_layout">

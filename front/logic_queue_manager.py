@@ -16,13 +16,14 @@ class TestStatus(str, Enum):
 
 
 class _Entry:
-    __slots__ = ("sensor_id", "func_name", "backend", "func")
+    __slots__ = ("sensor_id", "func_name", "backend", "func", "sensor")
 
-    def __init__(self, sensor_id, func_name, backend, func):
+    def __init__(self, sensor_id, func_name, backend, func, sensor=None):
         self.sensor_id = str(sensor_id)
         self.func_name = func_name
         self.backend   = backend
         self.func      = func
+        self.sensor    = sensor
 
     def matches(self, sensor_id, func_name) -> bool:
         return self.sensor_id == str(sensor_id) and self.func_name == func_name
@@ -38,9 +39,6 @@ class QueueManager(QObject):
     item_result           = pyqtSignal(str, str, dict)
     log_line              = pyqtSignal(str)
 
-    _AMBIENT_INTERVAL_MS = 1500
-    _AMBIENT_CAP         = 90
-
     def __init__(self, runner, parent=None):
         super().__init__(parent)
         self._runner   = runner
@@ -50,22 +48,18 @@ class QueueManager(QObject):
         self._progress = 0
         self._stop_requested = False  # True after cancel() on running test
 
-        self._ambient = QTimer(self)
-        self._ambient.setInterval(self._AMBIENT_INTERVAL_MS)
-        self._ambient.timeout.connect(self._on_ambient_tick)
-
         runner.test_finished.connect(self._on_runner_finished)
         runner.test_progress.connect(self._on_runner_progress)
         runner.all_finished.connect(self._on_all_finished)
         runner.log_line.connect(self.log_line)
 
 
-    def enqueue(self, sensor_id, func_name, backend, func):
+    def enqueue(self, sensor_id, func_name, backend, func, sensor=None):
         sensor_id = str(sensor_id)
         with self._lock:
             if self._is_active(sensor_id, func_name):
                 return
-            self._queue.append(_Entry(sensor_id, func_name, backend, func))
+            self._queue.append(_Entry(sensor_id, func_name, backend, func, sensor=sensor))
         self.log_line.emit(f"{func_name}  added to queue")
         self.item_state_changed.emit(sensor_id, func_name, TestStatus.QUEUED)
         self._try_advance()
@@ -151,22 +145,12 @@ class QueueManager(QObject):
 
         self._progress = 0
         self.item_state_changed.emit(entry.sensor_id, entry.func_name, TestStatus.RUNNING)
-        self._ambient.start()
 
         self.log_line.emit(
             f"[QueueManager] starting {entry.func_name} for sensor {entry.sensor_id}"
         )
-        self._runner.run_one(entry.backend, entry.func_name, entry.func)
+        self._runner.run_one(entry.backend, entry.func_name, entry.func, sensor=entry.sensor)
 
-    def _on_ambient_tick(self):
-        with self._lock:
-            running = self._running
-        if running is None:
-            self._ambient.stop()
-            return
-        if self._progress < self._AMBIENT_CAP:
-            self._progress += 1
-            self.item_progress_changed.emit(running.sensor_id, running.func_name, self._progress)
 
     def _on_runner_progress(self, func_name: str, value: int):
         with self._lock:
@@ -176,8 +160,6 @@ class QueueManager(QObject):
             self.item_progress_changed.emit(running.sensor_id, func_name, value)
 
     def _on_runner_finished(self, func_name: str, result: dict, status_str: str, duration: float):
-        self._ambient.stop()
-
         with self._lock:
             entry = self._running
 

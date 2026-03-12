@@ -13,15 +13,17 @@ class _Worker(QObject):
 
     log_line      = pyqtSignal(str)
     test_finished = pyqtSignal(str, dict, str, float)
+    test_progress = pyqtSignal(str, int)   # func_name, 0-100
     all_finished  = pyqtSignal()
     error         = pyqtSignal(str, str)
 
-    def __init__(self, core, backend, func_name: str, func):
+    def __init__(self, core, backend, func_name: str, func, sensor=None):
         super().__init__()
         self._core           = core
         self._backend        = backend
         self._func_name      = func_name
         self._func           = func
+        self._sensor         = sensor
         self._stop_requested = False
         self._thread_id: int | None = None
 
@@ -55,12 +57,20 @@ class _Worker(QObject):
         self.log_line.emit(f"{func_name}")
 
         def progress_cb(value: int):
+            print(f"[DEBUG runner] progress_cb: func={func_name} value={value}")
+            self.test_progress.emit(func_name, value)
             if self._stop_requested:
                 raise StopIteration
 
+        # Reset step gate for each test run
+        self._core.simulator.advance_step()
+
         t0 = time.time()
         try:
-            result = self._func(self._core.simulator, progress_cb=progress_cb)
+            if self._sensor is not None:
+                result = self._func(self._core.simulator, self._sensor, progress_cb=progress_cb)
+            else:
+                result = self._func(self._core.simulator, progress_cb=progress_cb)
             duration = time.time() - t0
 
             if result is None:
@@ -115,16 +125,18 @@ class TestRunner(QObject):
         self._thread = QThread(self)
         self._thread.start()
 
-    def run_one(self, backend, func_name: str, func):
+    def run_one(self, backend, func_name: str, func, sensor=None):
         worker = _Worker(
             core      = self._core,
             backend   = backend,
             func_name = func_name,
             func      = func,
+            sensor    = sensor,
         )
         worker.moveToThread(self._thread)
 
         worker.log_line.connect(self.log_line)
+        worker.test_progress.connect(self.test_progress)   # ← forward progress
         worker.test_finished.connect(self.test_finished)
         worker.all_finished.connect(self.all_finished)
         worker.error.connect(self.error)

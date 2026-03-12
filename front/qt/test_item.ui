@@ -50,6 +50,28 @@
     </layout>
    </item>
    <item>
+    <widget class="QPushButton" name="btn_lock">
+     <property name="text"><string/></property>
+     <property name="toolTip"><string>Run step by step</string></property>
+     <property name="checkable"><bool>true</bool></property>
+     <property name="minimumWidth"><number>32</number></property>
+     <property name="maximumWidth"><number>32</number></property>
+     <property name="minimumHeight"><number>32</number></property>
+     <property name="maximumHeight"><number>32</number></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPushButton" name="btn_step">
+     <property name="text"><string/></property>
+     <property name="toolTip"><string>Advance one step</string></property>
+     <property name="visible"><bool>false</bool></property>
+     <property name="minimumWidth"><number>32</number></property>
+     <property name="maximumWidth"><number>32</number></property>
+     <property name="minimumHeight"><number>32</number></property>
+     <property name="maximumHeight"><number>32</number></property>
+    </widget>
+   </item>
+   <item>
     <widget class="QPushButton" name="btn_run_stop">
      <property name="text"><string/></property>
      <property name="minimumWidth"><number>32</number></property>

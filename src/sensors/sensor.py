@@ -88,11 +88,13 @@ class Sensor:
         self.params.update(params)
 
     def capture_data(self, msg_type, topic: str = "", window: float = 2.0,
-                     timeout: float = 0.25) -> dict:
+                     timeout: float = 0.25,
+                     simulator=None) -> dict:
         """
         Read messages from a ROS topic for `window` seconds.
         Uses `topic` if given, otherwise falls back to self.topic (first in list).
         Returns {frame_id: pose} for each message received.
+        After capture: fires simulator.notify_capture and respects step-mode.
         """
         import rospy
         t = topic or self.topic
@@ -104,6 +106,27 @@ class Sensor:
                 results[msg.header.frame_id] = msg.pose
             except Exception:
                 continue
+
+        # Notify UI with captured data + observer frame
+        print(f"[DEBUG sensor] capture_data done: topic={t!r} results_count={len(results)} simulator={simulator}")
+        if simulator is not None:
+            obs_img = simulator.capture_observer_frame()
+            print(f"[DEBUG sensor] capture_observer_frame returned: {len(obs_img) if obs_img else None}")
+            sensor_data = {
+                "sensor_type": self.sensor_type,
+                "sensor_name": self.sensor_name,
+                "topic":       t,
+                "count":       len(results),
+                "frames":      list(results.keys()),
+            }
+            print(f"[DEBUG sensor] calling notify_capture with sensor_data={sensor_data}")
+            simulator.notify_capture(sensor_data, obs_img)
+            print(f"[DEBUG sensor] calling wait_for_step")
+            simulator.wait_for_step()
+            print(f"[DEBUG sensor] wait_for_step returned")
+        else:
+            print(f"[DEBUG sensor] simulator is None — no UI notification")
+
         return results
 
     def __repr__(self):

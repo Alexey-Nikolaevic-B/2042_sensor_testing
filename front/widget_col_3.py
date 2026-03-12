@@ -20,6 +20,7 @@ class ColTests(QWidget):
         self._backend      = None
         self._qm           = None
         self._repo         = None
+        self._simulator    = None  # set via set_simulator()
         self._widgets: dict[str, TestItem] = {}
         self._selected: str | None = None
         self._runner_log_forward = None   # set by ui_main: col_4.append_log
@@ -39,6 +40,11 @@ class ColTests(QWidget):
             queue_manager.log_line.connect(
                 lambda text: self._runner_log_forward("info", "test_runner", text)
             )
+
+    def set_simulator(self, simulator) -> None:
+        """Receive simulator reference so lock/step can control step-mode."""
+        self._simulator = simulator
+        print(f"[DEBUG col_3] set_simulator: {simulator}")
 
     def _log(self, level: str, msg: str):
         if self._runner_log_forward:
@@ -95,6 +101,19 @@ class ColTests(QWidget):
         except Exception as exc:
             self._log("error", f"_on_item_result error: {exc}")
 
+    def _on_item_lock_changed(self, func_name: str, locked: bool):
+        print(f"[DEBUG col_3] _on_item_lock_changed: func={func_name} locked={locked} simulator={self._simulator}")
+        if self._simulator:
+            self._simulator.set_step_mode(locked)
+            print(f"[DEBUG col_3] set_step_mode({locked}) called, _step_mode={self._simulator._step_mode}")
+
+    def _on_item_step(self, func_name: str):
+        print(f"[DEBUG col_3] _on_item_step: func={func_name} simulator={self._simulator}")
+        if self._simulator:
+            gate = self._simulator._step_gate
+            print(f"[DEBUG col_3] advance_step: gate={gate} is_set={gate.is_set() if gate else None}")
+            self._simulator.advance_step()
+
     def _on_item_run(self, func_name: str):
         if not self._qm:
             return
@@ -106,7 +125,7 @@ class ColTests(QWidget):
         if func is None:
             self._log("error", f"Cannot run '{func_name}': test function not found. Available: {list(tests.keys())}")
             return
-        self._qm.enqueue(self._sensor_id, func_name, self._backend, func)
+        self._qm.enqueue(self._sensor_id, func_name, self._backend, func, sensor=self._backend)
 
     def _on_item_stop(self, func_name: str):
         if self._qm:
@@ -124,7 +143,7 @@ class ColTests(QWidget):
         for func_name, func in tests.items():
             w = self._widgets.get(func_name)
             if w and w.test_status not in skip_statuses:
-                self._qm.enqueue(self._sensor_id, func_name, self._backend, func)
+                self._qm.enqueue(self._sensor_id, func_name, self._backend, func, sensor=self._backend)
                 queued += 1
         if queued == 0:
             self._log("info", "All tests are already queued or running.")
@@ -209,6 +228,7 @@ class ColTests(QWidget):
         pass  # btn_run_all is always enabled
 
     def _make_backend(self, sensor_data: dict):
+        """Build a Sensor instance from sensor_data dict (new generic system)."""
         try:
             from src.sensors.sensor import Sensor as SensorModel
             return SensorModel(
@@ -216,11 +236,10 @@ class ColTests(QWidget):
                 sensor_name = sensor_data.get("name", ""),
                 sdf_path    = sensor_data.get("sdf_path", ""),
                 topics      = sensor_data.get("topics", []),
+                description = sensor_data.get("description", ""),
+                image_path  = sensor_data.get("image_path", ""),
                 params      = sensor_data.get("params", {}),
             )
-        except FileNotFoundError as exc:
-            self._log("error", f"SDF file not found: {exc}")
-            return None
         except Exception as exc:
             import traceback
             self._log("error", f"Backend init failed: {exc}\n{traceback.format_exc()}")
@@ -240,6 +259,8 @@ class ColTests(QWidget):
             w.run_requested.connect(self._on_item_run)
             w.stop_requested.connect(self._on_item_stop)
             w.selected.connect(self._on_item_selected)
+            w.lock_changed.connect(self._on_item_lock_changed)
+            w.step_requested.connect(self._on_item_step)
             layout.addWidget(w)
             self._widgets[td["name"]] = w
 

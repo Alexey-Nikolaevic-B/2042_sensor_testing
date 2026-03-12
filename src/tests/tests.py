@@ -9,6 +9,30 @@ def _PoseStamped():
     return PoseStamped
 
 
+_RFID_WORLDS: dict[str, str] = {
+    "rfid_max_stable_read_distance": "rfid/change_distance.world",
+    "rfid_min_stable_read_distance": "rfid/change_distance.world",
+    "rfid_mass_read":                "rfid/mass_read.world",
+    "rfid_overlap_tags":             "rfid/overlap_tags.world",
+    "rfid_angle_dependence":         "rfid/angle_dependence.world",
+    "rfid_move_tags":                "rfid/move_tags.world",
+    "rfid_antenna_rotation":         "rfid/antenna_rotation.world",
+}
+
+
+def _world_path(sensor, func_name: str) -> str:
+    """Return the world file path for a test function."""
+    from config import CONFIG
+    base = CONFIG["WORLDS_PATH"]
+    rel  = _RFID_WORLDS.get(func_name, "")
+    return f"{base}{rel}" if rel else ""
+
+
+def _rfid_read(sensor, simulator, window: float = 3.0) -> dict:
+    """Capture PoseStamped messages on the sensor's primary topic."""
+    return sensor.capture_data(_PoseStamped(), window=window, simulator=simulator)
+
+
 def get_test(func_name: str) -> callable:
     fn = TESTS.get(func_name)
     if fn is None:
@@ -99,7 +123,7 @@ def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
 #
 # ── reading from a ROS topic ──────────────────────────────────────────────────
 #
-#   results = sensor.capture_data(_PoseStamped(), window=3.0)
+#   results = sensor.capture_data(_PoseStamped(), window=3.0, simulator=simulator)
 #   # returns {frame_id: pose} for every message received in the window
 #
 #
@@ -175,7 +199,7 @@ def rfid_max_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            if tag in sensor.capture_data(_PoseStamped(), window=3):
+            if tag in sensor.capture_data(_PoseStamped(), window=3, simulator=simulator):
                 max_dist = current
         except Exception:
             pass
@@ -215,7 +239,7 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            if tag in sensor.capture_data(_PoseStamped(), window=2):
+            if tag in sensor.capture_data(_PoseStamped(), window=2, simulator=simulator):
                 min_dist = current
         except Exception:
             pass
@@ -253,7 +277,7 @@ def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(int((i + 1) / tags_count * 50))
 
     t0   = time.time()
-    data = sensor.capture_data(_PoseStamped(), window=20)
+    data = sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
     if progress_cb:
         progress_cb(100)
 
@@ -287,7 +311,7 @@ def rfid_overlap_tags(simulator, sensor, progress_cb=None) -> dict:
             if not simulator.wait_for_model_spawn(f"rfid_tag{i+1}", 30):
                 raise RuntimeError(f"tag {i+1} not spawned")
 
-        data = sensor.capture_data(_PoseStamped(), window=5)
+        data = sensor.capture_data(_PoseStamped(), window=5, simulator=simulator)
         if len(data) == tags_count:
             dist_result = distance
         if progress_cb:
@@ -321,7 +345,7 @@ def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(int((i + 1) / len(angles) * 50))
 
     t0   = time.time()
-    data = sensor.capture_data(_PoseStamped(), window=20)
+    data = sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
     if progress_cb:
         progress_cb(100)
 
@@ -394,7 +418,7 @@ def rfid_antenna_rotation(simulator, sensor, progress_cb=None) -> dict:
         q = Quaternion(0, 0, math.sin(angle / 2), math.cos(angle / 2))
         simulator.set_pose("rfid_antenna", x=0, y=0, z=0, quaternion=q)
         time.sleep(0.01)
-        data = sensor.capture_data(_PoseStamped(), window=7)
+        data = sensor.capture_data(_PoseStamped(), window=7, simulator=simulator)
         if len(data) == tags_count and angle == 0:
             passed = True
         angle2count[round(math.degrees(angle), 1)] = len(data)

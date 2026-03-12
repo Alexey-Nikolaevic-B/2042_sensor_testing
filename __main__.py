@@ -24,6 +24,8 @@ if __name__ == "__main__":
     window.set_core(core)
     window.test_page._runner_log_forward = window.col_4.append_log
     window.test_page.set_runner(queue_manager, repo)
+    window.col_4.set_simulator(core.simulator)
+    window.test_page.set_simulator(core.simulator)
     window.show()
 
     def on_sim_log(level: str, msg: str):
