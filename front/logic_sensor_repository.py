@@ -35,13 +35,16 @@ class Sensor:
     @property
     def image_path(self)  -> str:  return self._data.get("image_path", "")
     @property
-    def sdf_path(self)    -> str:  return self._data.get("sdf_path", "")
-    @property
-    def topic(self)       -> str:  return self._data.get("topic", "")
-    @property
     def params(self)      -> dict: return self._data.get("params", {})
     @property
+    def topics(self)      -> list: return self._data.get("topics", [])
+    @property
+    def topic(self)       -> str:  return self.topics[0] if self.topics else ""
+    @property
     def tests(self)       -> list: return self._data["tests"]
+    @property
+    def last_update(self):
+        return self._data.get("last_update", datetime.min)
 
     def to_dict(self) -> dict:
         return copy.deepcopy(self._data)
@@ -57,12 +60,15 @@ class Sensor:
                 return t
         return None
 
-    def update_test(self, test_name: str, fields: dict) -> None:
+    def update_test(self, test_name: str, fields: dict) -> bool:
         for t in self._data["tests"]:
             if t.get("name") == test_name:
                 t.update(fields)
-                return
-        self._data["tests"].append({"name": test_name, **fields})
+                return True
+        new_test = {"name": test_name}
+        new_test.update(fields)
+        self._data["tests"].append(new_test)
+        return True
 
     def __repr__(self):
         return f"<Sensor id={self.id!r} name={self.name!r}>"
@@ -89,9 +95,10 @@ class SensorRepository(QObject):
         self._sensors: dict[str, Sensor] = {}
         SensorRepository._instance = self
         db.init_db()
+        db.init_test_meta_table()
         self.load()
 
-    def load(self) -> None:
+    def load(self):
         self._sensors.clear()
         for raw in db.get_all_sensors():
             try:
@@ -99,6 +106,7 @@ class SensorRepository(QObject):
                 self._sensors[s.id] = s
             except (TypeError, ValueError) as exc:
                 print(f"[SensorRepository] Skipping invalid sensor: {exc}")
+        print(f"[SensorRepository] Loaded {len(self._sensors)} sensors from DB")
         self.sensors_loaded.emit()
 
     def all_sensors(self) -> list[dict]:
@@ -115,57 +123,72 @@ class SensorRepository(QObject):
         return None
 
     def get_types(self) -> list[str]:
-        return db.get_sensor_type_names()
+        return db.get_sensor_types()
 
     def count(self) -> int:
         return len(self._sensors)
 
     def add_sensor(self, data: dict) -> dict:
-        # Inherit description from sensor type if not explicitly provided
-        description = data.get("description", "")
-        if not description:
-            try:
-                type_def = db.get_sensor_type(data["type"])
-                if type_def:
-                    description = type_def.get("description", "")
-            except Exception:
-                pass
-        db.add_sensor(
+        import inspect as _inspect
+        _add_sig = _inspect.signature(db.add_sensor).parameters
+        _kwargs = dict(
             sensor_name = data["name"],
             sensor_type = data["type"],
             sdf_path    = data.get("sdf_path", ""),
-            topic       = data.get("topic", ""),
-            description = description,
+            description = data.get("description", ""),
             image_path  = data.get("image_path", ""),
             params      = data.get("params", {}),
         )
+        if "topics" in _add_sig:
+            _kwargs["topics"] = data.get("topics", [])
+        db.add_sensor(**_kwargs)
         fresh = db.get_sensor_by_name(data["name"])
         s = Sensor(fresh)
         self._sensors[s.id] = s
-        self._extract_and_save_params(s)
-        self._reload_sensor(s.id)
+        self._seed_test_meta(s)
+        self._reload_sensor_from_db(s.id)
         self.sensor_added.emit(self._sensors[s.id].to_dict())
         return self._sensors[s.id].to_dict()
 
-    def _extract_and_save_params(self, sensor: Sensor) -> None:
+    def _seed_test_meta(self, sensor: "Sensor") -> None:
         try:
-            from src.sensors.sensor import Sensor as SensorModel
-            from src.core import Core
-            instance = SensorModel(
-                sensor_type = sensor.sensor_type,
-                sensor_name = sensor.name,
-                sdf_path    = sensor.sdf_path,
-            )
-            core = Core.__new__(Core)
-            params = core.read_sensor_params(instance)
-        except Exception as exc:
-            print(f"[SensorRepository] _extract_and_save_params failed: {exc}")
-            params = {}
+            from src.sensors import REGISTRY
+            from src.test_utils import load_test_functions
+
+            SensorClass = REGISTRY.get(sensor.sensor_type)
+            if SensorClass is None:
+                return
+
+            instance = SensorClass(sensor.sdf_path)
+            funcs = load_test_functions(instance)
+            existing = {r["func_name"] for r in db.get_test_meta(sensor.id)}
+            for func_name in funcs:
+                if func_name not in existing:
+                    db.save_test_meta(sensor.id, func_name, func_name, "", "")
+        except Exception:
+            pass
+
+    def _extract_and_save_params(self, sensor: "Sensor") -> None:
+        # TODO: replace mock param with real get_params() once backend is stable
+        try:
+            from src.sensors import REGISTRY
+
+            SensorClass = REGISTRY.get(sensor.sensor_type)
+            if SensorClass is None:
+                params = {}
+            else:
+                try:
+                    instance = SensorClass(sensor.sdf_path)
+                    params = instance.get_params()
+                except Exception:
+                    params = {}
+        except Exception:
+            params = {"TODO": "get parameters from sensor"}
 
         db.update_sensor(sensor.name, params=params)
         sensor.update_fields({"params": params})
 
-    def _reload_sensor(self, sensor_id: str) -> None:
+    def _reload_sensor_from_db(self, sensor_id: str) -> None:
         s = self._sensors.get(sensor_id)
         if s is None:
             return
@@ -177,19 +200,24 @@ class SensorRepository(QObject):
         s = self._sensors.get(sensor_id)
         if s is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
-        db.update_sensor(
+        # Build kwargs — only pass topics if db.update_sensor supports it
+        import inspect as _inspect
+        _upd_sig = _inspect.signature(db.update_sensor).parameters
+        _kwargs = dict(
             sensor_name = s.name,
             description = fields.get("description"),
             image_path  = fields.get("image_path"),
             params      = fields.get("params"),
             sdf_path    = fields.get("sdf_path"),
-            topic       = fields.get("topic"),
         )
+        if "topics" in _upd_sig:
+            _kwargs["topics"] = fields.get("topics")
+        db.update_sensor(**_kwargs)
         s.update_fields(fields)
         self.sensor_updated.emit(s.to_dict())
         return s.to_dict()
 
-    def delete_sensor(self, sensor_id: str) -> None:
+    def delete_sensor(self, sensor_id: str):
         s = self._sensors.get(sensor_id)
         if s is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
@@ -197,34 +225,69 @@ class SensorRepository(QObject):
         del self._sensors[sensor_id]
         self.sensor_deleted.emit(sensor_id)
 
-    def save_test_result(self, sensor_id: str, func_name: str, status: str,
-                         result, description: str = "", duration: float = 0.0) -> dict:
+    def save_test_result(
+        self,
+        sensor_id: str,
+        test_name: str,
+        status: str,
+        result,
+        description: str = "",
+        duration: float = 0.0,
+    ) -> dict:
         s = self._sensors.get(sensor_id)
         if s is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
 
         db.save_test_result(
             sensor_name = s.name,
-            func_name   = func_name,
+            test_name   = test_name,
             status      = status,
             result      = result,
             description = description,
             duration    = duration,
         )
 
-        s.update_test(func_name, {
+        from datetime import datetime as _dt
+        today = _dt.now().strftime("%Y-%m-%d")
+
+        result_str = str(result) if not isinstance(result, str) else result
+        s.update_test(test_name, {
             "status":   status,
-            "result":   result,
+            "result":   result_str,
             "duration": duration,
-            "date":     datetime.now().strftime("%Y-%m-%d"),
+            "date":     today,
         })
 
-        updated = s.get_test(func_name)
-        self.test_updated.emit(sensor_id, copy.deepcopy(updated))
-        return copy.deepcopy(updated)
+        updated_test = s.get_test(test_name)
+        self.test_updated.emit(sensor_id, copy.deepcopy(updated_test))
+        return copy.deepcopy(updated_test)
 
-    def get_test_history(self, sensor_id: str, func_name: str) -> list[dict]:
+    def get_test_meta(self, sensor_id: str) -> list[dict]:
+        rows = db.get_test_meta(sensor_id)
+        return {r["func_name"]: r for r in rows}
+
+    def save_test_meta(self, sensor_id: str, func_name: str,
+                       display_name: str, description: str,
+                       image_path: str) -> None:
+        db.save_test_meta(sensor_id, func_name, display_name, description, image_path)
+
         s = self._sensors.get(sensor_id)
         if s is None:
-            return []
-        return db.get_test_history(s.name, func_name)
+            return
+
+        db.upsert_type_test(s.sensor_type, func_name, display_name, description, image_path)
+        db.propagate_type_test_to_sensors(s.sensor_type, func_name, display_name, description, image_path)
+
+        s.update_test(func_name, {
+            "display_name": display_name,
+            "description":  description,
+            "image_path":   image_path,
+        })
+
+        for sibling in self._sensors.values():
+            if sibling.id != sensor_id and sibling.sensor_type == s.sensor_type:
+                sibling.update_test(func_name, {
+                    "display_name": display_name,
+                    "description":  description,
+                    "image_path":   image_path,
+                })

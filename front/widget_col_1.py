@@ -233,6 +233,14 @@ class ColSensors(QWidget):
         self._all_sensors = sensors
         self._rebuild_filter_menu(types)
         self._rebuild_cells(sensors)
+        # Also populate the type list — load_types reads fresh from DB
+        # so it always shows every persisted type, not just those with sensors.
+        try:
+            import src.database.sensor_storage as db
+            self.load_types(db.get_sensor_type_names())
+        except Exception as exc:
+            import traceback
+            print(f"[ColSensors] load_sensors / load_types failed: {exc}\n{traceback.format_exc()}")
 
     def load_types(self, types: list[str]):
         """Populate the sensor-type list at the top of the column."""
@@ -417,6 +425,20 @@ class ColSensors(QWidget):
         self.btn_delete.toggled.connect(self._toggle_delete_mode)
         self.btn_add_type.clicked.connect(self._open_add_type_dialog)
         self.btn_delete_type.toggled.connect(self._toggle_delete_type_mode)
+        self.delete_type_requested.connect(self._on_delete_type)
+
+    def _on_delete_type(self, sensor_type: str):
+        try:
+            import src.database.sensor_storage as db
+            db.delete_sensor_type(sensor_type)
+            db_types = db.get_sensor_type_names()
+            self.load_types(db_types)
+            # Clear selection if deleted type was selected
+            if self._selected_type == sensor_type:
+                self._selected_type = None
+        except Exception as exc:
+            import traceback
+            print(f"[ColSensors] _on_delete_type error: {exc}\n{traceback.format_exc()}")
 
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()

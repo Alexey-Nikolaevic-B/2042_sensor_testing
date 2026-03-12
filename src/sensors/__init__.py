@@ -1,2 +1,2 @@
-from .sensor import Sensor
-from .detector import DETECTORS, detect_sensor_type
+from .sensor import Sensor, REGISTRY, register_sensor
+from .detector import DETECTOR_REGISTRY, register_detector, detect_sensor_type, CUSTOM_DETECTORS

@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "sensors")
 IMAGE_W, IMAGE_H = 300, 200
@@ -29,7 +29,7 @@ class AddSensorDialog(QDialog):
         self._core = core
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedSize(680, 520)
+        self.setFixedSize(880, 520)
 
         self._edit_mode    = sensor_data is not None
         self._sensor_data  = sensor_data or {}
@@ -37,12 +37,14 @@ class AddSensorDialog(QDialog):
         self._image_source = ""
         self._sdf_source   = ""
         self._params:dict  = {}
+        self._topic_rows:list = []
         self._detected_type: str | None = None
 
         uic.loadUi(f"{QT_DIR}/add_sensor_dialog.ui", self)
         self._setup_styles()
         self._connect_signals()
         self.params_layout.addStretch()
+        self.topics_layout.addStretch()
 
         if self._edit_mode:
             self._prefill()
@@ -70,6 +72,9 @@ class AddSensorDialog(QDialog):
         sensor_type = d.get("type", "unknown")
         self._set_detected_type(sensor_type)
         self._populate_params(d.get("params", {}))
+        self.input_description.setPlainText(d.get("description", ""))
+        for t in d.get("topics", []):
+            self._add_topic_row(t)
 
     def _connect_signals(self):
         self.btn_dialog_close.clicked.connect(self.reject)
@@ -77,6 +82,7 @@ class AddSensorDialog(QDialog):
         self.btn_save.clicked.connect(self._on_save)
         self.btn_browse_sdf.clicked.connect(self._pick_sdf)
         self.image_container.mousePressEvent = lambda _: self._pick_image()
+        self.btn_add_topic.clicked.connect(lambda: self._add_topic_row(''))
 
     def _pick_image(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -128,6 +134,20 @@ class AddSensorDialog(QDialog):
             self._populate_params(params)
         except Exception:
             self._populate_params({})
+
+        # Auto-detect topics from SDF
+        for row in list(self._topic_rows):
+            self._remove_topic_row(row)
+        try:
+            from sensor import detect_topics_from_sdf
+        except ImportError:
+            try:
+                from src.sensors.sensor import detect_topics_from_sdf
+            except ImportError:
+                detect_topics_from_sdf = None
+        if detect_topics_from_sdf:
+            for t in (detect_topics_from_sdf(path) or []):
+                self._add_topic_row(t)
 
     def _set_detected_type(self, sensor_type: str | None):
         self._detected_type = sensor_type
@@ -217,8 +237,9 @@ class AddSensorDialog(QDialog):
             "type":        self._detected_type or "unknown",
             "sdf_path":    sdf_dest,
             "image_path":  image_dest,
-            "description": self._sensor_data.get("description", ""),
+            "description": self.input_description.toPlainText().strip(),
             "params":      dict(self._params),
+            "topics":      self._collect_topics(),
         }
         if self._sensor_id:
             result["id"] = self._sensor_id
@@ -240,110 +261,187 @@ class AddSensorDialog(QDialog):
         QTimer.singleShot(1200, lambda: widget.setStyleSheet(orig))
 
 
+    def _collect_topics(self) -> list:
+        result = []
+        for row in self._topic_rows:
+            edit = row.findChild(QLineEdit)
+            if edit:
+                t = edit.text().strip()
+                if t:
+                    result.append(t)
+        return result
+
+    def _add_topic_row(self, topic: str = ''):
+        row = QFrame()
+        row.setObjectName('topic_row')
+        h = QHBoxLayout(row)
+        h.setContentsMargins(4, 2, 4, 2)
+        h.setSpacing(4)
+        edit = QLineEdit(topic)
+        edit.setObjectName('field_input')
+        edit.setPlaceholderText('/topic/name')
+        btn = QPushButton('✕')
+        btn.setObjectName('btn_remove_topic')
+        btn.setFixedSize(22, 22)
+        btn.setStyleSheet(
+            f'QPushButton {{ background: transparent; border: none; color: {LC.TEXT_MUTED}; font-size: 12px; }}'
+            f'QPushButton:hover {{ color: {LC.ERROR}; }}'
+        )
+        btn.clicked.connect(lambda: self._remove_topic_row(row))
+        h.addWidget(edit)
+        h.addWidget(btn)
+        lay = self.topics_layout
+        lay.insertWidget(lay.count() - 1, row)
+        self._topic_rows.append(row)
+
+    def _remove_topic_row(self, row):
+        if row in self._topic_rows:
+            self._topic_rows.remove(row)
+        self.topics_layout.removeWidget(row)
+        row.deleteLater()
+
     def _setup_styles(self):
-        C = Colors
         self.setStyleSheet(f"""
             QDialog {{
-                background-color: {C.BG_CARD};
-                border: 1px solid {C.BORDER_LIGHT};
-                border-radius: 6px;
+                background: {LC.BG_PANEL};
+            }}
+            QWidget {{
+                background: {LC.BG_PANEL};
+                color: {LC.TEXT};
+                font-size: 13px;
             }}
             QWidget#dialog_titlebar {{
-                background-color: {C.BG_TOOLBAR};
-                border-bottom: 1px solid {C.BORDER};
+                background: {LC.BG};
+                border-bottom: 1px solid {LC.BORDER};
             }}
-            QLabel#dialog_title {{
-                color: {C.TEXT_WHITE};
-                font-size: 14px;
-                font-weight: bold;
-            }}
-            QPushButton#btn_dialog_close {{
-                background: transparent; border: none; border-radius: 4px;
-            }}
-            QPushButton#btn_dialog_close:hover {{ background-color: {C.BG_CARD_HOVER}; }}
-            QLabel#lbl_section_image, QLabel#lbl_section_name,
-            QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
-            QLabel#lbl_section_params {{
-                color: {C.TEXT_SECONDARY};
-                font-size: 11px;
-                font-weight: bold;
-                background: transparent;
+            QWidget#wt_buttons {{
+                background: {LC.BG};
+                border-top: 1px solid {LC.BORDER};
             }}
             QWidget#image_container {{
-                background-color: {C.BG_IMAGE};
-                border: 1px solid {C.BORDER};
+                background: {LC.BG_HOVER};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
+            }}
+            QScrollArea#params_scroll {{
+                background: {LC.BG};
+                border: 1px solid {LC.BORDER};
+                border-radius: 4px;
+            }}
+            QWidget#params_contents {{ background: {LC.BG}; }}
+            QFrame#param_row {{
+                background: transparent;
+                border-bottom: 1px solid {LC.BG_HOVER};
+            }}
+            QLabel#dialog_title {{
+                color: {LC.TEXT};
+                font-size: 14px;
+                font-weight: 700;
+                background: transparent;
+            }}
+            QLabel#lbl_section_image, QLabel#lbl_section_name,
+            QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
+            QLabel#lbl_section_params, QLabel#lbl_section_description, QLabel#lbl_section_topics {{
+                color: {LC.TEXT_SEC};
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                background: transparent;
             }}
             QLabel#image_label {{
-                color: {C.TEXT_MUTED}; font-size: 12px; background: transparent;
+                color: {LC.TEXT_MUTED};
+                font-size: 12px;
+                background: transparent;
             }}
             QLabel#sdf_label {{
-                color: {C.TEXT_SECONDARY}; font-size: 12px;
+                color: {LC.TEXT_SEC};
+                font-size: 12px;
+                background: transparent;
+            }}
+            QLabel#param_key {{
+                color: {LC.TEXT_SEC};
+                font-size: 12px;
+                background: transparent;
+            }}
+            QLabel#params_placeholder {{
+                color: {LC.TEXT_MUTED};
+                font-size: 11px;
+                padding: 8px;
+                background: transparent;
             }}
             QLineEdit#input_name, QLineEdit#field_input {{
-                background-color: {C.BG_INPUT};
-                border: 1px solid {C.BORDER_LIGHT};
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_PRIMARY};
-                padding: 6px 10px;
+                color: {LC.TEXT};
+                padding: 5px 8px;
                 font-size: 13px;
             }}
             QLineEdit#input_name:focus, QLineEdit#field_input:focus {{
-                border-color: {C.ACCENT};
+                border-color: {LC.ACCENT};
             }}
-            QScrollArea#params_scroll {{
-                background-color: {C.BG_COLUMN};
-                border: 1px solid {C.BORDER};
+            QPlainTextEdit {{
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
+                border-radius: 4px;
+                color: {LC.TEXT};
+                padding: 5px 8px;
+                font-size: 12px;
+            }}
+            QPlainTextEdit:focus {{ border-color: {LC.ACCENT}; }}
+            QPushButton#btn_dialog_close {{
+                background: transparent;
+                border: none;
                 border-radius: 4px;
             }}
-            QWidget#params_contents {{ background-color: {C.BG_COLUMN}; }}
-            QFrame#param_row {{
-                background-color: transparent;
-                border-bottom: 1px solid {C.BORDER};
-            }}
-            QLabel#param_key {{
-                color: {C.TEXT_SECONDARY}; font-size: 12px; background: transparent;
-            }}
-            QLabel#params_placeholder {{
-                color: {C.TEXT_MUTED}; font-size: 11px;
-                padding: 8px; background: transparent;
-            }}
-            QWidget#wt_buttons {{
-                background-color: {C.BG_TOOLBAR};
-                border-top: 1px solid {C.BORDER};
-            }}
+            QPushButton#btn_dialog_close:hover {{ background: {LC.BG_HOVER}; }}
             QPushButton#btn_browse_sdf {{
-                background-color: {C.BG_CARD};
-                border: 1px solid {C.BORDER_LIGHT};
+                background: {LC.BG};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_PRIMARY};
+                color: {LC.TEXT};
                 font-size: 12px;
                 padding: 0 12px;
             }}
-            QPushButton#btn_browse_sdf:hover {{ background-color: {C.BG_CARD_HOVER}; }}
+            QPushButton#btn_browse_sdf:hover {{ background: {LC.BG_HOVER}; }}
             QPushButton#btn_cancel {{
-                background-color: transparent;
-                border: 1px solid {C.BORDER_LIGHT};
+                background: transparent;
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_SECONDARY};
+                color: {LC.TEXT_SEC};
                 font-size: 13px;
                 padding: 0 16px;
             }}
-            QPushButton#btn_cancel:hover {{ background-color: {C.BG_CARD_HOVER}; }}
+            QPushButton#btn_cancel:hover {{ background: {LC.BG_HOVER}; color: {LC.TEXT}; }}
             QPushButton#btn_save {{
-                background-color: {C.ACCENT_DIM};
-                border: 1px solid {C.ACCENT};
+                background: {LC.ACCENT};
+                border: none;
                 border-radius: 4px;
-                color: {C.ACCENT};
+                color: #ffffff;
                 font-size: 13px;
-                font-weight: bold;
+                font-weight: 600;
                 padding: 0 20px;
             }}
-            QPushButton#btn_save:hover {{ background-color: #1e3d50; }}
-            QPushButton#btn_save:pressed {{ background-color: {C.BG_APP}; }}
-            {Styles.SCROLLBAR}
+            QPushButton#btn_save:hover {{ background: {LC.ACCENT_HVR}; }}
+            QPushButton#btn_save:pressed {{ background: #1e40af; }}
+            QScrollArea#topics_scroll {{
+                background: {LC.BG};
+                border: 1px solid {LC.BORDER};
+                border-radius: 4px;
+            }}
+            QWidget#topics_contents {{ background: {LC.BG}; }}
+            QFrame#topic_row {{ background: transparent; border-bottom: 1px solid {LC.BG_HOVER}; }}
+            QPushButton#btn_add_topic {{
+                background: transparent;
+                border: 1px dashed {LC.BORDER};
+                border-radius: 4px;
+                color: {LC.TEXT_SEC};
+                font-size: 12px;
+                padding: 4px;
+            }}
+            QPushButton#btn_add_topic:hover {{ background: {LC.BG_HOVER}; color: {LC.TEXT}; }}
+            {LS.SCROLLBAR}
         """)
         self.btn_dialog_close.setIcon(Icons.CLOSE())
         self.btn_dialog_close.setIconSize(Layout.ICON_SIZE_SM)
-        # Initial state: dot muted until SDF loaded
         self._set_detected_type(None)

@@ -215,7 +215,7 @@ class ColTests(QWidget):
                 sensor_type = sensor_data.get("type", ""),
                 sensor_name = sensor_data.get("name", ""),
                 sdf_path    = sensor_data.get("sdf_path", ""),
-                topic       = sensor_data.get("topic", ""),
+                topics      = sensor_data.get("topics", []),
                 params      = sensor_data.get("params", {}),
             )
         except FileNotFoundError as exc:

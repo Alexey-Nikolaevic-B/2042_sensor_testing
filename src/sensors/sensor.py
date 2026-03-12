@@ -6,17 +6,46 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def detect_topics_from_sdf(sdf_path: str) -> list[str]:
+    """
+    Scan an SDF file and extract all topic-like values.
+    Looks for any XML tag whose name ends with 'topic'
+    and whose value starts with '/'.
+    Returns a deduplicated list preserving order.
+    """
+    try:
+        with open(sdf_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError as e:
+        logger.error("detect_topics_from_sdf: cannot read %r: %s", sdf_path, e)
+        return []
+
+    seen   = set()
+    topics = []
+    for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
+        t = m.group(1).strip()
+        if t and t not in seen:
+            seen.add(t)
+            topics.append(t)
+    return topics
+
+
 class Sensor:
     def __init__(self, sensor_type: str, sensor_name: str, sdf_path: str,
-                 topic: str = "", description: str = "",
+                 topics: list = None, description: str = "",
                  image_path: str = "", params: dict = None):
         self.sensor_type = sensor_type
         self.sensor_name = sensor_name
         self.sdf_path    = sdf_path
-        self.topic       = topic
+        self.topics      = list(topics or [])
         self.description = description
         self.image_path  = image_path
         self.params      = params or {}
+
+    @property
+    def topic(self) -> str:
+        """Primary topic — first in list, for backwards compat."""
+        return self.topics[0] if self.topics else ""
 
     def param(self, name: str, default=None):
         return self.params.get(name, default)
@@ -58,14 +87,20 @@ class Sensor:
             f.write(content)
         self.params.update(params)
 
-    def capture_data(self, msg_type, window: float = 2.0,
+    def capture_data(self, msg_type, topic: str = "", window: float = 2.0,
                      timeout: float = 0.25) -> dict:
+        """
+        Read messages from a ROS topic for `window` seconds.
+        Uses `topic` if given, otherwise falls back to self.topic (first in list).
+        Returns {frame_id: pose} for each message received.
+        """
         import rospy
+        t = topic or self.topic
         results  = {}
         deadline = time.time() + window
         while time.time() < deadline:
             try:
-                msg = rospy.wait_for_message(self.topic, msg_type, timeout=timeout)
+                msg = rospy.wait_for_message(t, msg_type, timeout=timeout)
                 results[msg.header.frame_id] = msg.pose
             except Exception:
                 continue
@@ -73,3 +108,18 @@ class Sensor:
 
     def __repr__(self):
         return f"<Sensor {self.sensor_type!r} name={self.sensor_name!r}>"
+
+
+# ── Legacy REGISTRY (used by rfid.py, core.py, widget_col_3.py) ───────────────
+from typing import Dict, Type as _Type
+
+REGISTRY: Dict[str, _Type] = {}
+
+
+def register_sensor(sensor_type: str):
+    """Decorator to register a concrete sensor class by type string."""
+    def deco(cls):
+        cls.sensor_type = sensor_type
+        REGISTRY[sensor_type] = cls
+        return cls
+    return deco

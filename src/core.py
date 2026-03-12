@@ -1,40 +1,75 @@
-import logging
-from typing import Optional
+from typing import List, Dict, Any, Optional
 
 from .gazebo_simulator import Simulator
-from .sensors.sensor import Sensor
-from .sensors.detector import detect_sensor_type
-from config import CONFIG
+from .sensors import REGISTRY, Sensor
+from .sensors.detector import detect_sensor_type as _detect
 
-logger = logging.getLogger(__name__)
+from config import CONFIG
 
 
 class Core:
     def __init__(self) -> None:
         self.simulator = Simulator(CONFIG)
 
-    def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
-        return detect_sensor_type(sdf_path)
+    def get_sensor_types(self) -> List[str]:
+        return sorted(REGISTRY.keys())
 
-    def read_sensor_params(self, sensor: Sensor) -> dict:
+    def get_tests(self, sensor: Sensor) -> Dict[str, Any]:
+        return {
+            attr: getattr(sensor, attr)
+            for attr in dir(sensor)
+            if attr.endswith("_test") and callable(getattr(sensor, attr))
+        }
+
+    def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
+        return _detect(sdf_path)
+
+    def read_sensor_params(self, sensor) -> dict:
+        import re
         import src.database.sensor_storage as db
-        type_def = db.get_sensor_type(sensor.sensor_type)
+
+        sensor_type = getattr(sensor, "sensor_type", None)
+        sdf_path    = getattr(sensor, "sdf_path", None)
+        if not sensor_type or not sdf_path:
+            return {}
+
+        type_def = db.get_sensor_type(sensor_type)
         if not type_def:
             return {}
+
         param_names = [p["name"] for p in type_def.get("params", []) if p.get("name")]
-        return sensor.read_params_from_sdf(param_names)
+        if not param_names:
+            return {}
 
-    def get_world_for_test(self, sensor_type: str, func_name: str) -> str:
-        import src.database.sensor_storage as db
-        tests = {t["func_name"]: t for t in db.get_type_tests(sensor_type)}
-        return tests.get(func_name, {}).get("world_path", "")
+        try:
+            with open(sdf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            return {}
 
-    def get_tests(self, sensor) -> dict[str, callable]:
-        from src.tests import get_tests_for_type
-        return get_tests_for_type(sensor.sensor_type)
+        result = {}
+        for name in param_names:
+            m = re.search(rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
+                          content, re.DOTALL)
+            if m:
+                result[name] = m.group(1).strip()
+        return result
 
-    def get_tests_for_sensor(self, sensor) -> dict[str, callable]:
-        return self.get_tests(sensor)
+    def save_sensor_params(self, sensor_id: str, params: dict, repo) -> None:
+        sensor_data = repo.get_sensor(sensor_id)
+        if sensor_data is None:
+            raise KeyError(f"No sensor with id {sensor_id!r}")
+
+        sensor_type = sensor_data.get("type")
+        sdf_path    = sensor_data.get("sdf_path")
+
+        SensorClass = REGISTRY.get(sensor_type)
+        if SensorClass is None:
+            raise ValueError(f"No sensor class registered for type {sensor_type!r}")
+
+        instance = SensorClass(sdf_path)
+        instance.save_params_to_sdf(sdf_path, params)
+        repo.update_sensor(sensor_id, {"params": params})
 
     def kill(self) -> None:
         self.simulator.kill()

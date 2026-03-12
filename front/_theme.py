@@ -169,110 +169,6 @@ class Styles:
     CARD_IMAGE_LABEL = ""
 
 
-
-
-class LightColors:
-    """Colours for light-theme dialogs (mostly white)."""
-    BG          = "#ffffff"
-    BG_PANEL    = "#f5f6f8"
-    BG_INPUT    = "#ffffff"
-    BG_HOVER    = "#eef0f3"
-    BORDER      = "#d0d4db"
-    TEXT        = "#1a1d23"
-    TEXT_SEC    = "#6b7280"
-    TEXT_MUTED  = "#9ca3af"
-    ACCENT      = "#2563eb"
-    ACCENT_HVR  = "#1d4ed8"
-    ACCENT_DIM  = "#dbeafe"
-    ERROR       = "#ef4444"
-
-
-class LightStyles:
-    INPUT = f"""
-        QLineEdit {{
-            background: {LightColors.BG_INPUT};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px;
-            color: {LightColors.TEXT};
-            padding: 5px 9px;
-            font-size: 12px;
-        }}
-        QLineEdit:focus {{ border-color: {LightColors.ACCENT}; }}
-        QLineEdit[readOnly="true"] {{
-            background: {LightColors.BG_PANEL};
-            color: {LightColors.TEXT_SEC};
-        }}
-    """
-
-    SCROLLBAR = f"""
-        QScrollBar:vertical {{
-            background: {LightColors.BG_PANEL}; width: 6px; margin: 0;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {LightColors.BORDER}; border-radius: 3px; min-height: 20px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        QScrollBar:horizontal {{ height: 0; }}
-    """
-
-    BUTTON_PRIMARY = f"""
-        QPushButton {{
-            background: {LightColors.ACCENT};
-            border: none; border-radius: 4px;
-            color: #ffffff;
-            padding: 7px 24px;
-            font-weight: 600; font-size: 13px;
-        }}
-        QPushButton:hover {{ background: {LightColors.ACCENT_HVR}; }}
-        QPushButton:pressed {{ background: #1e40af; }}
-    """
-
-    BUTTON_DEFAULT = f"""
-        QPushButton {{
-            background: {LightColors.BG};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px;
-            color: {LightColors.TEXT};
-            padding: 5px 12px; font-size: 12px;
-        }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
-    """
-
-    BUTTON_CANCEL = f"""
-        QPushButton {{
-            background: transparent;
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px;
-            color: {LightColors.TEXT_SEC};
-            padding: 7px 20px; font-size: 13px;
-        }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; color: {LightColors.TEXT}; }}
-    """
-
-    BUTTON_ICON = f"""
-        QPushButton {{
-            background: transparent; border: none; border-radius: 4px;
-        }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
-    """
-
-    LIST_WIDGET = f"""
-        QListWidget {{
-            background: {LightColors.BG};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px; outline: none;
-            font-size: 12px; color: {LightColors.TEXT};
-        }}
-        QListWidget::item {{
-            padding: 4px 8px;
-            border-bottom: 1px solid {LightColors.BG_HOVER};
-        }}
-        QListWidget::item:selected {{
-            background: {LightColors.ACCENT_DIM}; color: {LightColors.ACCENT};
-        }}
-        QListWidget::item:hover {{ background: {LightColors.BG_HOVER}; }}
-    """
-
 class Icons:
     _cache: dict = {}
 
@@ -365,3 +261,97 @@ class Layout:
     CARD_HEIGHT = 300
     CARD_H_GAP  = 10
     CARD_V_GAP  = 30
+
+# ── Light theme ───────────────────────────────────────────────────────────────
+
+class LightColors:
+    BG         = "#ffffff"
+    BG_PANEL   = "#f5f6f8"
+    BG_INPUT   = "#ffffff"
+    BG_HOVER   = "#eef0f3"
+    BORDER     = "#d0d4db"
+    TEXT       = "#1a1d23"
+    TEXT_SEC   = "#6b7280"
+    TEXT_MUTED = "#9ca3af"
+    ACCENT     = "#2563eb"
+    ACCENT_HVR = "#1d4ed8"
+    ACCENT_DIM = "#dbeafe"
+    ERROR      = "#ef4444"
+
+
+class LightStyles:
+    INPUT = f"""
+        QLineEdit {{
+            background: {LightColors.BG_INPUT};
+            border: 1px solid {LightColors.BORDER};
+            border-radius: 4px;
+            color: {LightColors.TEXT};
+            padding: 5px 8px;
+            font-size: 12px;
+        }}
+        QLineEdit:focus {{ border-color: {LightColors.ACCENT}; }}
+    """
+
+    SCROLLBAR = f"""
+        QScrollBar:vertical {{
+            background: {LightColors.BG_PANEL};
+            width: 6px; border: none;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {LightColors.BORDER};
+            border-radius: 3px; min-height: 20px;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+    """
+
+    BUTTON_PRIMARY = f"""
+        QPushButton {{
+            background: {LightColors.ACCENT};
+            border: none; border-radius: 4px;
+            color: #fff; font-size: 13px; font-weight: 600;
+            padding: 0 18px;
+        }}
+        QPushButton:hover {{ background: {LightColors.ACCENT_HVR}; }}
+        QPushButton:pressed {{ background: #1e40af; }}
+    """
+
+    BUTTON_DEFAULT = f"""
+        QPushButton {{
+            background: {LightColors.BG};
+            border: 1px solid {LightColors.BORDER};
+            border-radius: 4px; color: {LightColors.TEXT};
+            font-size: 12px; padding: 0 14px;
+        }}
+        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
+    """
+
+    BUTTON_CANCEL = f"""
+        QPushButton {{
+            background: transparent;
+            border: 1px solid {LightColors.BORDER};
+            border-radius: 4px; color: {LightColors.TEXT_SEC};
+            font-size: 13px; padding: 0 14px;
+        }}
+        QPushButton:hover {{ background: {LightColors.BG_HOVER}; color: {LightColors.TEXT}; }}
+    """
+
+    BUTTON_ICON = f"""
+        QPushButton {{
+            background: transparent; border: none; border-radius: 4px;
+        }}
+        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
+    """
+
+    LIST_WIDGET = f"""
+        QListWidget {{
+            background: {LightColors.BG};
+            border: 1px solid {LightColors.BORDER};
+            border-radius: 4px; color: {LightColors.TEXT};
+            font-size: 12px; outline: none;
+        }}
+        QListWidget::item {{ padding: 5px 8px; }}
+        QListWidget::item:selected {{
+            background: {LightColors.ACCENT_DIM}; color: {LightColors.ACCENT};
+        }}
+        QListWidget::item:hover:!selected {{ background: {LightColors.BG_HOVER}; }}
+    """
