@@ -7,11 +7,13 @@ import re
 import signal
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import rospy
+from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import ApplyBodyWrench, BodyRequest, GetModelProperties
 from geometry_msgs.msg import Point, Wrench
 
@@ -212,6 +214,49 @@ class TactileHarness:
         stream.start()
         return stream
 
+    def sensor_body_half_extent_z(self) -> float:
+        try:
+            tree = ET.parse(self.sensor_model_path)
+            body = tree.find(".//model/link[@name='body']")
+            if body is None:
+                return 0.0
+            collision = body.find("collision/geometry")
+            if collision is None:
+                return 0.0
+            cylinder = collision.find("cylinder")
+            if cylinder is not None:
+                length = float((cylinder.findtext("length") or "0").strip())
+                return max(0.0, 0.5 * length)
+            box = collision.find("box")
+            if box is not None:
+                size = (box.findtext("size") or "0 0 0").split()
+                if len(size) == 3:
+                    return max(0.0, 0.5 * float(size[2]))
+        except Exception:
+            pass
+        return 0.0
+
+    def set_model_pose(self, model_name: str, x: float, y: float, z: float) -> Dict[str, object]:
+        from gazebo_msgs.srv import SetModelState
+
+        rospy.wait_for_service("/gazebo/set_model_state", timeout=10.0)
+        proxy = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
+        state = ModelState()
+        state.model_name = str(model_name)
+        state.reference_frame = "world"
+        state.pose.position.x = float(x)
+        state.pose.position.y = float(y)
+        state.pose.position.z = float(z)
+        state.pose.orientation.w = 1.0
+        response = proxy(state)
+        if not bool(response.success):
+            raise RuntimeError(f"set_model_state failed for {model_name}: {response.status_message}")
+        return {
+            "model_name": str(model_name),
+            "pose_xyz": [float(x), float(y), float(z)],
+            "status_message": str(response.status_message),
+        }
+
     def apply_body_wrench(
         self,
         force_xyz: Iterable[float],
@@ -270,6 +315,30 @@ class TactileHarness:
             if sample is not None:
                 samples.append(sample)
         return samples
+
+    def collect_active_window(
+        self,
+        stream: GazeboWrenchStream,
+        force_xyz: Iterable[float],
+        sample_duration_s: float,
+        preload_s: float = 0.15,
+        hold_margin_s: float = 0.10,
+        reference_point_xyz: Iterable[float] = (0.0, 0.0, 0.0),
+        poll_timeout_s: float = 0.10,
+    ) -> List[WrenchSample]:
+        total_duration_s = float(preload_s) + float(sample_duration_s) + float(hold_margin_s)
+        self.clear_body_wrenches()
+        self.apply_body_wrench(
+            force_xyz=force_xyz,
+            duration_s=total_duration_s,
+            reference_point_xyz=reference_point_xyz,
+        )
+        time.sleep(float(preload_s))
+        return self.collect_window(
+            stream,
+            duration_s=float(sample_duration_s),
+            poll_timeout_s=float(poll_timeout_s),
+        )
 
     @staticmethod
     def sample_summary(samples: List[WrenchSample]) -> Dict[str, float]:

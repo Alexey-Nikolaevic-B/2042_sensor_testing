@@ -85,9 +85,13 @@ class TactileProfileBase(Sensor):
             steps = []
             threshold_force = None
             for force_n in [0.5, 1.0, 1.5, 2.0, 2.5]:
-                harness.clear_body_wrenches()
-                harness.apply_body_wrench((0.0, 0.0, -force_n), duration_s=0.8)
-                samples = harness.collect_window(stream, duration_s=0.4)
+                samples = harness.collect_active_window(
+                    stream,
+                    force_xyz=(0.0, 0.0, -force_n),
+                    sample_duration_s=0.30,
+                    preload_s=0.15,
+                    hold_margin_s=0.10,
+                )
                 summary = harness.sample_summary(samples)
                 stable_summary = summary
                 steps.append(
@@ -133,9 +137,14 @@ class TactileProfileBase(Sensor):
             for y in offsets:
                 row = []
                 for x in offsets:
-                    harness.clear_body_wrenches()
-                    harness.apply_body_wrench((0.0, 0.0, -1.96), duration_s=0.7, reference_point_xyz=(x, y, 0.0))
-                    samples = harness.collect_window(stream, duration_s=0.8)
+                    samples = harness.collect_active_window(
+                        stream,
+                        force_xyz=(0.0, 0.0, -1.96),
+                        sample_duration_s=0.35,
+                        preload_s=0.20,
+                        hold_margin_s=0.15,
+                        reference_point_xyz=(x, y, 0.0),
+                    )
                     summary = harness.sample_summary(samples)
                     row.append(
                         {
@@ -178,12 +187,16 @@ class TactileProfileBase(Sensor):
         harness.open_world(self.WORLD_T3)
         stream = harness.make_stream()
         try:
-            harness.clear_body_wrenches()
-            harness.apply_body_wrench((0.0, 0.0, -4.9), duration_s=duration_s)
             series = []
             elapsed = 0.0
             while elapsed < duration_s:
-                samples = harness.collect_window(stream, duration_s=sample_window_s)
+                samples = harness.collect_active_window(
+                    stream,
+                    force_xyz=(0.0, 0.0, -4.9),
+                    sample_duration_s=sample_window_s,
+                    preload_s=0.15,
+                    hold_margin_s=0.15,
+                )
                 summary = harness.sample_summary(samples)
                 series.append(
                     {
@@ -233,25 +246,36 @@ class TactileProfileBase(Sensor):
         harness.open_world(self.WORLD_T4)
         stream = harness.make_stream()
         try:
+            sensor_top_z = harness.sensor_body_half_extent_z()
+            impactor_half_height_m = 0.05
+            drop_height_m = 0.5
+            spawn_gap_m = 0.005
+            reset_pose = harness.set_model_pose(
+                "t4_impactor",
+                x=0.0,
+                y=0.0,
+                z=sensor_top_z + impactor_half_height_m + drop_height_m + spawn_gap_m,
+            )
+            harness.collect_window(stream, duration_s=0.1, poll_timeout_s=0.02)
             waveform_samples = harness.collect_window(stream, duration_s=capture_duration_s, poll_timeout_s=0.05)
             peak_value = max((sample.normal_force for sample in waveform_samples), default=0.0)
-            plateau_hits = sum(
-                1 for sample in waveform_samples
-                if abs(sample.normal_force - peak_value) <= max(0.02 * peak_value, 1e-6)
-            )
-            saturation_detected = peak_value >= 0.98 * self.spec.rated_force_n or plateau_hits >= 5
+            saturation_detected = peak_value >= 0.98 * self.spec.rated_force_n
             payload = {
                 "waveform": harness.serialize_samples(waveform_samples),
                 "peak_value": float(peak_value),
                 "saturation_detected": bool(saturation_detected),
                 "capture_duration_s": float(capture_duration_s),
                 "rated_force_n": float(self.spec.rated_force_n),
+                "impactor_reset_pose": reset_pose,
                 "assumptions": self._default_assumptions() + [
                     "The impact body is the cylinder defined in tactile_t4_peak_load.world: diameter 0.05 m, height 0.1 m, mass 1 kg.",
-                    "Saturation/clipping is inferred when the peak reaches >= 98% of the rated force or forms a repeated plateau at the peak.",
+                    "The impactor is repositioned above the sensor at the start of T4 to guarantee a fresh 0.5 m drop after the world loads.",
+                    "Saturation/clipping is inferred when the peak reaches >= 98% of the rated force.",
                 ],
             }
             payload["metric_path"] = harness.write_metric("t4_peak_load_test", payload)
+            if peak_value <= 1.0:
+                raise AssertionError(f"T4 failed: peak_value too small for a valid impact ({peak_value})")
             if saturation_detected:
                 raise AssertionError(f"T4 failed: saturation_detected={saturation_detected}, peak_value={peak_value}")
             return payload
