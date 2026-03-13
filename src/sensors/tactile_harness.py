@@ -164,6 +164,9 @@ class TactileHarness:
         if not bool(response.success):
             raise RuntimeError(f"get_model_properties failed for {self.sensor_name}: {response.status_message}")
         body_names = [str(item) for item in getattr(response, "body_names", [])]
+        for preferred in ("body", "sensor_body", "top", "plate"):
+            if preferred in body_names:
+                return preferred
         if not body_names:
             return f"{self.sensor_name}::body"
         return body_names[0]
