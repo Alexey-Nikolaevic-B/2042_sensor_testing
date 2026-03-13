@@ -7,4 +7,5 @@ from . import (
     depth_camera,
     uvc_profile_640x480_60deg,
     camera_sdf_registry,
+    tactile_sdf_registry,
 )

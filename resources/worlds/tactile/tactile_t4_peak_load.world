@@ -1,0 +1,107 @@
+<?xml version="1.0" ?>
+<!--
+  T4 — peak impact load world.
+  The tactile runner spawns the sensor separately at the origin. This world
+  provides a 1 kg impact cylinder already positioned for a 0.5 m drop.
+-->
+<sdf version="1.6">
+  <world name="tactile_t4_peak_load">
+    <scene>
+      <ambient>0.76 0.76 0.76 1</ambient>
+      <background>0.94 0.95 0.98 1</background>
+    </scene>
+
+    <gravity>0 0 -9.81</gravity>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <model name="t4_mount_base">
+      <static>true</static>
+      <pose>0 0 -0.04 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.24 0.24 0.06</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>0.24 0.24 0.06</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.33 0.35 0.39 1</ambient>
+            <diffuse>0.33 0.35 0.39 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="t4_guide_frame">
+      <static>true</static>
+      <pose>0 0 0.30 0 0 0</pose>
+      <link name="link">
+        <visual name="guide">
+          <geometry>
+            <cylinder>
+              <radius>0.0305</radius>
+              <length>0.60</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.18 0.20 0.24 0.15</ambient>
+            <diffuse>0.18 0.20 0.24 0.15</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="t4_impactor">
+      <static>false</static>
+      <pose>0 0 0.56225 0 0 0</pose>
+      <link name="body">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia>
+            <ixx>1.145833333333e-03</ixx>
+            <iyy>1.145833333333e-03</iyy>
+            <izz>3.125000000000e-04</izz>
+            <ixy>0</ixy>
+            <ixz>0</ixz>
+            <iyz>0</iyz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.025</radius>
+              <length>0.10</length>
+            </cylinder>
+          </geometry>
+          <surface>
+            <contact>
+              <collide_bitmask>0x01</collide_bitmask>
+            </contact>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.025</radius>
+              <length>0.10</length>
+            </cylinder>
+          </geometry>
+          <material>
+            <ambient>0.78 0.52 0.14 1</ambient>
+            <diffuse>0.78 0.52 0.14 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

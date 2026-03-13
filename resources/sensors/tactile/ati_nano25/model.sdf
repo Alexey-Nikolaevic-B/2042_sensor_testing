@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="ati_nano25">
+    <pose>0 0 0 0 0 0</pose>
+    <static>false</static>
+    <link name="body">
+      <inertial>
+        <mass>0.0634</mass>
+        <inertia>
+          <ixx>4.941553666667e-06</ixx>
+          <iyy>4.941553666667e-06</iyy>
+          <izz>4.953125000000e-06</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.0125</radius>
+            <length>0.0216</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.0125</radius>
+            <length>0.0216</length>
+          </cylinder>
+        </geometry>
+      </visual>
+      <!-- Rated limits: Fx/Fy 250 N, Fz 1000 N, Mx/My 6 Nm, Mz 3.4 Nm -->
+      <sensor name="ft_sensor" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>1000</update_rate>
+        <visualize>false</visualize>
+        <force_torque>
+          <frame>child</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </link>
+  </model>
+</sdf>
