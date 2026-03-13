@@ -183,7 +183,20 @@ class TactileHarness:
                 if self.sensor_name in topic and topic.endswith("/wrench")
             ]
             if matching:
-                return sorted(matching, key=len)[0]
+                # Prefer the explicit joint-mounted force_torque sensor topic over
+                # generic body wrench topics, which may exist but stay silent.
+                def _rank(topic: str) -> tuple[int, int, str]:
+                    topic_lower = topic.lower()
+                    score = 0
+                    if "/ft_sensor/" in topic_lower:
+                        score += 4
+                    if "/ft_joint/" in topic_lower:
+                        score += 2
+                    if "/body/" in topic_lower:
+                        score -= 3
+                    return (-score, len(topic), topic)
+
+                return sorted(matching, key=_rank)[0]
             time.sleep(0.3)
         raise RuntimeError(
             "Failed to discover tactile wrench topic. "
