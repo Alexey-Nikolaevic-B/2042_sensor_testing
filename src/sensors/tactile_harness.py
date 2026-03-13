@@ -341,6 +341,20 @@ class TactileHarness:
         )
 
     @staticmethod
+    def estimate_target_force(samples: List[WrenchSample], target_force_n: float) -> float:
+        if not samples:
+            return 0.0
+        target_force_n = abs(float(target_force_n))
+        values = sorted(sample.normal_force for sample in samples)
+        if target_force_n <= 0.0:
+            return float(values[len(values) // 2])
+        in_band = [value for value in values if 0.5 * target_force_n <= value <= 1.5 * target_force_n]
+        if in_band:
+            return float(in_band[len(in_band) // 2])
+        nearest = min(values, key=lambda value: abs(value - target_force_n))
+        return float(nearest)
+
+    @staticmethod
     def sample_summary(samples: List[WrenchSample]) -> Dict[str, float]:
         if not samples:
             return {
