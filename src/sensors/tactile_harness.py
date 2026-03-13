@@ -343,12 +343,20 @@ class TactileHarness:
     @staticmethod
     def sample_summary(samples: List[WrenchSample]) -> Dict[str, float]:
         if not samples:
-            return {"mean_normal_force": 0.0, "std_normal_force": 0.0, "peak_normal_force": 0.0}
+            return {
+                "mean_normal_force": 0.0,
+                "median_normal_force": 0.0,
+                "std_normal_force": 0.0,
+                "peak_normal_force": 0.0,
+            }
         values = [sample.normal_force for sample in samples]
+        sorted_values = sorted(values)
         mean_value = sum(values) / len(values)
         variance = sum((value - mean_value) ** 2 for value in values) / len(values)
+        median_value = sorted_values[len(sorted_values) // 2]
         return {
             "mean_normal_force": float(mean_value),
+            "median_normal_force": float(median_value),
             "std_normal_force": float(math.sqrt(variance)),
             "peak_normal_force": float(max(values)),
         }

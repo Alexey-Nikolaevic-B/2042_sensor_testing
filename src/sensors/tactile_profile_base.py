@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -150,7 +151,7 @@ class TactileProfileBase(Sensor):
                         {
                             "x_m": float(x),
                             "y_m": float(y),
-                            "response_n": float(summary["mean_normal_force"]),
+                            "response_n": float(summary["median_normal_force"]),
                             "samples": harness.serialize_samples(samples),
                         }
                     )
@@ -183,6 +184,7 @@ class TactileProfileBase(Sensor):
     def t3_stability_test(self, simulator) -> Dict[str, Any]:
         duration_s = float(self._params.get("stability_duration_s", 600.0))
         sample_window_s = float(self._params.get("stability_sample_window_s", 1.0))
+        sample_duration_s = float(self._params.get("stability_measurement_duration_s", 0.10))
         harness = TactileHarness(self.sensor_name, simulator=simulator, result_root=self.result_root)
         harness.open_world(self.WORLD_T3)
         stream = harness.make_stream()
@@ -193,28 +195,32 @@ class TactileProfileBase(Sensor):
                 samples = harness.collect_active_window(
                     stream,
                     force_xyz=(0.0, 0.0, -4.9),
-                    sample_duration_s=sample_window_s,
-                    preload_s=0.15,
-                    hold_margin_s=0.15,
+                    sample_duration_s=sample_duration_s,
+                    preload_s=0.05,
+                    hold_margin_s=0.05,
                 )
                 summary = harness.sample_summary(samples)
                 series.append(
                     {
                         "elapsed_s": float(elapsed),
                         "mean_normal_force": float(summary["mean_normal_force"]),
+                        "median_normal_force": float(summary["median_normal_force"]),
                         "std_normal_force": float(summary["std_normal_force"]),
                         "peak_normal_force": float(summary["peak_normal_force"]),
                     }
                 )
+                remaining_sleep_s = sample_window_s - (0.05 + sample_duration_s + 0.05)
+                if remaining_sleep_s > 0:
+                    time.sleep(float(remaining_sleep_s))
                 elapsed += sample_window_s
 
             harness.clear_body_wrenches()
             recovery_samples = harness.collect_window(stream, duration_s=5.0)
             recovery_summary = harness.sample_summary(recovery_samples)
-            initial_value = float(series[0]["mean_normal_force"]) if series else 0.0
-            final_value = float(series[-1]["mean_normal_force"]) if series else 0.0
+            initial_value = float(series[0]["median_normal_force"]) if series else 0.0
+            final_value = float(series[-1]["median_normal_force"]) if series else 0.0
             relative_change = abs(final_value - initial_value) / initial_value if initial_value else math.inf
-            drift_n = max(abs(point["mean_normal_force"] - initial_value) for point in series) if series else 0.0
+            drift_n = max(abs(point["median_normal_force"] - initial_value) for point in series) if series else 0.0
             chatter_n = max(point["std_normal_force"] for point in series) if series else 0.0
 
             payload = {
@@ -229,8 +235,9 @@ class TactileProfileBase(Sensor):
                 "duration_s": float(duration_s),
                 "assumptions": self._default_assumptions() + [
                     "Recovery is sampled during a 5 second unloaded observation window after the hold phase.",
-                    "Drift is reported as the largest absolute deviation from the initial mean normal-force estimate.",
-                    "Chatter is reported as the largest 1 second windowed standard deviation during the hold phase.",
+                    "Drift is reported as the largest absolute deviation from the initial median normal-force estimate.",
+                    "Chatter is reported as the largest spot-measurement standard deviation during the hold phase.",
+                    "T3 uses repeated 0.1 second spot measurements at a 1 second cadence across the 10 minute campaign to avoid mixing transient unload segments into the stability metric.",
                 ],
             }
             payload["metric_path"] = harness.write_metric("t3_stability_test", payload)
