@@ -86,6 +86,8 @@ class TactileProfileBase(Sensor):
             steps = []
             threshold_force = None
             for force_n in [0.5, 1.0, 1.5, 2.0, 2.5]:
+                baseline_samples = harness.collect_window(stream, duration_s=0.10, poll_timeout_s=0.02)
+                baseline_force = harness.sample_summary(baseline_samples)["median_normal_force"]
                 samples = harness.collect_active_window(
                     stream,
                     force_xyz=(0.0, 0.0, -force_n),
@@ -93,11 +95,13 @@ class TactileProfileBase(Sensor):
                     preload_s=0.15,
                     hold_margin_s=0.10,
                 )
-                summary = harness.sample_summary(samples)
+                adjusted_values = harness.values_from_samples(samples, baseline_force_n=baseline_force)
+                summary = harness.value_summary(adjusted_values)
                 stable_summary = summary
                 steps.append(
                     {
                         "command_force_n": float(force_n),
+                        "baseline_force_n": float(baseline_force),
                         "response_summary": summary,
                         "stable_response_summary": stable_summary,
                         "samples": harness.serialize_samples(samples),
@@ -138,6 +142,8 @@ class TactileProfileBase(Sensor):
             for y in offsets:
                 row = []
                 for x in offsets:
+                    baseline_samples = harness.collect_window(stream, duration_s=0.10, poll_timeout_s=0.02)
+                    baseline_force = harness.sample_summary(baseline_samples)["median_normal_force"]
                     samples = harness.collect_active_window(
                         stream,
                         force_xyz=(0.0, 0.0, -1.96),
@@ -146,12 +152,14 @@ class TactileProfileBase(Sensor):
                         hold_margin_s=0.15,
                         reference_point_xyz=(x, y, 0.0),
                     )
-                    summary = harness.sample_summary(samples)
+                    adjusted_values = harness.values_from_samples(samples, baseline_force_n=baseline_force)
+                    response_n = harness.estimate_target_force_values(adjusted_values, target_force_n=1.96)
                     row.append(
                         {
                             "x_m": float(x),
                             "y_m": float(y),
-                            "response_n": float(summary["median_normal_force"]),
+                            "baseline_force_n": float(baseline_force),
+                            "response_n": float(response_n),
                             "samples": harness.serialize_samples(samples),
                         }
                     )
@@ -189,6 +197,8 @@ class TactileProfileBase(Sensor):
         harness.open_world(self.WORLD_T3)
         stream = harness.make_stream()
         try:
+            baseline_samples = harness.collect_window(stream, duration_s=0.20, poll_timeout_s=0.02)
+            baseline_force = harness.sample_summary(baseline_samples)["median_normal_force"]
             # Warm up the Gazebo topic reader once so the first measured window is not empty.
             harness.collect_active_window(
                 stream,
@@ -199,7 +209,11 @@ class TactileProfileBase(Sensor):
             )
             series = []
             elapsed = 0.0
+            window_index = 0
             while elapsed < duration_s:
+                if window_index > 0 and window_index % 10 == 0:
+                    stream.stop()
+                    stream = harness.make_stream()
                 samples = harness.collect_active_window(
                     stream,
                     force_xyz=(0.0, 0.0, -4.9),
@@ -207,11 +221,13 @@ class TactileProfileBase(Sensor):
                     preload_s=0.05,
                     hold_margin_s=0.05,
                 )
-                summary = harness.sample_summary(samples)
-                estimated_force = harness.estimate_target_force(samples, target_force_n=4.9)
+                adjusted_values = harness.values_from_samples(samples, baseline_force_n=baseline_force)
+                summary = harness.value_summary(adjusted_values)
+                estimated_force = harness.estimate_target_force_values(adjusted_values, target_force_n=4.9)
                 series.append(
                     {
                         "elapsed_s": float(elapsed),
+                        "baseline_force_n": float(baseline_force),
                         "mean_normal_force": float(summary["mean_normal_force"]),
                         "median_normal_force": float(summary["median_normal_force"]),
                         "estimated_normal_force": float(estimated_force),
@@ -223,10 +239,13 @@ class TactileProfileBase(Sensor):
                 if remaining_sleep_s > 0:
                     time.sleep(float(remaining_sleep_s))
                 elapsed += sample_window_s
+                window_index += 1
 
             harness.clear_body_wrenches()
             recovery_samples = harness.collect_window(stream, duration_s=5.0)
-            recovery_summary = harness.sample_summary(recovery_samples)
+            recovery_summary = harness.value_summary(
+                harness.values_from_samples(recovery_samples, baseline_force_n=baseline_force)
+            )
             initial_value = float(series[0]["estimated_normal_force"]) if series else 0.0
             final_value = float(series[-1]["estimated_normal_force"]) if series else 0.0
             relative_change = abs(final_value - initial_value) / initial_value if initial_value else math.inf
@@ -243,12 +262,15 @@ class TactileProfileBase(Sensor):
                 "chatter_n": float(chatter_n),
                 "command_force_n": 4.9,
                 "duration_s": float(duration_s),
+                "baseline_force_n": float(baseline_force),
                 "assumptions": self._default_assumptions() + [
                     "Recovery is sampled during a 5 second unloaded observation window after the hold phase.",
                     "Drift is reported as the largest absolute deviation from the initial estimated quasi-static force.",
                     "Chatter is reported as the largest spot-measurement standard deviation during the hold phase.",
                     "T3 uses repeated 0.1 second spot measurements at a 1 second cadence across the 10 minute campaign to avoid mixing transient unload segments into the stability metric.",
                     "For each T3 spot measurement, the reported quasi-static force is estimated from samples nearest the commanded 4.9 N load, rejecting near-zero baseline and high transient impact spikes.",
+                    "T1/T2/T3 force metrics are baseline-compensated by subtracting the unloaded wrench level measured before loading.",
+                    "T3 refreshes the Gazebo wrench stream every 10 spot measurements to avoid stale buffered samples during the 10 minute run.",
                 ],
             }
             payload["metric_path"] = harness.write_metric("t3_stability_test", payload)

@@ -342,28 +342,28 @@ class TactileHarness:
 
     @staticmethod
     def estimate_target_force(samples: List[WrenchSample], target_force_n: float) -> float:
-        if not samples:
-            return 0.0
-        target_force_n = abs(float(target_force_n))
-        values = sorted(sample.normal_force for sample in samples)
-        if target_force_n <= 0.0:
-            return float(values[len(values) // 2])
-        in_band = [value for value in values if 0.5 * target_force_n <= value <= 1.5 * target_force_n]
-        if in_band:
-            return float(in_band[len(in_band) // 2])
-        nearest = min(values, key=lambda value: abs(value - target_force_n))
-        return float(nearest)
+        values = TactileHarness.values_from_samples(samples)
+        return TactileHarness.estimate_target_force_values(values, target_force_n)
 
     @staticmethod
     def sample_summary(samples: List[WrenchSample]) -> Dict[str, float]:
-        if not samples:
+        values = TactileHarness.values_from_samples(samples)
+        return TactileHarness.value_summary(values)
+
+    @staticmethod
+    def values_from_samples(samples: List[WrenchSample], baseline_force_n: float = 0.0) -> List[float]:
+        baseline_force_n = max(0.0, float(baseline_force_n))
+        return [max(0.0, sample.normal_force - baseline_force_n) for sample in samples]
+
+    @staticmethod
+    def value_summary(values: List[float]) -> Dict[str, float]:
+        if not values:
             return {
                 "mean_normal_force": 0.0,
                 "median_normal_force": 0.0,
                 "std_normal_force": 0.0,
                 "peak_normal_force": 0.0,
             }
-        values = [sample.normal_force for sample in samples]
         sorted_values = sorted(values)
         mean_value = sum(values) / len(values)
         variance = sum((value - mean_value) ** 2 for value in values) / len(values)
@@ -374,6 +374,20 @@ class TactileHarness:
             "std_normal_force": float(math.sqrt(variance)),
             "peak_normal_force": float(max(values)),
         }
+
+    @staticmethod
+    def estimate_target_force_values(values: List[float], target_force_n: float) -> float:
+        if not values:
+            return 0.0
+        target_force_n = abs(float(target_force_n))
+        values = sorted(float(value) for value in values)
+        if target_force_n <= 0.0:
+            return float(values[len(values) // 2])
+        in_band = [value for value in values if 0.5 * target_force_n <= value <= 1.5 * target_force_n]
+        if in_band:
+            return float(in_band[len(in_band) // 2])
+        nearest = min(values, key=lambda value: abs(value - target_force_n))
+        return float(nearest)
 
     def write_metric(self, test_name: str, payload: Dict[str, object]) -> str:
         path = self.metrics_dir / f"{test_name}.json"
