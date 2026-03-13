@@ -3,6 +3,21 @@
   <model name="ati_nano17">
     <pose>0 0 0 0 0 0</pose>
     <static>false</static>
+    <link name="mount">
+      <gravity>false</gravity>
+      <inertial>
+        <!-- Heavy mount approximates a bolted fixture without depending on a world joint. -->
+        <mass>1000.0</mass>
+        <inertia>
+          <ixx>1.0</ixx>
+          <iyy>1.0</iyy>
+          <izz>1.0</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+    </link>
     <link name="body">
       <inertial>
         <mass>0.00907</mass>
@@ -33,9 +48,8 @@
       </visual>
     </link>
     <joint name="ft_joint" type="fixed">
-      <parent>world</parent>
+      <parent>mount</parent>
       <child>body</child>
-      <!-- Gazebo Classic publishes force_torque measurements reliably when the sensor is attached to a joint. -->
       <sensor name="ft_sensor" type="force_torque">
         <always_on>true</always_on>
         <update_rate>1000</update_rate>
