@@ -88,46 +88,55 @@ class Sensor:
         self.params.update(params)
 
     def capture_data(self, msg_type, topic: str = "", window: float = 2.0,
-                     timeout: float = 0.25,
-                     simulator=None) -> dict:
+                     timeout: float = 0.25, warmup: float = 0.0,
+                     simulator=None) -> list:
         """
         Read messages from a ROS topic for `window` seconds.
         Uses `topic` if given, otherwise falls back to self.topic (first in list).
-        Returns {frame_id: pose} for each message received.
+        Returns a list of raw ROS messages in arrival order.
+
+        warmup: seconds to sleep before starting the capture loop.
+                Use this for sensors (e.g. cameras) whose plugin takes a few
+                seconds to register its ROS topic after Gazebo starts.
+
         After capture: fires simulator.notify_capture and respects step-mode.
         """
         import rospy
-        t = topic or self.topic
-        results  = {}
+        t        = topic or self.topic
+        results  = []
+        if warmup > 0:
+            time.sleep(warmup)
         deadline = time.time() + window
         while time.time() < deadline:
             try:
                 msg = rospy.wait_for_message(t, msg_type, timeout=timeout)
-                results[msg.header.frame_id] = msg.pose
+                results.append(msg)
             except Exception:
                 continue
 
-        # Notify UI with captured data + observer frame
-        print(f"[DEBUG sensor] capture_data done: topic={t!r} results_count={len(results)} simulator={simulator}")
         if simulator is not None:
-            obs_img = simulator.capture_observer_frame()
-            print(f"[DEBUG sensor] capture_observer_frame returned: {len(obs_img) if obs_img else None}")
             sensor_data = {
                 "sensor_type": self.sensor_type,
                 "sensor_name": self.sensor_name,
                 "topic":       t,
                 "count":       len(results),
-                "frames":      list(results.keys()),
             }
-            print(f"[DEBUG sensor] calling notify_capture with sensor_data={sensor_data}")
-            simulator.notify_capture(sensor_data, obs_img)
-            print(f"[DEBUG sensor] calling wait_for_step")
+            simulator.notify_capture(sensor_data, None)
             simulator.wait_for_step()
-            print(f"[DEBUG sensor] wait_for_step returned")
-        else:
-            print(f"[DEBUG sensor] simulator is None — no UI notification")
 
         return results
+
+    def capture_frames(self, msg_type, topic: str = "", window: float = 2.0,
+                       timeout: float = 0.25,
+                       simulator=None) -> dict:
+        """
+        RFID-style capture: returns {frame_id: pose} deduplicating by frame_id.
+        Wraps capture_data — keeps RFID tests unchanged.
+        """
+        msgs = self.capture_data(msg_type, topic=topic, window=window,
+                                 timeout=timeout, simulator=simulator)
+        return {msg.header.frame_id: msg.pose for msg in msgs
+                if hasattr(msg, "header") and hasattr(msg, "pose")}
 
     def __repr__(self):
         return f"<Sensor {self.sensor_type!r} name={self.sensor_name!r}>"
