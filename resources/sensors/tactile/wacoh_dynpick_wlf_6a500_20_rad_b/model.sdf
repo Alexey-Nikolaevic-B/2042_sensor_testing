@@ -3,6 +3,20 @@
   <model name="wacoh_dynpick_wlf_6a500_20_rad_b">
     <pose>0 0 0 0 0 0</pose>
     <static>false</static>
+    <link name="mount">
+      <gravity>false</gravity>
+      <inertial>
+        <mass>1000.0</mass>
+        <inertia>
+          <ixx>1.0</ixx>
+          <iyy>1.0</iyy>
+          <izz>1.0</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+    </link>
     <link name="body">
       <inertial>
         <mass>0.25</mass>
@@ -33,7 +47,7 @@
       </visual>
     </link>
     <joint name="ft_joint" type="fixed">
-      <parent>world</parent>
+      <parent>mount</parent>
       <child>body</child>
       <sensor name="ft_sensor" type="force_torque">
         <always_on>true</always_on>
