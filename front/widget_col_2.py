@@ -6,42 +6,21 @@ from PyQt5 import uic
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 from .dialog_add_sensor import AddSensorDialog
 
-DESCRIPTION_STYLE = f"""
-    QScrollArea {{
-        border: none;
-        border-top: 1px solid {Colors.BORDER};
-        border-bottom: 1px solid {Colors.BORDER};
-        background-color: {Colors.BG_TOOLBAR};
-    }}
-    QWidget#scroll_description_contents {{
-        background-color: {Colors.BG_TOOLBAR};
-    }}
-    QLabel {{
-        color: {Colors.TEXT_SECONDARY};
-        font-size: 12px;
-        background-color: transparent;
-    }}
-    {Styles.SCROLLBAR}
-"""
-
-IMAGE_H   = 200
-TOOLBAR_H = 44
-NAME_H    = 36
-DESC_H    = 72
-
 
 class ColDetails(QWidget):
     save_requested    = pyqtSignal(dict)
     save_as_requested = pyqtSignal(dict)
-    sensor_updated    = pyqtSignal(dict)   # emitted after edit dialog saves
+    sensor_updated    = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_2.ui", self)
         self._sensor_data: dict | None = None
-        self._enforce_heights()
+        self._setup_heights()
         self._setup_styles()
         self._connect_signals()
+
+    # ── public API ────────────────────────────────────────────────────────────
 
     def load_sensor(self, sensor_data: dict):
         self._sensor_data = sensor_data
@@ -58,11 +37,20 @@ class ColDetails(QWidget):
         self.lbl_description.setText("")
         self._clear_params()
 
-    def _enforce_heights(self):
-        self.lbl_sensor_image.setFixedHeight(IMAGE_H)
-        self.wt_toolbar.setFixedHeight(TOOLBAR_H)
-        self.lbl_sensor_name.setFixedHeight(NAME_H)
-        self.scroll_description.setFixedHeight(DESC_H)
+    # ── slots ─────────────────────────────────────────────────────────────────
+
+    def _on_edit(self):
+        if not self._sensor_data:
+            return
+        dlg = AddSensorDialog(parent=self, sensor_data=self._sensor_data)
+        dlg.sensor_saved.connect(self._on_edit_saved)
+        dlg.exec_()
+
+    def _on_edit_saved(self, sensor_dict: dict):
+        self.sensor_updated.emit(sensor_dict)
+        self.load_sensor(sensor_dict)
+
+    # ── helpers ───────────────────────────────────────────────────────────────
 
     def _load_image(self, path: str):
         if path:
@@ -108,7 +96,7 @@ class ColDetails(QWidget):
 
         filler = QWidget()
         filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        filler.setStyleSheet(f"background-color: transparent;")
+        filler.setStyleSheet("background-color: transparent;")
         layout.addWidget(filler)
 
     def _clear_params(self):
@@ -118,20 +106,16 @@ class ColDetails(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+    # ── setup ─────────────────────────────────────────────────────────────────
+
+    def _setup_heights(self):
+        self.lbl_sensor_image.setFixedHeight(Layout.IMAGE_H)
+        self.wt_toolbar.setFixedHeight(Layout.TOOLBAR_H)
+        self.lbl_sensor_name.setFixedHeight(Layout.NAME_H)
+        self.scroll_description.setFixedHeight(Layout.DESC_H)
+
     def _connect_signals(self):
         self.btn_edit.clicked.connect(self._on_edit)
-
-    def _on_edit(self):
-        if not self._sensor_data:
-            return
-        dlg = AddSensorDialog(parent=self, sensor_data=self._sensor_data)
-        dlg.sensor_saved.connect(self._on_edit_saved)
-        dlg.exec_()
-
-    def _on_edit_saved(self, sensor_dict: dict):
-        self.sensor_updated.emit(sensor_dict)
-        # Refresh the column with new data immediately
-        self.load_sensor(sensor_dict)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
@@ -160,10 +144,9 @@ class ColDetails(QWidget):
             }}
             {Styles.SCROLLBAR}
         """)
-        self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)
-        for btn, icon, style in [
-            (self.btn_edit,    Icons.EDIT(), Styles.BUTTON_ICON),
-        ]:
-            btn.setIcon(icon)
-            btn.setIconSize(Layout.ICON_SIZE_MD)
-            btn.setStyleSheet(style)
+        self.scroll_description.setStyleSheet(
+            Styles.DESCRIPTION_AREA
+        )
+        self.btn_edit.setIcon(Icons.EDIT())
+        self.btn_edit.setIconSize(Layout.ICON_SIZE_MD)
+        self.btn_edit.setStyleSheet(Styles.BUTTON_ICON)

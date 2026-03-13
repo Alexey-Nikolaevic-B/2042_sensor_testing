@@ -159,6 +159,23 @@ class Styles:
         QListWidget::item:focus {{ outline: none; border: none; }}
     """
 
+    DESCRIPTION_AREA = (
+        f"QScrollArea {{"
+        f"  border: none;"
+        f"  border-top: 1px solid {Colors.BORDER};"
+        f"  border-bottom: 1px solid {Colors.BORDER};"
+        f"  background-color: {Colors.BG_TOOLBAR};"
+        f"}}"
+        f"QWidget#scroll_description_contents {{"
+        f"  background-color: {Colors.BG_TOOLBAR};"
+        f"}}"
+        f"QLabel {{"
+        f"  color: {Colors.TEXT_SECONDARY};"
+        f"  font-size: 12px;"
+        f"  background-color: transparent;"
+        f"}}"
+    ) + SCROLLBAR
+
     # legacy aliases
     BUTTON_BLUE  = BUTTON_ACCENT
     BUTTON_GREEN = BUTTON_DEFAULT
@@ -221,7 +238,11 @@ class Icons:
     @classmethod
     def RUNNING(cls):   return cls.get("running.png")
     @classmethod
-    def UNKNOWN(cls):   return cls.get("unknown_status.png")
+    def UNKNOWN(cls):        return cls.get("unknown_status.png")
+    @classmethod
+    def TARGET_SENSOR(cls):  return cls.get("target_sensor.png")
+    @classmethod
+    def OBSERVER(cls):       return cls.get("observer.png")
 
     @classmethod
     def RUNNING_MOVIE(cls, label=None):
@@ -254,6 +275,11 @@ class Layout:
     ICON_SIZE_SM = QSize(16, 16)
     ICON_SIZE_MD = QSize(20, 20)
     ICON_SIZE_LG = QSize(28, 28)
+    # Column shared heights
+    IMAGE_H   = 200
+    TOOLBAR_H = 44
+    NAME_H    = 36
+    DESC_H    = 72
     SENSOR_CELL_HEIGHT = 52
     TEST_ITEM_HEIGHT   = 64
     TEST_LIST_MAX_H    = 9999
@@ -262,96 +288,114 @@ class Layout:
     CARD_H_GAP  = 10
     CARD_V_GAP  = 30
 
-# ── Light theme ───────────────────────────────────────────────────────────────
-
 class LightColors:
+    """Light-theme palette used by modal dialogs."""
+    BG_PANEL   = "#f0f0f0"
     BG         = "#ffffff"
-    BG_PANEL   = "#f5f6f8"
-    BG_INPUT   = "#ffffff"
-    BG_HOVER   = "#eef0f3"
-    BORDER     = "#d0d4db"
-    TEXT       = "#1a1d23"
-    TEXT_SEC   = "#6b7280"
-    TEXT_MUTED = "#9ca3af"
-    ACCENT     = "#2563eb"
-    ACCENT_HVR = "#1d4ed8"
-    ACCENT_DIM = "#dbeafe"
-    ERROR      = "#ef4444"
+    BG_INPUT   = "#fafafa"
+    BG_HOVER   = "#e8e8e8"
+    BORDER     = "#cccccc"
+    TEXT       = "#1a1a1a"
+    TEXT_SEC   = "#555555"
+    TEXT_MUTED = "#999999"
+    ACCENT     = "#0078d4"
+    ACCENT_HVR = "#106ebe"
+    ACCENT_DIM = "#cce4f7"
+    ERROR      = "#d32f2f"
 
 
 class LightStyles:
-    INPUT = f"""
-        QLineEdit {{
-            background: {LightColors.BG_INPUT};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px;
-            color: {LightColors.TEXT};
-            padding: 5px 8px;
-            font-size: 12px;
-        }}
-        QLineEdit:focus {{ border-color: {LightColors.ACCENT}; }}
-    """
+    """Light-theme styles used by modal dialogs."""
 
-    SCROLLBAR = f"""
-        QScrollBar:vertical {{
-            background: {LightColors.BG_PANEL};
-            width: 6px; border: none;
-        }}
-        QScrollBar::handle:vertical {{
-            background: {LightColors.BORDER};
-            border-radius: 3px; min-height: 20px;
-        }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-    """
-
-    BUTTON_PRIMARY = f"""
-        QPushButton {{
-            background: {LightColors.ACCENT};
-            border: none; border-radius: 4px;
-            color: #fff; font-size: 13px; font-weight: 600;
-            padding: 0 18px;
-        }}
-        QPushButton:hover {{ background: {LightColors.ACCENT_HVR}; }}
-        QPushButton:pressed {{ background: #1e40af; }}
+    BUTTON_ICON = """
+        QPushButton { background-color: transparent; border: none; padding: 4px; }
+        QPushButton:hover { background-color: rgba(0,0,0,0.08); border-radius: 4px; }
+        QPushButton:pressed { background-color: rgba(0,0,0,0.15); }
+        QPushButton:disabled { opacity: 0.4; }
     """
 
     BUTTON_DEFAULT = f"""
         QPushButton {{
-            background: {LightColors.BG};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px; color: {LightColors.TEXT};
-            font-size: 12px; padding: 0 14px;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #1a1a1a;
+            padding: 4px 12px;
         }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
+        QPushButton:hover {{ background-color: #e8e8e8; }}
+        QPushButton:pressed {{ background-color: #d0d0d0; }}
+    """
+
+    BUTTON_PRIMARY = f"""
+        QPushButton {{
+            border: 1px solid #0078d4;
+            border-radius: 4px;
+            background-color: #0078d4;
+            color: #ffffff;
+            padding: 4px 12px;
+            font-weight: 600;
+        }}
+        QPushButton:hover {{ background-color: #106ebe; }}
+        QPushButton:pressed {{ background-color: #005a9e; }}
     """
 
     BUTTON_CANCEL = f"""
         QPushButton {{
-            background: transparent;
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px; color: {LightColors.TEXT_SEC};
-            font-size: 13px; padding: 0 14px;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            color: #555555;
+            padding: 4px 12px;
         }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; color: {LightColors.TEXT}; }}
+        QPushButton:hover {{ background-color: #e0e0e0; }}
+        QPushButton:pressed {{ background-color: #d0d0d0; }}
     """
 
-    BUTTON_ICON = f"""
-        QPushButton {{
-            background: transparent; border: none; border-radius: 4px;
+    INPUT = f"""
+        QLineEdit, QPlainTextEdit {{
+            background-color: #ffffff;
+            border: 1px solid #cccccc;
+            border-radius: 3px;
+            color: #1a1a1a;
+            padding: 4px 8px;
+            font-size: 13px;
         }}
-        QPushButton:hover {{ background: {LightColors.BG_HOVER}; }}
+        QLineEdit:focus, QPlainTextEdit:focus {{
+            border-color: #0078d4;
+        }}
     """
 
-    LIST_WIDGET = f"""
-        QListWidget {{
-            background: {LightColors.BG};
-            border: 1px solid {LightColors.BORDER};
-            border-radius: 4px; color: {LightColors.TEXT};
-            font-size: 12px; outline: none;
-        }}
-        QListWidget::item {{ padding: 5px 8px; }}
-        QListWidget::item:selected {{
-            background: {LightColors.ACCENT_DIM}; color: {LightColors.ACCENT};
-        }}
-        QListWidget::item:hover:!selected {{ background: {LightColors.BG_HOVER}; }}
+    SCROLLBAR = """
+        QScrollBar:vertical {
+            background: transparent; width: 5px; margin: 0;
+        }
+        QScrollBar::handle:vertical {
+            background-color: #cccccc;
+            border-radius: 2px; min-height: 20px;
+        }
+        QScrollBar::handle:vertical:hover { background-color: #aaaaaa; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical
+            { height: 0; background: transparent; }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical
+            { background: transparent; }
+        QScrollBar:horizontal { height: 0; background: transparent; }
+    """
+
+    LIST_WIDGET = """
+        QListWidget {
+            border: 1px solid #cccccc;
+            background-color: #ffffff;
+            outline: none;
+        }
+        QListWidget::item {
+            border-bottom: 1px solid #eeeeee;
+            color: #1a1a1a;
+            padding: 4px;
+        }
+        QListWidget::item:hover { background-color: #e8e8e8; }
+        QListWidget::item:selected {
+            background-color: #cce4f7;
+            color: #1a1a1a;
+        }
+        QListWidget::item:focus { outline: none; border: none; }
     """

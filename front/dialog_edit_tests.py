@@ -1,12 +1,12 @@
 import os
 import shutil
 
-from PyQt5.QtWidgets import QDialog, QWidget, QLabel, QSizePolicy, QScrollArea, QFrame
+from PyQt5.QtWidgets import QDialog, QWidget, QLabel, QHBoxLayout, QVBoxLayout
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QPixmap, QColor
+from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from ._theme import Colors, Styles, Icons, Layout, QT_DIR
+from ._theme import Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "sensors")
 IMAGE_W, IMAGE_H = 320, 160
@@ -26,7 +26,6 @@ class TestMetaRow(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setObjectName("TestMetaRow")
 
-        from PyQt5.QtWidgets import QHBoxLayout, QVBoxLayout
         h = QHBoxLayout(self)
         h.setContentsMargins(12, 0, 12, 0)
         h.setSpacing(8)
@@ -55,6 +54,8 @@ class TestMetaRow(QWidget):
 
         self._refresh_style()
 
+    # ── public API ────────────────────────────────────────────────────────────
+
     def set_selected(self, selected: bool):
         self._selected = selected
         self._refresh_style()
@@ -62,17 +63,19 @@ class TestMetaRow(QWidget):
     def update_display_name(self, name: str):
         self._lbl_display.setText(name or self.func_name)
 
+    # ── helpers ───────────────────────────────────────────────────────────────
+
     def _refresh_style(self):
-        bar_color = Colors.STATUS_YELLOW if self.missing else Colors.ACCENT
-        bg        = Colors.ACCENT_BLUE_TEXT if self._selected else "transparent"
+        bar_color = LC.ERROR   if self.missing   else LC.ACCENT
+        bg        = LC.ACCENT_DIM if self._selected else "transparent"
         self._bar.setStyleSheet(f"background-color: {bar_color};")
         self.setStyleSheet(f"""
             QWidget#TestMetaRow {{
                 background-color: {bg};
-                border-bottom: 1px solid {Colors.BORDER};
+                border-bottom: 1px solid {LC.BORDER};
             }}
             QWidget#TestMetaRow:hover {{
-                background-color: {Colors.TEXT_PRIMARY};
+                background-color: {LC.BG_HOVER};
             }}
         """)
 
@@ -109,47 +112,16 @@ class EditTestsDialog(QDialog):
         if tests:
             self._select(tests[0]["func_name"])
 
-    def _populate_list(self, tests: list[dict]):
-        layout = self.scroll_tests_list_contents.layout()
-        for test in tests:
-            row = TestMetaRow(test, parent=self.scroll_tests_list_contents)
-            row.clicked.connect(self._select)
-            layout.addWidget(row)
-            self._rows[test["func_name"]] = row
-        layout.addStretch(1)
+    # ── slots ─────────────────────────────────────────────────────────────────
 
-    def _select(self, func_name: str):
-        if self._selected and self._selected in self._rows:
-            self._rows[self._selected].set_selected(False)
+    def _on_name_changed(self, text: str):
+        if self._selected:
+            self._tests[self._selected]["display_name"] = text
+            self._rows[self._selected].update_display_name(text)
 
-        self._selected = func_name
-        self._rows[func_name].set_selected(True)
-        test = self._tests[func_name]
-
-        self.lbl_empty.setVisible(False)
-        self.wt_editor.setVisible(True)
-
-        self.lbl_missing_warn.setVisible(test.get("missing", False))
-
-        self.input_display_name.blockSignals(True)
-        self.input_description.blockSignals(True)
-        self.input_display_name.setText(test.get("display_name") or "")
-        self.input_func_name.setText(func_name)
-        self.input_description.setPlainText(test.get("description") or "")
-        self.input_display_name.blockSignals(False)
-        self.input_description.blockSignals(False)
-
-        self._load_image(test.get("image_path", ""))
-
-    def _load_image(self, path: str):
-        if path and os.path.isfile(path):
-            px = QPixmap(path)
-            if not px.isNull():
-                self.lbl_image.setPixmap(self._crop(px))
-                self.lbl_image.setText("")
-                return
-        self.lbl_image.clear()
-        self.lbl_image.setText("Click to choose image")
+    def _on_desc_changed(self):
+        if self._selected:
+            self._tests[self._selected]["description"] = self.input_description.toPlainText()
 
     def _pick_image(self):
         if not self._selected:
@@ -163,15 +135,6 @@ class EditTestsDialog(QDialog):
             return
         self._tests[self._selected]["image_path"] = path
         self._load_image(path)
-
-    def _on_name_changed(self, text: str):
-        if self._selected:
-            self._tests[self._selected]["display_name"] = text
-            self._rows[self._selected].update_display_name(text)
-
-    def _on_desc_changed(self):
-        if self._selected:
-            self._tests[self._selected]["description"] = self.input_description.toPlainText()
 
     def _on_save_all(self):
         from .logic_sensor_repository import SensorRepository
@@ -204,12 +167,57 @@ class EditTestsDialog(QDialog):
         self.tests_saved.emit()
         self.accept()
 
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _populate_list(self, tests: list[dict]):
+        layout = self.scroll_tests_list_contents.layout()
+        for test in tests:
+            row = TestMetaRow(test, parent=self.scroll_tests_list_contents)
+            row.clicked.connect(self._select)
+            layout.addWidget(row)
+            self._rows[test["func_name"]] = row
+        layout.addStretch(1)
+
+    def _select(self, func_name: str):
+        if self._selected and self._selected in self._rows:
+            self._rows[self._selected].set_selected(False)
+
+        self._selected = func_name
+        self._rows[func_name].set_selected(True)
+        test = self._tests[func_name]
+
+        self.lbl_empty.setVisible(False)
+        self.wt_editor.setVisible(True)
+        self.lbl_missing_warn.setVisible(test.get("missing", False))
+
+        self.input_display_name.blockSignals(True)
+        self.input_description.blockSignals(True)
+        self.input_display_name.setText(test.get("display_name") or "")
+        self.input_func_name.setText(func_name)
+        self.input_description.setPlainText(test.get("description") or "")
+        self.input_display_name.blockSignals(False)
+        self.input_description.blockSignals(False)
+
+        self._load_image(test.get("image_path", ""))
+
+    def _load_image(self, path: str):
+        if path and os.path.isfile(path):
+            px = QPixmap(path)
+            if not px.isNull():
+                self.lbl_image.setPixmap(self._crop(px))
+                self.lbl_image.setText("")
+                return
+        self.lbl_image.clear()
+        self.lbl_image.setText("Click to choose image")
+
     def _crop(self, px: QPixmap) -> QPixmap:
         scaled = px.scaled(IMAGE_W, IMAGE_H, Qt.KeepAspectRatioByExpanding,
                            Qt.SmoothTransformation)
         x = (scaled.width()  - IMAGE_W) // 2
         y = (scaled.height() - IMAGE_H) // 2
         return scaled.copy(x, y, IMAGE_W, IMAGE_H)
+
+    # ── setup ─────────────────────────────────────────────────────────────────
 
     def _connect_signals(self):
         self.btn_close.clicked.connect(self.reject)
@@ -220,48 +228,53 @@ class EditTestsDialog(QDialog):
         self.input_description.textChanged.connect(self._on_desc_changed)
 
     def _setup_styles(self):
-        C = Colors
         self.setStyleSheet(f"""
+            QDialog {{ background: {LC.BG_PANEL}; }}
+            QWidget {{
+                background: {LC.BG_PANEL};
+                color: {LC.TEXT};
+                font-size: 13px;
+            }}
             QWidget#wt_titlebar {{
-                background-color: {C.BG_COLUMN};
-                border-bottom: 1px solid {C.BORDER};
+                background: {LC.BG};
+                border-bottom: 1px solid {LC.BORDER};
             }}
             QLabel#lbl_title {{
-                color: {C.TEXT_WHITE};
+                color: {LC.TEXT};
                 font-size: 14px;
                 font-weight: bold;
                 background: transparent;
             }}
             QWidget#wt_list_panel {{
-                background-color: {C.BG_COLUMN};
-                border-right: 1px solid {C.BORDER};
+                background: {LC.BG};
+                border-right: 1px solid {LC.BORDER};
             }}
             QLabel#row_display {{
-                color: {C.TEXT_BLACK};
+                color: {LC.TEXT};
                 font-size: 13px;
                 background: transparent;
             }}
             QLabel#row_func {{
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_MUTED};
                 font-size: 10px;
                 background: transparent;
             }}
             QLabel#row_warn {{
-                color: {C.STATUS_YELLOW};
+                color: {LC.ERROR};
                 font-size: 10px;
                 background: transparent;
             }}
             QWidget#wt_editor_panel {{
-                background-color: transparent;
+                background: {LC.BG};
             }}
             QLabel#lbl_func_badge {{
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_MUTED};
                 font-size: 11px;
                 font-family: monospace;
                 background: transparent;
             }}
             QLabel#lbl_empty {{
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_MUTED};
                 font-size: 13px;
                 background: transparent;
             }}
@@ -269,84 +282,84 @@ class EditTestsDialog(QDialog):
             QLabel#lbl_section_name,
             QLabel#lbl_section_func,
             QLabel#lbl_section_desc {{
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_SEC};
                 font-size: 10px;
                 font-weight: bold;
                 letter-spacing: 1px;
                 background: transparent;
             }}
             QWidget#wt_image_container {{
-                background-color: {C.BG_IMAGE};
-                border: 1px solid {C.BORDER};
+                background: {LC.BG_HOVER};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
             }}
             QLabel#lbl_image {{
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_MUTED};
                 font-size: 12px;
                 background: transparent;
             }}
             QLineEdit {{
-                border: 1px solid {C.BORDER_LIGHT};
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_BLACK};
+                color: {LC.TEXT};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
-            QLineEdit:focus {{ border-color: {C.ACCENT}; }}
+            QLineEdit:focus {{ border-color: {LC.ACCENT}; }}
             QLineEdit[readOnly="true"] {{
-                color: {C.TEXT_BLACK};
-                border-color: {C.BORDER};
+                color: {LC.TEXT_SEC};
+                background: {LC.BG_HOVER};
+                border-color: {LC.BORDER};
             }}
             QPlainTextEdit {{
-            background: transparent;
-                border: 1px solid {C.BORDER_LIGHT};
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_BLACK};
+                color: {LC.TEXT};
                 padding: 6px 10px;
                 font-size: 13px;
             }}
-            QPlainTextEdit:focus {{ border-color: {C.ACCENT}; }}
+            QPlainTextEdit:focus {{ border-color: {LC.ACCENT}; }}
             QLabel#lbl_missing_warn {{
-                color: {C.STATUS_YELLOW};
-                background-color: #2a2000;
-                border: 1px solid {C.STATUS_YELLOW};
+                color: {LC.ERROR};
+                background: #ffeaea;
+                border: 1px solid {LC.ERROR};
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 12px;
             }}
             QWidget#wt_footer {{
-                background-color: {C.BG_COLUMN};
-                border-top: 1px solid {C.BORDER};
+                background: {LC.BG};
+                border-top: 1px solid {LC.BORDER};
             }}
             QPushButton#btn_cancel {{
                 background: transparent;
-                border: 1px solid {C.BORDER_LIGHT};
+                border: 1px solid {LC.BORDER};
                 border-radius: 4px;
-                color: {C.TEXT_MUTED};
+                color: {LC.TEXT_SEC};
                 font-size: 13px;
                 padding: 0 16px;
             }}
-            QPushButton#btn_cancel:hover {{ background-color: {C.BG_CARD_HOVER}; }}
+            QPushButton#btn_cancel:hover {{ background: {LC.BG_HOVER}; color: {LC.TEXT}; }}
             QPushButton#btn_save {{
-                background-color: {C.ACCENT_DIM};
-                border: 1px solid {C.ACCENT};
+                background: {LC.ACCENT};
+                border: none;
                 border-radius: 4px;
-                color: {C.ACCENT};
+                color: #ffffff;
                 font-size: 13px;
                 font-weight: bold;
                 padding: 0 20px;
             }}
-            QPushButton#btn_save:hover {{ background-color: #1e3d50; }}
+            QPushButton#btn_save:hover {{ background: {LC.ACCENT_HVR}; }}
             QPushButton#btn_close {{
                 background: transparent;
                 border: none;
                 border-radius: 4px;
             }}
-            QPushButton#btn_close:hover {{ background-color: {C.BG_CARD_HOVER}; }}
-
-            {Styles.SCROLLBAR}
+            QPushButton#btn_close:hover {{ background: {LC.BG_HOVER}; }}
+            {LS.SCROLLBAR}
         """)
-
         self.btn_close.setIcon(Icons.CLOSE())
         self.btn_close.setIconSize(Layout.ICON_SIZE_SM)
-        self.lbl_title.setText(f"Edit tests")
+        self.lbl_title.setText("Edit tests")

@@ -9,7 +9,7 @@ from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
 from PyQt5 import uic
 
-from ._theme import Colors, Styles, Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
+from ._theme import Colors, Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "sensors")
 IMAGE_W, IMAGE_H = 300, 200
@@ -36,8 +36,8 @@ class AddSensorDialog(QDialog):
         self._sensor_id    = self._sensor_data.get("id")
         self._image_source = ""
         self._sdf_source   = ""
-        self._params:dict  = {}
-        self._topic_rows:list = []
+        self._params: dict = {}
+        self._topic_rows: list = []
         self._detected_type: str | None = None
 
         uic.loadUi(f"{QT_DIR}/add_sensor_dialog.ui", self)
@@ -49,40 +49,56 @@ class AddSensorDialog(QDialog):
         if self._edit_mode:
             self._prefill()
 
-    def _prefill(self):
-        d = self._sensor_data
-        self.dialog_title.setText("Edit sensor")
-        self.btn_save.setText("Save changes")
+    # ── public API ────────────────────────────────────────────────────────────
 
-        self.input_name.setText(d.get("name", ""))
+    # (none beyond __init__ / signals)
 
-        img = d.get("image_path", "")
-        if img and os.path.exists(img):
-            self._image_source = img
-            px = QPixmap(img)
-            if not px.isNull():
-                self.image_label.setPixmap(self._center_crop(px, IMAGE_W, IMAGE_H))
-                self.image_label.setText("")
+    # ── slots ─────────────────────────────────────────────────────────────────
 
-        sdf = d.get("sdf_path", "")
-        if sdf:
-            self._sdf_source = sdf
-            self.sdf_label.setText(os.path.basename(sdf))
+    def _on_save(self):
+        name = self.input_name.text().strip()
+        if not name:
+            self._flash_error(self.input_name)
+            return
+        if not self._sdf_source:
+            self._flash_error(self.sdf_label)
+            return
+        if self._detected_type == "unknown":
+            self._flash_error(self.lbl_detected_type)
+            return
 
-        sensor_type = d.get("type", "unknown")
-        self._set_detected_type(sensor_type)
-        self._populate_params(d.get("params", {}))
-        self.input_description.setPlainText(d.get("description", ""))
-        for t in d.get("topics", []):
-            self._add_topic_row(t)
+        asset_dir = os.path.join(ASSETS_DIR, name)
+        os.makedirs(asset_dir, exist_ok=True)
 
-    def _connect_signals(self):
-        self.btn_dialog_close.clicked.connect(self.reject)
-        self.btn_cancel.clicked.connect(self.reject)
-        self.btn_save.clicked.connect(self._on_save)
-        self.btn_browse_sdf.clicked.connect(self._pick_sdf)
-        self.image_container.mousePressEvent = lambda _: self._pick_image()
-        self.btn_add_topic.clicked.connect(lambda: self._add_topic_row(''))
+        sdf_dest = os.path.join(asset_dir, "model.sdf")
+        if os.path.abspath(self._sdf_source) != os.path.abspath(sdf_dest):
+            shutil.copy2(self._sdf_source, sdf_dest)
+
+        image_dest = self._sensor_data.get("image_path", "")
+        if self._image_source:
+            ext = os.path.splitext(self._image_source)[1].lower() or ".png"
+            image_dest = os.path.abspath(os.path.join(asset_dir, f"image{ext}"))
+            if os.path.abspath(self._image_source) != os.path.abspath(image_dest):
+                px = QPixmap(self._image_source)
+                if not px.isNull():
+                    self._center_crop(px, IMAGE_W, IMAGE_H).save(image_dest)
+                else:
+                    shutil.copy2(self._image_source, image_dest)
+
+        result = {
+            "name":        name,
+            "type":        self._detected_type or "unknown",
+            "sdf_path":    sdf_dest,
+            "image_path":  image_dest,
+            "description": self.input_description.toPlainText().strip(),
+            "params":      dict(self._params),
+            "topics":      self._collect_topics(),
+        }
+        if self._sensor_id:
+            result["id"] = self._sensor_id
+
+        self.sensor_saved.emit(result)
+        self.accept()
 
     def _pick_image(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -108,6 +124,62 @@ class AddSensorDialog(QDialog):
         self.sdf_label.setText(os.path.basename(path))
         self._on_sdf_selected(path)
 
+    def _add_topic_row(self, topic: str = ""):
+        row = QFrame()
+        row.setObjectName("topic_row")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(4, 2, 4, 2)
+        h.setSpacing(4)
+        edit = QLineEdit(topic)
+        edit.setObjectName("field_input")
+        edit.setPlaceholderText("/topic/name")
+        btn = QPushButton("✕")
+        btn.setObjectName("btn_remove_topic")
+        btn.setFixedSize(22, 22)
+        btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {LC.TEXT_MUTED}; font-size: 12px; }}"
+            f"QPushButton:hover {{ color: {LC.ERROR}; }}"
+        )
+        btn.clicked.connect(lambda: self._remove_topic_row(row))
+        h.addWidget(edit)
+        h.addWidget(btn)
+        lay = self.topics_layout
+        lay.insertWidget(lay.count() - 1, row)
+        self._topic_rows.append(row)
+
+    def _remove_topic_row(self, row):
+        if row in self._topic_rows:
+            self._topic_rows.remove(row)
+        self.topics_layout.removeWidget(row)
+        row.deleteLater()
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _prefill(self):
+        d = self._sensor_data
+        self.dialog_title.setText("Edit sensor")
+        self.btn_save.setText("Save changes")
+        self.input_name.setText(d.get("name", ""))
+
+        img = d.get("image_path", "")
+        if img and os.path.exists(img):
+            self._image_source = img
+            px = QPixmap(img)
+            if not px.isNull():
+                self.image_label.setPixmap(self._center_crop(px, IMAGE_W, IMAGE_H))
+                self.image_label.setText("")
+
+        sdf = d.get("sdf_path", "")
+        if sdf:
+            self._sdf_source = sdf
+            self.sdf_label.setText(os.path.basename(sdf))
+
+        self._set_detected_type(d.get("type", "unknown"))
+        self._populate_params(d.get("params", {}))
+        self.input_description.setPlainText(d.get("description", ""))
+        for t in d.get("topics", []):
+            self._add_topic_row(t)
+
     def _on_sdf_selected(self, path: str):
         if self._core is None:
             self._set_detected_type("unknown")
@@ -115,57 +187,38 @@ class AddSensorDialog(QDialog):
             return
 
         sensor_type = self._core.detect_sensor_type(path)
-
         if sensor_type is None:
             self._set_detected_type("unknown")
             self._populate_params({})
             return
 
         self._set_detected_type(sensor_type)
-
         try:
             from src.sensors.sensor import Sensor as SensorModel
-            instance = SensorModel(
-                sensor_type = sensor_type,
-                sensor_name = "",
-                sdf_path    = path,
-            )
-            params = self._core.read_sensor_params(instance)
-            self._populate_params(params)
+            instance = SensorModel(sensor_type=sensor_type, sensor_name="", sdf_path=path)
+            self._populate_params(self._core.read_sensor_params(instance))
         except Exception:
             self._populate_params({})
 
-        # Auto-detect topics from SDF
         for row in list(self._topic_rows):
             self._remove_topic_row(row)
         try:
-            from sensor import detect_topics_from_sdf
+            from src.sensors.sensor import detect_topics_from_sdf
         except ImportError:
-            try:
-                from src.sensors.sensor import detect_topics_from_sdf
-            except ImportError:
-                detect_topics_from_sdf = None
+            detect_topics_from_sdf = None
         if detect_topics_from_sdf:
             for t in (detect_topics_from_sdf(path) or []):
                 self._add_topic_row(t)
 
     def _set_detected_type(self, sensor_type: str | None):
         self._detected_type = sensor_type
-        if sensor_type != "unknown":
-            color = Colors.STATUS_GREEN
-            display = sensor_type
-        else:
-            color = Colors.STATUS_YELLOW
-            display = "unknown"
-
+        color   = Colors.STATUS_GREEN if sensor_type != "unknown" else Colors.STATUS_YELLOW
+        display = sensor_type or "unknown"
         dot = getattr(self, "lbl_type_dot", None)
-        if dot is not None:
+        if dot:
             dot.setStyleSheet(f"color: {color}; background: transparent;")
-
         self.lbl_detected_type.setText(display)
-        self.lbl_detected_type.setStyleSheet(
-            f"color: {color}; background: transparent;"
-        )
+        self.lbl_detected_type.setStyleSheet(f"color: {color}; background: transparent;")
 
     def _populate_params(self, params: dict):
         while self.params_layout.count() > 1:
@@ -201,66 +254,6 @@ class AddSensorDialog(QDialog):
         h.addWidget(edit_val)
         return row
 
-    def _on_save(self):
-        name = self.input_name.text().strip()
-        if not name:
-            self._flash_error(self.input_name)
-            return
-        if not self._sdf_source:
-            self._flash_error(self.sdf_label)
-            return
-        if self._detected_type == "unknown":
-            self._flash_error(self.lbl_detected_type)
-            return
-        
-
-        asset_dir = os.path.join(ASSETS_DIR, name)
-        os.makedirs(asset_dir, exist_ok=True)
-
-        sdf_dest = os.path.join(asset_dir, "model.sdf")
-        if os.path.abspath(self._sdf_source) != os.path.abspath(sdf_dest):
-            shutil.copy2(self._sdf_source, sdf_dest)
-
-        image_dest = self._sensor_data.get("image_path", "")
-        if self._image_source:
-            ext = os.path.splitext(self._image_source)[1].lower() or ".png"
-            image_dest = os.path.abspath(os.path.join(asset_dir, f"image{ext}"))
-            if os.path.abspath(self._image_source) != os.path.abspath(image_dest):
-                px = QPixmap(self._image_source)
-                if not px.isNull():
-                    self._center_crop(px, IMAGE_W, IMAGE_H).save(image_dest)
-                else:
-                    shutil.copy2(self._image_source, image_dest)
-
-        result = {
-            "name":        name,
-            "type":        self._detected_type or "unknown",
-            "sdf_path":    sdf_dest,
-            "image_path":  image_dest,
-            "description": self.input_description.toPlainText().strip(),
-            "params":      dict(self._params),
-            "topics":      self._collect_topics(),
-        }
-        if self._sensor_id:
-            result["id"] = self._sensor_id
-
-        self.sensor_saved.emit(result)
-        self.accept()
-
-
-    @staticmethod
-    def _center_crop(px: QPixmap, w: int, h: int) -> QPixmap:
-        scaled = px.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        x = (scaled.width()  - w) // 2
-        y = (scaled.height() - h) // 2
-        return scaled.copy(x, y, w, h)
-
-    def _flash_error(self, widget: QWidget):
-        orig = widget.styleSheet()
-        widget.setStyleSheet(orig + "border: 1px solid #ef4444;")
-        QTimer.singleShot(1200, lambda: widget.setStyleSheet(orig))
-
-
     def _collect_topics(self) -> list:
         result = []
         for row in self._topic_rows:
@@ -271,40 +264,31 @@ class AddSensorDialog(QDialog):
                     result.append(t)
         return result
 
-    def _add_topic_row(self, topic: str = ''):
-        row = QFrame()
-        row.setObjectName('topic_row')
-        h = QHBoxLayout(row)
-        h.setContentsMargins(4, 2, 4, 2)
-        h.setSpacing(4)
-        edit = QLineEdit(topic)
-        edit.setObjectName('field_input')
-        edit.setPlaceholderText('/topic/name')
-        btn = QPushButton('✕')
-        btn.setObjectName('btn_remove_topic')
-        btn.setFixedSize(22, 22)
-        btn.setStyleSheet(
-            f'QPushButton {{ background: transparent; border: none; color: {LC.TEXT_MUTED}; font-size: 12px; }}'
-            f'QPushButton:hover {{ color: {LC.ERROR}; }}'
-        )
-        btn.clicked.connect(lambda: self._remove_topic_row(row))
-        h.addWidget(edit)
-        h.addWidget(btn)
-        lay = self.topics_layout
-        lay.insertWidget(lay.count() - 1, row)
-        self._topic_rows.append(row)
+    def _flash_error(self, widget: QWidget):
+        orig = widget.styleSheet()
+        widget.setStyleSheet(orig + "border: 1px solid #ef4444;")
+        QTimer.singleShot(1200, lambda: widget.setStyleSheet(orig))
 
-    def _remove_topic_row(self, row):
-        if row in self._topic_rows:
-            self._topic_rows.remove(row)
-        self.topics_layout.removeWidget(row)
-        row.deleteLater()
+    @staticmethod
+    def _center_crop(px: QPixmap, w: int, h: int) -> QPixmap:
+        scaled = px.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        x = (scaled.width()  - w) // 2
+        y = (scaled.height() - h) // 2
+        return scaled.copy(x, y, w, h)
+
+    # ── setup ─────────────────────────────────────────────────────────────────
+
+    def _connect_signals(self):
+        self.btn_dialog_close.clicked.connect(self.reject)
+        self.btn_cancel.clicked.connect(self.reject)
+        self.btn_save.clicked.connect(self._on_save)
+        self.btn_browse_sdf.clicked.connect(self._pick_sdf)
+        self.image_container.mousePressEvent = lambda _: self._pick_image()
+        self.btn_add_topic.clicked.connect(lambda: self._add_topic_row(""))
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
-            QDialog {{
-                background: {LC.BG_PANEL};
-            }}
+            QDialog {{ background: {LC.BG_PANEL}; }}
             QWidget {{
                 background: {LC.BG_PANEL};
                 color: {LC.TEXT};
@@ -341,7 +325,8 @@ class AddSensorDialog(QDialog):
             }}
             QLabel#lbl_section_image, QLabel#lbl_section_name,
             QLabel#lbl_section_sdf,   QLabel#lbl_section_type,
-            QLabel#lbl_section_params, QLabel#lbl_section_description, QLabel#lbl_section_topics {{
+            QLabel#lbl_section_params, QLabel#lbl_section_description,
+            QLabel#lbl_section_topics {{
                 color: {LC.TEXT_SEC};
                 font-size: 11px;
                 font-weight: 600;
@@ -430,7 +415,10 @@ class AddSensorDialog(QDialog):
                 border-radius: 4px;
             }}
             QWidget#topics_contents {{ background: {LC.BG}; }}
-            QFrame#topic_row {{ background: transparent; border-bottom: 1px solid {LC.BG_HOVER}; }}
+            QFrame#topic_row {{
+                background: transparent;
+                border-bottom: 1px solid {LC.BG_HOVER};
+            }}
             QPushButton#btn_add_topic {{
                 background: transparent;
                 border: 1px dashed {LC.BORDER};

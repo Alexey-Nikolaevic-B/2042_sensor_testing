@@ -205,6 +205,7 @@ class ColSensors(QWidget):
     add_requested         = pyqtSignal()
     delete_requested      = pyqtSignal(str)    # sensor_id
     add_type_requested    = pyqtSignal()
+    edit_type_requested   = pyqtSignal(str)    # sensor_type
     delete_type_requested = pyqtSignal(str)    # sensor_type
 
     # Sensor types that ship with the app — cannot be deleted from the UI
@@ -293,6 +294,39 @@ class ColSensors(QWidget):
         dlg.type_saved.connect(self._on_type_saved)
         dlg.exec_()
 
+    def _open_edit_type_dialog(self):
+        if not self._selected_type:
+            return
+        from .dialog_add_sensor_type import AddSensorTypeDialog
+        try:
+            from src.tests import TESTS
+            existing_tests = sorted(TESTS.keys())
+        except Exception:
+            existing_tests = []
+        try:
+            import src.database.sensor_storage as db
+            type_def = db.get_sensor_type(self._selected_type) or {}
+            tests    = db.get_type_tests(self._selected_type)
+        except Exception:
+            type_def = {}
+            tests    = []
+
+        prefill = {
+            "name":        type_def.get("sensor_type", self._selected_type),
+            "description": type_def.get("description", ""),
+            "params":      type_def.get("params", []),
+            "detection":   type_def.get("detection", {}),
+            "tests":       tests,
+        }
+        dlg = AddSensorTypeDialog(
+            existing_tests = existing_tests,
+            mode           = "edit",
+            prefill        = prefill,
+            parent         = self,
+        )
+        dlg.type_saved.connect(self._on_type_saved)
+        dlg.exec_()
+
     def _on_type_saved(self, definition: dict):
         """Reload type list from DB so display always matches persisted state."""
         try:
@@ -313,10 +347,12 @@ class ColSensors(QWidget):
             self._selected_type = None
             self._current_filter = None
             self.wt_filter_badge.setVisible(False)
+            self.btn_edit_type.setEnabled(False)
             self._apply_search()
             return
         self._selected_type = sensor_type
         self._type_cells[sensor_type].set_selected(True)
+        self.btn_edit_type.setEnabled(True)
         self._apply_filter(sensor_type)
 
     def _toggle_delete_mode(self, active: bool):
@@ -389,6 +425,7 @@ class ColSensors(QWidget):
             (self.btn_delete,       Icons.CLEAR()),
             (self.btn_clear_filter, Icons.CLOSE()),
             (self.btn_add_type,     Icons.ADD()),
+            (self.btn_edit_type,    Icons.EDIT()),
             (self.btn_delete_type,  Icons.CLEAR()),
         ]:
             btn.setIcon(icon)
@@ -424,6 +461,7 @@ class ColSensors(QWidget):
         self.btn_add.clicked.connect(self.add_requested)
         self.btn_delete.toggled.connect(self._toggle_delete_mode)
         self.btn_add_type.clicked.connect(self._open_add_type_dialog)
+        self.btn_edit_type.clicked.connect(self._open_edit_type_dialog)
         self.btn_delete_type.toggled.connect(self._toggle_delete_type_mode)
         self.delete_type_requested.connect(self._on_delete_type)
 
@@ -479,6 +517,7 @@ class ColSensors(QWidget):
         if self._selected_type and self._selected_type in self._type_cells:
             self._type_cells[self._selected_type].set_selected(False)
         self._selected_type = None
+        self.btn_edit_type.setEnabled(False)
         self._apply_search()
 
     def _apply_search(self):

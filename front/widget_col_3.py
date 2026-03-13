@@ -5,7 +5,6 @@ from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 from .widget_test_item import TestItem
-from .widget_col_2 import DESCRIPTION_STYLE, IMAGE_H, TOOLBAR_H, NAME_H, DESC_H
 from .logic_queue_manager import TestStatus
 
 
@@ -20,15 +19,16 @@ class ColTests(QWidget):
         self._backend      = None
         self._qm           = None
         self._repo         = None
-        self._simulator    = None  # set via set_simulator()
+        self._simulator    = None
         self._widgets: dict[str, TestItem] = {}
         self._selected: str | None = None
-        self._runner_log_forward = None   # set by ui_main: col_4.append_log
+        self._runner_log_forward = None
 
-        self._enforce_heights()
+        self._setup_heights()
         self._setup_styles()
         self._connect_toolbar()
 
+    # ── public API ────────────────────────────────────────────────────────────
 
     def set_runner(self, queue_manager, repo):
         self._qm   = queue_manager
@@ -42,15 +42,7 @@ class ColTests(QWidget):
             )
 
     def set_simulator(self, simulator) -> None:
-        """Receive simulator reference so lock/step can control step-mode."""
         self._simulator = simulator
-        print(f"[DEBUG col_3] set_simulator: {simulator}")
-
-    def _log(self, level: str, msg: str):
-        if self._runner_log_forward:
-            self._runner_log_forward(level, "col_3", msg)
-        else:
-            print(f"[col_3/{level}] {msg}")
 
     def load_sensor(self, sensor_data: dict):
         from .logic_sensor_repository import SensorRepository
@@ -70,6 +62,8 @@ class ColTests(QWidget):
         self._reset_detail_panel()
         self._populate_tests([])
 
+    # ── slots — queue state ───────────────────────────────────────────────────
+
     def _on_state_changed(self, sensor_id: str, func_name: str, status: TestStatus):
         try:
             if sensor_id != self._sensor_id:
@@ -77,9 +71,8 @@ class ColTests(QWidget):
             w = self._widgets.get(func_name)
             if w:
                 w.set_status(status)
-            self._sync_run_all_button()
         except Exception as exc:
-            self._log("error", f"_on_state_changed error: {exc}")
+            self._log("error", f"_on_state_changed: {exc}")
 
     def _on_progress_changed(self, sensor_id: str, func_name: str, value: int):
         try:
@@ -89,7 +82,7 @@ class ColTests(QWidget):
             if w:
                 w.set_progress(value)
         except Exception as exc:
-            self._log("error", f"_on_progress_changed error: {exc}")
+            self._log("error", f"_on_progress_changed: {exc}")
 
     def _on_item_result(self, sensor_id: str, func_name: str, result: dict):
         try:
@@ -99,54 +92,26 @@ class ColTests(QWidget):
             if w:
                 w.set_result(result)
         except Exception as exc:
-            self._log("error", f"_on_item_result error: {exc}")
+            self._log("error", f"_on_item_result: {exc}")
 
-    def _on_item_lock_changed(self, func_name: str, locked: bool):
-        print(f"[DEBUG col_3] _on_item_lock_changed: func={func_name} locked={locked} simulator={self._simulator}")
-        if self._simulator:
-            self._simulator.set_step_mode(locked)
-            print(f"[DEBUG col_3] set_step_mode({locked}) called, _step_mode={self._simulator._step_mode}")
-
-    def _on_item_step(self, func_name: str):
-        print(f"[DEBUG col_3] _on_item_step: func={func_name} simulator={self._simulator}")
-        if self._simulator:
-            gate = self._simulator._step_gate
-            print(f"[DEBUG col_3] advance_step: gate={gate} is_set={gate.is_set() if gate else None}")
-            self._simulator.advance_step()
+    # ── slots — test item actions ─────────────────────────────────────────────
 
     def _on_item_run(self, func_name: str):
         if not self._qm:
             return
         if not self._backend:
-            self._log("error", f"Cannot run '{func_name}': sensor backend failed to load. Check sensor type/SDF.")
+            self._log("error", f"Cannot run '{func_name}': sensor backend failed to load.")
             return
         tests = self._qm.get_tests(self._backend)
         func  = tests.get(func_name)
         if func is None:
-            self._log("error", f"Cannot run '{func_name}': test function not found. Available: {list(tests.keys())}")
+            self._log("error", f"Test '{func_name}' not found. Available: {list(tests.keys())}")
             return
         self._qm.enqueue(self._sensor_id, func_name, self._backend, func, sensor=self._backend)
 
     def _on_item_stop(self, func_name: str):
         if self._qm:
             self._qm.cancel(self._sensor_id, func_name)
-
-    def _on_run_all(self):
-        if not self._qm:
-            return
-        if not self._backend:
-            self._log("error", "Cannot run tests: sensor backend failed to load. Check sensor type/SDF.")
-            return
-        tests = self._qm.get_tests(self._backend)
-        queued = 0
-        skip_statuses = (TestStatus.QUEUED, TestStatus.RUNNING)
-        for func_name, func in tests.items():
-            w = self._widgets.get(func_name)
-            if w and w.test_status not in skip_statuses:
-                self._qm.enqueue(self._sensor_id, func_name, self._backend, func, sensor=self._backend)
-                queued += 1
-        if queued == 0:
-            self._log("info", "All tests are already queued or running.")
 
     def _on_item_selected(self, func_name: str):
         if self._selected and self._selected in self._widgets:
@@ -159,6 +124,33 @@ class ColTests(QWidget):
             self.lbl_test_description.setText(w.test_description)
             self._load_test_image(w._image_path)
 
+    def _on_item_lock_changed(self, func_name: str, locked: bool):
+        if self._simulator:
+            self._simulator.set_step_mode(locked)
+
+    def _on_item_step(self, func_name: str):
+        if self._simulator:
+            self._simulator.advance_step()
+
+    # ── slots — toolbar ───────────────────────────────────────────────────────
+
+    def _on_run_all(self):
+        if not self._qm:
+            return
+        if not self._backend:
+            self._log("error", "Cannot run tests: sensor backend failed to load.")
+            return
+        tests = self._qm.get_tests(self._backend)
+        skip  = (TestStatus.QUEUED, TestStatus.RUNNING)
+        queued = 0
+        for func_name, func in tests.items():
+            w = self._widgets.get(func_name)
+            if w and w.test_status not in skip:
+                self._qm.enqueue(self._sensor_id, func_name, self._backend, func, sensor=self._backend)
+                queued += 1
+        if queued == 0:
+            self._log("info", "All tests are already queued or running.")
+
     def _on_edit_tests(self):
         if not self._sensor_data:
             return
@@ -167,6 +159,67 @@ class ColTests(QWidget):
         except Exception:
             import traceback
             traceback.print_exc()
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _log(self, level: str, msg: str):
+        if self._runner_log_forward:
+            self._runner_log_forward(level, "col_3", msg)
+        else:
+            print(f"[col_3/{level}] {msg}")
+
+    def _make_backend(self, sensor_data: dict):
+        try:
+            from src.sensors.sensor import Sensor as SensorModel
+            return SensorModel(
+                sensor_type = sensor_data.get("type", ""),
+                sensor_name = sensor_data.get("name", ""),
+                sdf_path    = sensor_data.get("sdf_path", ""),
+                topics      = sensor_data.get("topics", []),
+                description = sensor_data.get("description", ""),
+                image_path  = sensor_data.get("image_path", ""),
+                params      = sensor_data.get("params", {}),
+            )
+        except Exception as exc:
+            import traceback
+            self._log("error", f"Backend init failed: {exc}\n{traceback.format_exc()}")
+            return None
+
+    def _populate_tests(self, tests: list):
+        layout = self.scroll_tests_contents.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._widgets.clear()
+
+        for td in tests:
+            w = TestItem(parent=self)
+            w.load(td)
+            w.run_requested.connect(self._on_item_run)
+            w.stop_requested.connect(self._on_item_stop)
+            w.selected.connect(self._on_item_selected)
+            w.lock_changed.connect(self._on_item_lock_changed)
+            w.step_requested.connect(self._on_item_step)
+            layout.addWidget(w)
+            self._widgets[td["name"]] = w
+
+        layout.addStretch(1)
+
+        if self._qm and self._sensor_id:
+            self._restore_live_states()
+
+    def _restore_live_states(self):
+        running = self._qm.get_running()
+        queued  = self._qm.get_queued_for_sensor(self._sensor_id)
+        for func_name, status in queued.items():
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_status(status)
+        if running and running[0] == self._sensor_id:
+            w = self._widgets.get(running[1])
+            if w:
+                w.set_status(TestStatus.RUNNING)
 
     def _open_edit_tests_dialog(self):
         from .dialog_edit_tests import EditTestsDialog
@@ -224,67 +277,6 @@ class ColTests(QWidget):
             self.lbl_test_description.setText(w.test_description)
             self._load_test_image(w._image_path)
 
-    def _sync_run_all_button(self):
-        pass  # btn_run_all is always enabled
-
-    def _make_backend(self, sensor_data: dict):
-        """Build a Sensor instance from sensor_data dict (new generic system)."""
-        try:
-            from src.sensors.sensor import Sensor as SensorModel
-            return SensorModel(
-                sensor_type = sensor_data.get("type", ""),
-                sensor_name = sensor_data.get("name", ""),
-                sdf_path    = sensor_data.get("sdf_path", ""),
-                topics      = sensor_data.get("topics", []),
-                description = sensor_data.get("description", ""),
-                image_path  = sensor_data.get("image_path", ""),
-                params      = sensor_data.get("params", {}),
-            )
-        except Exception as exc:
-            import traceback
-            self._log("error", f"Backend init failed: {exc}\n{traceback.format_exc()}")
-            return None
-
-    def _populate_tests(self, tests: list):
-        layout = self.scroll_tests_contents.layout()
-        while layout.count():
-            item = layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._widgets.clear()
-
-        for td in tests:
-            w = TestItem(parent=self)
-            w.load(td)
-            w.run_requested.connect(self._on_item_run)
-            w.stop_requested.connect(self._on_item_stop)
-            w.selected.connect(self._on_item_selected)
-            w.lock_changed.connect(self._on_item_lock_changed)
-            w.step_requested.connect(self._on_item_step)
-            layout.addWidget(w)
-            self._widgets[td["name"]] = w
-
-        layout.addStretch(1)
-
-        if self._qm and self._sensor_id:
-            self._restore_live_states()
-
-        self._sync_run_all_button()
-
-    def _restore_live_states(self):
-        running = self._qm.get_running()
-        queued  = self._qm.get_queued_for_sensor(self._sensor_id)
-
-        for func_name, status in queued.items():
-            w = self._widgets.get(func_name)
-            if w:
-                w.set_status(status)
-
-        if running and running[0] == self._sensor_id:
-            w = self._widgets.get(running[1])
-            if w:
-                w.set_status(TestStatus.RUNNING)
-
     def _reset_detail_panel(self):
         self.lbl_test_image.clear()
         self.lbl_test_image.setText("no test image")
@@ -307,11 +299,13 @@ class ColTests(QWidget):
         self.lbl_test_image.clear()
         self.lbl_test_image.setText("no test image")
 
-    def _enforce_heights(self):
-        self.lbl_test_image.setFixedHeight(IMAGE_H)
-        self.wt_toolbar.setFixedHeight(TOOLBAR_H)
-        self.lbl_selected_test_name.setFixedHeight(NAME_H)
-        self.scroll_description.setFixedHeight(DESC_H)
+    # ── setup ─────────────────────────────────────────────────────────────────
+
+    def _setup_heights(self):
+        self.lbl_test_image.setFixedHeight(Layout.IMAGE_H)
+        self.wt_toolbar.setFixedHeight(Layout.TOOLBAR_H)
+        self.lbl_selected_test_name.setFixedHeight(Layout.NAME_H)
+        self.scroll_description.setFixedHeight(Layout.DESC_H)
 
     def _connect_toolbar(self):
         self.btn_run_all.clicked.connect(self._on_run_all)
@@ -339,7 +333,9 @@ class ColTests(QWidget):
             QWidget#scroll_tests_contents {{ background: transparent; }}
             {Styles.SCROLLBAR}
         """)
-        self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)
+        self.scroll_description.setStyleSheet(
+            Styles.DESCRIPTION_AREA
+        )
         for btn, icon in [
             (self.btn_run_all,    Icons.RUN_ALL()),
             (self.btn_add_test,   Icons.ADD()),
