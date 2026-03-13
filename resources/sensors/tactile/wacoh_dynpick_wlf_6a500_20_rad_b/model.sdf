@@ -31,7 +31,10 @@
           </cylinder>
         </geometry>
       </visual>
-      <!-- Rated limits: Fx/Fy/Fz 500 N, Tx/Ty/Tz 20 Nm -->
+    </link>
+    <joint name="ft_joint" type="fixed">
+      <parent>world</parent>
+      <child>body</child>
       <sensor name="ft_sensor" type="force_torque">
         <always_on>true</always_on>
         <update_rate>1000</update_rate>
@@ -41,6 +44,6 @@
           <measure_direction>child_to_parent</measure_direction>
         </force_torque>
       </sensor>
-    </link>
+    </joint>
   </model>
 </sdf>
