@@ -89,14 +89,20 @@ class TactileProfileBase(Sensor):
                 harness.apply_body_wrench((0.0, 0.0, -force_n), duration_s=0.6)
                 samples = harness.collect_window(stream, duration_s=0.7)
                 summary = harness.sample_summary(samples)
+                stable_slice = samples[-max(20, len(samples) // 4):] if samples else []
+                stable_summary = harness.sample_summary(stable_slice or samples)
                 steps.append(
                     {
                         "command_force_n": float(force_n),
                         "response_summary": summary,
+                        "stable_response_summary": stable_summary,
                         "samples": harness.serialize_samples(samples),
                     }
                 )
-                if summary["mean_normal_force"] >= (0.8 * force_n) and summary["std_normal_force"] <= 0.25 * max(force_n, 1e-6):
+                if (
+                    stable_summary["mean_normal_force"] >= (0.8 * force_n)
+                    and stable_summary["std_normal_force"] <= 0.20 * max(force_n, 1e-6)
+                ):
                     threshold_force = float(force_n)
                     break
 
@@ -106,7 +112,8 @@ class TactileProfileBase(Sensor):
                 "threshold_force": threshold_force,
                 "pass_criterion_n": 2.0,
                 "assumptions": self._default_assumptions() + [
-                    "Stable triggering is treated as mean response >= 80% of commanded load with <= 25% windowed standard deviation.",
+                    "Stable triggering is evaluated on the last quarter of the sampling window to suppress the initial application transient.",
+                    "Stable triggering is treated as mean response >= 80% of commanded load with <= 20% tail-window standard deviation.",
                 ],
             }
             payload["metric_path"] = harness.write_metric("t1_minimum_force_test", payload)
