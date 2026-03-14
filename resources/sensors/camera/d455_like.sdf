@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="d455_like_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+    <link name="camera_link">
+      <collision name="collision">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </visual>
+      <sensor name="d455_like" type="depth">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="d455_like">
+          <horizontal_fov>1.501</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.52</near>
+            <far>12.0</far>
+          </clip>
+        </camera>
+        <plugin name="d455_like_depth_plugin" filename="libgazebo_ros_depth_camera.so">
+          <cameraName>d455_like</cameraName>
+          <ros>
+            <namespace>/d455_like</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>depth/image_raw:=depth/image_raw</argument>
+            <argument>points:=points</argument>
+          </ros>
+          <frame_name>d455_like_optical_frame</frame_name>
+          <optical_frame_id>d455_like_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

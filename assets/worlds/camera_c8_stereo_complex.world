@@ -1,0 +1,201 @@
+<?xml version="1.0" ?>
+<!--
+  Что это:
+  - Сцена C8 для stereo-проверок на комплексной геометрии и фоне.
+  - Стена на X=5.0 разделена на 2 половины: `wall_left` (гладкая) и `wall_right` (визуально текстурная).
+  - На дистанциях X=2.0 и X=4.5 размещены по 2 объекта (cube + sphere).
+
+  Как используется:
+  - Сцена статична, камера в world не добавляется.
+  - Камера подключается существующим механизмом симулятора.
+
+  Model names:
+  - wall_left, wall_right, obj_near_cube, obj_near_sphere, obj_far_cube, obj_far_sphere
+-->
+<sdf version="1.6">
+  <world name="camera_c8_stereo_complex">
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.5 0.5 0.5 1</background>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <model name="wall_left">
+      <pose>5.0 -1.0 1.0 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_right">
+      <pose>5.0 1.0 1.0 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+        </collision>
+
+        <visual name="base">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.25 0.25 0.25 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
+          </material>
+        </visual>
+
+        <visual name="stripe_1">
+          <pose>0 -0.75 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+
+        <visual name="stripe_2">
+          <pose>0 -0.25 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.70 0.70 0.70 1</ambient>
+            <diffuse>0.70 0.70 0.70 1</diffuse>
+          </material>
+        </visual>
+
+        <visual name="stripe_3">
+          <pose>0 0.25 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+
+        <visual name="stripe_4">
+          <pose>0 0.75 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.70 0.70 0.70 1</ambient>
+            <diffuse>0.70 0.70 0.70 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obj_near_cube">
+      <pose>2.0 -0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+          <material>
+            <ambient>1.0 0.2 0.2 1</ambient>
+            <diffuse>1.0 0.2 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obj_near_sphere">
+      <pose>2.0 0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <sphere><radius>0.1</radius></sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.1</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>0.2 1.0 0.2 1</ambient>
+            <diffuse>0.2 1.0 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obj_far_cube">
+      <pose>4.5 -0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+          <material>
+            <ambient>0.2 0.2 1.0 1</ambient>
+            <diffuse>0.2 0.2 1.0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obj_far_sphere">
+      <pose>4.5 0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <sphere><radius>0.1</radius></sphere>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <sphere><radius>0.1</radius></sphere>
+          </geometry>
+          <material>
+            <ambient>1.0 1.0 0.2 1</ambient>
+            <diffuse>1.0 1.0 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

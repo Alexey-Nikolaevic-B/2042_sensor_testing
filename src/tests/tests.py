@@ -2,6 +2,7 @@ import math
 import time
 import logging
 from enum import Enum
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 #   3. Reference it in your test:  world = Worlds.MY_WORLD.value
 #
 class Worlds(str, Enum):
-    path  = '/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds'
+    path  = Config('ROOT_PATH')
 
     # RFID
     RFID_CHANGE_DISTANCE  = f"{path}/rfid_change_distance.world"
@@ -25,9 +26,8 @@ class Worlds(str, Enum):
     RFID_MOVE_TAGS        = f"{path}/rfid_move_tags.world"
     RFID_ANTENNA_ROTATION = f"{path}/rfid_antenna_rotation.world"
     # Camera
-    CAMERA_SMOKE          = f"{path}/rfid_antenna_rotation.world"
-    CAMERA_DEPTH_ACCURACY = f"{path}/rfid_antenna_rotation.world"
-    CAMERA_RESOLUTION     = f"{path}/rfid_antenna_rotation.world"
+    c1 = f"{path}/camera_c1_single_cube.world"
+    
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -593,6 +593,14 @@ def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
         "sep_contours":     sep_results,
         "saved_to":         save_dir,
     }
+
+# ███╗░░░███╗░█████╗░███╗░░██╗░█████╗░░█████╗░░█████╗░███╗░░░███╗███████╗██████╗░░█████╗░
+# ████╗░████║██╔══██╗████╗░██║██╔══██╗██╔══██╗██╔══██╗████╗░████║██╔════╝██╔══██╗██╔══██╗
+# ██╔████╔██║██║░░██║██╔██╗██║██║░░██║██║░░╚═╝███████║██╔████╔██║█████╗░░██████╔╝███████║
+# ██║╚██╔╝██║██║░░██║██║╚████║██║░░██║██║░░██╗██╔══██║██║╚██╔╝██║██╔══╝░░██╔══██╗██╔══██║
+# ██║░╚═╝░██║╚█████╔╝██║░╚███║╚█████╔╝╚█████╔╝██║░░██║██║░╚═╝░██║███████╗██║░░██║██║░░██║
+# ╚═╝░░░░░╚═╝░╚════╝░╚═╝░░╚══╝░╚════╝░░╚════╝░╚═╝░░╚═╝╚═╝░░░░░╚═╝╚══════╝╚═╝░░╚═╝╚═╝░░╚═╝
+
 
 
 

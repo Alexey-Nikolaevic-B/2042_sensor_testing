@@ -1,0 +1,43 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="azure_kinect_wfov_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+    <link name="camera_link">
+      <collision name="collision">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </visual>
+      <sensor name="azure_kinect_wfov" type="depth">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="azure_kinect_wfov">
+          <horizontal_fov>2.094</horizontal_fov>
+          <image>
+            <width>512</width>
+            <height>512</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.25</near>
+            <far>2.88</far>
+          </clip>
+        </camera>
+        <plugin name="azure_kinect_wfov_depth_plugin" filename="libgazebo_ros_depth_camera.so">
+          <cameraName>azure_kinect_wfov</cameraName>
+          <ros>
+            <namespace>/azure_kinect_wfov</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>depth/image_raw:=depth/image_raw</argument>
+            <argument>points:=points</argument>
+          </ros>
+          <frame_name>azure_kinect_wfov_optical_frame</frame_name>
+          <optical_frame_id>azure_kinect_wfov_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>
