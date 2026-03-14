@@ -57,7 +57,7 @@
      <property name="bottomMargin"><number>0</number></property>
 
      <!-- ════════════════════════════════════════
-          LEFT PANEL — name / desc / params / detection
+          LEFT PANEL — name / detection / params
           ════════════════════════════════════════ -->
      <item>
       <widget class="QWidget" name="panel_left">
@@ -83,62 +83,7 @@
 
         <item><widget class="QLabel" name="lbl_gap1"><property name="text"><string/></property><property name="maximumHeight"><number>4</number></property></widget></item>
 
-        <!-- DESCRIPTION -->
-        <item>
-         <widget class="QLabel" name="lbl_desc_section">
-          <property name="text"><string>DESCRIPTION</string></property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QTextEdit" name="inp_desc">
-          <property name="placeholderText"><string>What this sensor does, where it is used…</string></property>
-          <property name="maximumHeight"><number>144</number></property>
-         </widget>
-        </item>
-
-        <item><widget class="QFrame" name="line_1"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
-
-        <!-- PARAMETERS — scroll expands to fill space -->
-        <item>
-         <widget class="QLabel" name="lbl_params_section">
-          <property name="text"><string>PARAMETERS</string></property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QLabel" name="lbl_params_hint">
-          <property name="text"><string>Each name is used as the XML tag to read the value from the SDF, e.g. &lt;width&gt;.</string></property>
-          <property name="wordWrap"><bool>true</bool></property>
-         </widget>
-        </item>
-
-        <item>
-         <widget class="QPushButton" name="btn_add_param">
-          <property name="text"><string>+ Add parameter</string></property>
-         </widget>
-        </item>
-
-        <!-- stretch=1 makes this scroll grow to fill leftover space -->
-        <item stretch="1">
-         <widget class="QScrollArea" name="scroll_params">
-          <property name="widgetResizable"><bool>true</bool></property>
-          <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
-          <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
-          <property name="minimumHeight"><number>36</number></property>
-          <widget class="QWidget" name="scroll_params_contents">
-           <layout class="QVBoxLayout" name="layout_params">
-            <property name="spacing"><number>3</number></property>
-            <property name="leftMargin"><number>0</number></property>
-            <property name="topMargin"><number>0</number></property>
-            <property name="rightMargin"><number>0</number></property>
-            <property name="bottomMargin"><number>0</number></property>
-           </layout>
-          </widget>
-         </widget>
-        </item>
-
-        <item><widget class="QFrame" name="line_2"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
-
-        <!-- DETECTION -->
+        <!-- DETECTION (moved up) -->
         <item>
          <widget class="QLabel" name="lbl_detect_section">
           <property name="text"><string>DETECTION</string></property>
@@ -190,7 +135,7 @@
          </widget>
         </item>
 
-        <!-- Custom mode (hidden by default) -->
+        <!-- Custom mode -->
         <item>
          <widget class="QWidget" name="widget_custom">
           <property name="visible"><bool>false</bool></property>
@@ -235,6 +180,46 @@
             </widget>
            </item>
           </layout>
+         </widget>
+        </item>
+
+        <item><widget class="QFrame" name="line_2"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Plain</enum></property></widget></item>
+
+        <!-- PARAMETERS -->
+        <item>
+         <widget class="QLabel" name="lbl_params_section">
+          <property name="text"><string>PARAMETERS</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="lbl_params_hint">
+          <property name="text"><string>Each name is used as the XML tag to read the value from the SDF, e.g. &lt;width&gt;.</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+
+        <item>
+         <widget class="QPushButton" name="btn_add_param">
+          <property name="text"><string>+ Add parameter</string></property>
+         </widget>
+        </item>
+
+        <!-- stretch=1 makes this scroll grow -->
+        <item stretch="1">
+         <widget class="QScrollArea" name="scroll_params">
+          <property name="widgetResizable"><bool>true</bool></property>
+          <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+          <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+          <property name="minimumHeight"><number>36</number></property>
+          <widget class="QWidget" name="scroll_params_contents">
+           <layout class="QVBoxLayout" name="layout_params">
+            <property name="spacing"><number>3</number></property>
+            <property name="leftMargin"><number>0</number></property>
+            <property name="topMargin"><number>0</number></property>
+            <property name="rightMargin"><number>0</number></property>
+            <property name="bottomMargin"><number>0</number></property>
+           </layout>
+          </widget>
          </widget>
         </item>
 
@@ -315,7 +300,7 @@
          </widget>
         </item>
 
-        <!-- stretch=1 makes this grow to fill available space -->
+        <!-- stretch=1 makes this grow -->
         <item stretch="1">
          <widget class="QScrollArea" name="scroll_tests">
           <property name="widgetResizable"><bool>true</bool></property>

@@ -176,7 +176,7 @@ class AddSensorTypeDialog(QDialog):
             f"color: {LC.TEXT_SEC}; font-size: 11px; font-weight: 600;"
             " letter-spacing: 0.5px; background: transparent;"
         )
-        for name in ("lbl_name_section", "lbl_desc_section", "lbl_params_section",
+        for name in ("lbl_name_section", "lbl_params_section",
                      "lbl_detect_section", "lbl_tests_section", "lbl_added_tests"):
             w = getattr(self, name, None)
             if w:
@@ -295,8 +295,6 @@ class AddSensorTypeDialog(QDialog):
         d = self._prefill
         if d.get("name"):
             self.inp_name.setText(d["name"])
-        if d.get("description"):
-            self.inp_desc.setPlainText(d["description"])
         for p in d.get("params", []):
             self._add_param_row(value=p.get("name", ""))
         det = d.get("detection", {})
@@ -469,7 +467,6 @@ class AddSensorTypeDialog(QDialog):
 
         definition = {
             "name":        name,
-            "description": self.inp_desc.toPlainText().strip(),
             "params":      [r.data() for r in self._param_rows if r.data()["name"]],
             "detection":   detection,
             "tests":       [r.data() for r in self._test_rows],
@@ -490,7 +487,7 @@ class AddSensorTypeDialog(QDialog):
         sensor_type = d["name"]
         db.upsert_sensor_type(
             sensor_type = sensor_type,
-            description = d["description"],
+            description = "",  # Empty string since we removed description
             params      = d["params"],
             detection   = d["detection"],
         )

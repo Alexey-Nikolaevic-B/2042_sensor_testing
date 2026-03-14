@@ -26,8 +26,8 @@ class Worlds(str, Enum):
     RFID_ANTENNA_ROTATION = f"{path}/rfid_antenna_rotation.world"
     # Camera
     CAMERA_SMOKE          = f"{path}/rfid_antenna_rotation.world"
-    CAMERA_DEPTH_ACCURACY = f"{path}/rfid_antenna_rotation.world"
-    CAMERA_RESOLUTION     = f"{path}/rfid_antenna_rotation.world"
+    CAMERA_DEPTH_ACCURACY = f"{path}/camera_depth.world"
+    CAMERA_RESOLUTION     = f"{path}/camera_resolution.world"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -434,39 +434,76 @@ def camera_data_received(simulator, sensor, progress_cb=None) -> dict:
     """
     from sensor_msgs.msg import Image
     import numpy as np
+    import traceback
 
-    world = _world_from_db(sensor, "camera_data_received") or Worlds.CAMERA_SMOKE.value
-    if not simulator.open_scene(world, sensor.sdf_path):
-        raise RuntimeError("failed to open Gazebo scene")
+    world = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/resources/worlds/rfid/overlap_tags.world"
+    
+    try:
+        if not simulator.open_scene(world, sensor.sdf_path):
+            raise RuntimeError("failed to open Gazebo scene")
+    except Exception as e:
+        print(f"Error opening scene: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "error": f"Scene open failed: {str(e)}",
+        }
 
     if progress_cb:
         progress_cb(20)
 
-    t0   = time.time()
-    msgs = sensor.capture_data(Image, window=15.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    t0 = time.time()
+    
+    try:
+        msgs = sensor.capture_data(Image, window=15.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    except Exception as e:
+        print(f"Error capturing data: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "duration": round(time.time() - t0, 2),
+            "error": f"Capture failed: {str(e)}",
+        }
 
     if not msgs:
         return {
-            "passed":   False,
+            "passed": False,
             "duration": round(time.time() - t0, 2),
-            "detail":   "No image received within 15 s",
+            "detail": "No image received within 15 s",
         }
 
-    arr       = _img_to_numpy(msgs[0])
-    non_zero  = int(np.count_nonzero(arr))
-    save_path = _save_image(arr, _get_save_dir(sensor, "camera_data_received"), "frame_0")
+    # Process the first image with error handling
+    try:
+        arr = _img_to_numpy(msgs[0])
+        non_zero = int(np.count_nonzero(arr))
+        
+        try:
+            save_path = _save_image(arr, _get_save_dir(sensor, "camera_data_received"), "frame_0")
+        except Exception as e:
+            print(f"Error saving image: {e}")
+            save_path = None
+            
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "duration": round(time.time() - t0, 2),
+            "error": f"Image processing failed: {str(e)}",
+            "frames_recv": len(msgs),
+        }
 
     if progress_cb:
         progress_cb(100)
 
     return {
-        "passed":      non_zero > 0,
-        "duration":    round(time.time() - t0, 2),
-        "resolution":  f"{msgs[0].width}x{msgs[0].height}",
-        "encoding":    msgs[0].encoding,
+        "passed": non_zero > 0,
+        "duration": round(time.time() - t0, 2),
+        "resolution": f"{msgs[0].width}x{msgs[0].height}",
+        "encoding": msgs[0].encoding,
         "frames_recv": len(msgs),
         "non_zero_px": non_zero,
-        "saved_to":    save_path,
+        "saved_to": save_path if save_path else None,
     }
 
 
@@ -477,43 +514,106 @@ def camera_depth_accuracy(simulator, sensor, progress_cb=None) -> dict:
     """
     from sensor_msgs.msg import Image
     import numpy as np
+    import rospy
 
     Z_TRUE    = 3.0
     PASS_PCT  = 2.0
 
+    # Debug: print sensor info
+    print(f"\n{'='*60}")
+    print(f"Depth Accuracy Test")
+    print(f"Sensor name: {sensor.sensor_name}")
+    print(f"Sensor type: {sensor.sensor_type}")
+    print(f"SDF path: {sensor.sdf_path}")
+    print(f"Topic: {sensor.topic}")
+    print(f"{'='*60}")
+
     world = _world_from_db(sensor, "camera_depth_accuracy") or Worlds.CAMERA_DEPTH_ACCURACY.value
+    print(f"Using world: {world}")
+    
     if not simulator.open_scene(world, sensor.sdf_path):
         raise RuntimeError("failed to open Gazebo scene")
 
     if progress_cb:
         progress_cb(20)
 
-    t0   = time.time()
-    msgs = sensor.capture_data(Image, window=5.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    # Wait longer for depth camera to initialize
+    print("Waiting 5 seconds for depth camera to initialize...")
+    time.sleep(5)
+
+    # Check what topics are available
+    print("Checking available topics...")
+    topics = rospy.get_published_topics()
+    image_topics = [t for t, t_type in topics if 'image' in t_type or 'Image' in t_type]
+    print(f"Image topics found: {image_topics}")
+    
+    if sensor.topic not in [t for t, _ in topics]:
+        print(f"WARNING: Topic {sensor.topic} not found!")
+        print(f"Available topics: {[t for t, _ in topics[:10]]}")
+
+    t0 = time.time()
+    
+    # Try with a longer window and no timeout
+    print(f"Capturing depth data for 10 seconds...")
+    msgs = sensor.capture_data(Image, window=10.0, timeout=1.0, warmup=2.0, simulator=simulator)
 
     if not msgs:
-        raise RuntimeError("No depth frames received")
+        print("No messages received!")
+        # Try one more time with a different approach
+        print("Retrying with direct ROS wait_for_message...")
+        try:
+            msg = rospy.wait_for_message(sensor.topic, Image, timeout=5.0)
+            msgs = [msg]
+            print(f"Success! Received one message")
+        except Exception as e:
+            print(f"Direct wait failed: {e}")
+            raise RuntimeError("No depth frames received")
+
+    print(f"Received {len(msgs)} depth frames")
 
     if progress_cb:
         progress_cb(60)
 
-    frames     = [_img_to_numpy(m)[:, :, 0] for m in msgs]
-    depth_map  = float("nan")
-    import numpy as np
-    depth_map  = np.nanmedian(np.stack(frames, axis=0), axis=0)
-    cy, cx     = depth_map.shape[0] // 2, depth_map.shape[1] // 2
-    patch      = depth_map[cy - 5:cy + 5, cx - 5:cx + 5]
-    z_measured = float(np.nanmedian(patch))
-    abs_err    = abs(z_measured - Z_TRUE)
-    rel_err    = abs_err / Z_TRUE * 100.0
+    # Process frames
+    frames = []
+    for i, m in enumerate(msgs):
+        print(f"Frame {i}: encoding={m.encoding}, size={m.width}x{m.height}")
+        try:
+            frame = _img_to_numpy(m)
+            print(f"  Converted shape: {frame.shape}")
+            if len(frame.shape) >= 2:
+                frames.append(frame[:, :, 0] if len(frame.shape) == 3 else frame)
+        except Exception as e:
+            print(f"  Error converting frame: {e}")
 
-    save_path  = _save_image(
+    if not frames:
+        raise RuntimeError("Could not convert any frames to numpy")
+
+    print(f"Stacking {len(frames)} frames...")
+    depth_map = np.nanmedian(np.stack(frames, axis=0), axis=0)
+    print(f"Depth map shape: {depth_map.shape}")
+    
+    cy, cx = depth_map.shape[0] // 2, depth_map.shape[1] // 2
+    print(f"Center pixel: ({cy}, {cx})")
+    
+    patch = depth_map[cy - 5:cy + 5, cx - 5:cx + 5]
+    print(f"Patch shape: {patch.shape}")
+    print(f"Patch stats: min={np.nanmin(patch):.3f}, max={np.nanmax(patch):.3f}, median={np.nanmedian(patch):.3f}")
+    
+    z_measured = float(np.nanmedian(patch))
+    abs_err = abs(z_measured - Z_TRUE)
+    rel_err = abs_err / Z_TRUE * 100.0
+
+    save_path = _save_image(
         depth_map[:, :, None] if depth_map.ndim == 2 else depth_map,
         _get_save_dir(sensor, "camera_depth_accuracy"), "depth_frame"
     )
 
     if progress_cb:
         progress_cb(100)
+
+    print(f"Depth measured: {z_measured:.3f}m, error: {rel_err:.2f}%")
+    print(f"{'='*60}\n")
 
     return {
         "passed":        rel_err <= PASS_PCT,
@@ -525,7 +625,6 @@ def camera_depth_accuracy(simulator, sensor, progress_cb=None) -> dict:
         "frames_used":   len(msgs),
         "saved_to":      save_path,
     }
-
 
 def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
     """
@@ -860,18 +959,6 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
 # ── Register tests ────────────────────────────────────────────────────────────
 
-
-# ── World definitions ─────────────────────────────────────────────────────────
-
-from enum import Enum
-
-class Worlds(Enum):
-    # ... existing worlds ...
-    TACTILE_FORCE = "assets/sensors/worlds/tactile_force.world"
-    TACTILE_UNIFORMITY = "assets/sensors/worlds/tactile_uniformity.world"
-
-
-
 # ── Generic test (any sensor type) ───────────────────────────────────────────
 
 # Ordered probe list: (importable pkg, class name, short hint, warmup_sec).
@@ -987,11 +1074,11 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     result = {
         "passed": False,
         "topic": sensor.topic,
-        "sensor_type": getattr(sensor, "sensor_type", "unknown"),
-        "sensor_name": getattr(sensor, "sensor_name", "unknown"),
-        "duration": 0,
-        "message_type": None,
-        "data_received": False,
+        # "sensor_type": getattr(sensor, "sensor_type", "unknown"),
+        # "sensor_name": getattr(sensor, "sensor_name", "unknown"),
+        # "duration": 0,
+        # "message_type": None,
+        # "data_received": False,
         "error": None
     }
     
