@@ -602,8 +602,144 @@ def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
 # ╚═╝░░░░░╚═╝░╚════╝░╚═╝░░╚══╝░╚════╝░░╚════╝░╚═╝░░╚═╝╚═╝░░░░░╚═╝╚══════╝╚═╝░░╚═╝╚═╝░░╚═╝
 
 
+    def c1_size_order_test(self, simulator) -> Dict[str, Any]:
+        """
+        Method C1 — Size Order.
+        Pass criterion: 5/5 cubes visible in correct size order.
+        """
+        artifacts: List[str] = []
+        metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["c1_size_order_test"]),
+            "expected_topic": str(self.IMAGE_TOPIC),
+            "resolved_topic": "",
+            "scene_open_success": False,
+            "topic_mapping_changed": False,
+            "display_env": {},
+            "positions": list(self.C1_POSITIONS),
+            "cube_pose": {"y": float(self.C1_TRACK_Y), "z": float(self.C1_TRACK_Z)},
+            "bbox_area_px": {},
+            "bbox_px": {},
+            "red_pixels": {},
+            "frame_stamp_s": {},
+            "min_margin_ratio": float(self.C1_MIN_MARGIN_RATIO),
+            "status": "ERROR",
+            "error_reason": "",
+        }
+        msg_class, real_topic, _ = rostopic.get_topic_class(sensor.topic)
+        msg = rospy.wait_for_message(sensor.topic, msg_class, timeout=10.0)
 
+        if msg: 
+            print(f"[DEBUG] msg.encoding: {msg.encoding}")
+            print(f"[DEBUG] Image: {msg.width}x{msg.height}, encoding={msg.encoding}")
+            print(f"[DEBUG] Data length: {len(msg.data)} bytes")
+            return
 
+"""
+
+        def _store_c1_diag() -> str:
+            metrics_path = self._save_metrics_json("c1_size_order_metrics.json", metrics)
+            self._set_test_diagnostics(
+                c1_size_order={
+                    "metrics": dict(metrics),
+                    "artifacts": list(artifacts),
+                    "metrics_json": metrics_path,
+                }
+            )
+            return metrics_path
+
+        self._last_test_diagnostics = {}
+        metrics["display_env"] = self._ensure_render_display_env()
+        _store_c1_diag()
+
+        try:
+            self._open_test_scene(simulator, "c1_size_order_test")
+        except Exception:
+            resolved_topic, scene_diag = self._resolved_image_topic(simulator)
+            metrics["resolved_topic"] = str(resolved_topic)
+            metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+            metrics["scene_open_success"] = False
+            reason = "unknown"
+            if isinstance(scene_diag, dict):
+                reason = str(scene_diag.get("reason", "unknown"))
+            metrics["error_reason"] = f"scene_open_failed:{reason}"
+            _store_c1_diag()
+            raise
+
+        metrics["scene_open_success"] = True
+        resolved_topic, _ = self._resolved_image_topic(simulator)
+        metrics["resolved_topic"] = str(resolved_topic)
+        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
+        _store_c1_diag()
+
+        if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{self.C1_CUBE_NAME}"
+            _store_c1_diag()
+            raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
+
+        prev_stamp_s: Optional[float] = None
+        for x in self.C1_POSITIONS:
+            label = f"x{int(x)}"
+            self._move_and_settle(
+                simulator,
+                self.C1_CUBE_NAME,
+                x=float(x),
+                y=float(self.C1_TRACK_Y),
+                z=float(self.C1_TRACK_Z),
+            )
+
+            try:
+                msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            except Exception as exc:
+                metrics["error_reason"] = f"image_receive_failed:{exc}"
+                _store_c1_diag()
+                raise RuntimeError(f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}") from exc
+            prev_stamp_s = self._msg_stamp_s(msg)
+            frame = self._msg_to_bgr(msg)
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            red = self._red_mask(hsv)
+            area, (bx, by, bw, bh) = self._bbox_area(red)
+            metrics["bbox_area_px"][label] = int(area)
+            metrics["bbox_px"][label] = {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)}
+            metrics["red_pixels"][label] = int(self._count_pixels(red))
+            metrics["frame_stamp_s"][label] = float(prev_stamp_s)
+
+            artifacts.append(self._save_frame(f"c1_{label}_raw.png", frame))
+
+            debug = frame.copy()
+            if area > 0:
+                cv2.rectangle(debug, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
+            cv2.putText(
+                debug,
+                f"{label}: area={area} ts={prev_stamp_s:.6f}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
+            artifacts.append(self._save_frame(f"c1_{label}.png", debug))
+
+        x1 = metrics["bbox_area_px"].get("x1", 0)
+        x3 = metrics["bbox_area_px"].get("x3", 0)
+        x5 = metrics["bbox_area_px"].get("x5", 0)
+        order_ok = x1 > x3 > x5
+        margin_ok = (x1 >= x3 * self.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * self.C1_MIN_MARGIN_RATIO)
+        metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
+        metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
+        if not (order_ok and margin_ok):
+            metrics["error_reason"] = (
+                f"size_order_failed: checks={metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}"
+            )
+
+        metrics_path = _store_c1_diag()
+        if not (order_ok and margin_ok):
+            raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
+
+        return {"id": "C1", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+"""
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░████████╗░█████╗░░█████╗░████████╗██╗██╗░░░░░███████╗░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░╚══██╔══╝██╔══██╗██╔══██╗╚══██╔══╝██║██║░░░░░██╔════╝░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██║░░░███████║██║░░╚═╝░░░██║░░░██║██║░░░░░█████╗░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
