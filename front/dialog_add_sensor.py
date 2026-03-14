@@ -41,6 +41,7 @@ class AddSensorDialog(QDialog):
         self._detected_type: str | None = None
 
         uic.loadUi(f"{QT_DIR}/add_sensor_dialog.ui", self)
+        self._setup_heights()
         self._setup_styles()
         self._connect_signals()
         self.params_layout.addStretch()
@@ -114,12 +115,21 @@ class AddSensorDialog(QDialog):
             self.image_label.setText("")
 
     def _pick_sdf(self):
+        if self._sdf_source and os.path.exists(self._sdf_source):
+            start_dir = os.path.dirname(os.path.abspath(self._sdf_source))
+        else:
+            start_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose SDF file", "",
+            self, 
+            "Choose SDF file", 
+            start_dir,
             "SDF files (*.sdf);;All files (*)"
         )
+        
         if not path:
             return
+        
         self._sdf_source = path
         self.sdf_label.setText(os.path.basename(path))
         self._on_sdf_selected(path)
@@ -286,6 +296,10 @@ class AddSensorDialog(QDialog):
         self.image_container.mousePressEvent = lambda _: self._pick_image()
         self.btn_add_topic.clicked.connect(lambda: self._add_topic_row(""))
 
+    def _setup_heights(self):
+        self.lbl_params_hint.setFixedHeight(Layout.TOOLBAR_H)
+        self.lbl_topics_hint.setFixedHeight(Layout.TOOLBAR_H)
+
     def _setup_styles(self):
         self.setStyleSheet(f"""
             QDialog {{ background: {LC.BG_PANEL}; }}
@@ -428,6 +442,13 @@ class AddSensorDialog(QDialog):
                 padding: 4px;
             }}
             QPushButton#btn_add_topic:hover {{ background: {LC.BG_HOVER}; color: {LC.TEXT}; }}
+            
+        QFrame#sep_1, QFrame#sep_2 {{
+            border-left: 1px solid {LC.BORDER};
+            border-right: none;
+            margin: 4px 0;
+        }}
+            
             {LS.SCROLLBAR}
         """)
         self.btn_dialog_close.setIcon(Icons.CLOSE())
