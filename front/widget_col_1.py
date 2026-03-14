@@ -6,7 +6,7 @@ from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 
-from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR
+from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR, LightColors as LC, LightStyles as LS
 
 
 # ── Sensor type cell ──────────────────────────────────────────────────────────
@@ -461,11 +461,58 @@ class ColSensors(QWidget):
     def _on_delete_type(self, sensor_type: str):
         try:
             import src.database.sensor_storage as db
+            
+            sensors = db.get_sensors_by_type(sensor_type)
+            if sensors:
+                from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+                
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Cannot Delete Type")
+                dialog.setFixedSize(360, 150)
+                dialog.setStyleSheet(f"""
+                    QDialog {{
+                        background-color: {LC.BG_PANEL};
+                    }}
+                """)
+                
+                layout = QVBoxLayout(dialog)
+                
+                text = QLabel(f"Cannot delete type '{sensor_type}' because it is used by {len(sensors)} sensor(s).\n\nPlease delete or reassign these sensors first.")
+                text.setWordWrap(True)
+                text.setStyleSheet(f"color: {LC.TEXT}; font-size: 12px; background-color: transparent;")
+                layout.addWidget(text)
+                
+                button_layout = QHBoxLayout()
+                button_layout.addStretch()
+                
+                ok_button = QPushButton("OK")
+                ok_button.setFixedSize(80, 28)
+                ok_button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {LC.ACCENT};
+                        border: none;
+                        border-radius: 3px;
+                        color: white;
+                        font-size: 12px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {LC.ACCENT_HVR};
+                    }}
+                """)
+                ok_button.clicked.connect(dialog.accept)
+                
+                button_layout.addWidget(ok_button)
+                layout.addLayout(button_layout)
+                
+                dialog.exec_()
+                return
+            
             db.delete_sensor_type(sensor_type)
             db_types = db.get_sensor_type_names()
             self.load_types(db_types)
             if self._selected_type == sensor_type:
                 self._selected_type = None
+                
         except Exception as exc:
             import traceback
             print(f"[ColSensors] _on_delete_type error: {exc}\n{traceback.format_exc()}")
