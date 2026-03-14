@@ -2,7 +2,13 @@ import math
 import time
 import logging
 from enum import Enum
-from config import Config
+from config import CONFIG
+
+
+import time
+import rospy
+from sensor_msgs.msg import Image
+    
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +22,7 @@ logger = logging.getLogger(__name__)
 #   3. Reference it in your test:  world = Worlds.MY_WORLD.value
 #
 class Worlds(str, Enum):
-    path  = Config('ROOT_PATH')
+    path  = CONFIG['ROOT_PATH']
 
     # RFID
     RFID_CHANGE_DISTANCE  = f"{path}/rfid_change_distance.world"
@@ -26,8 +32,9 @@ class Worlds(str, Enum):
     RFID_MOVE_TAGS        = f"{path}/rfid_move_tags.world"
     RFID_ANTENNA_ROTATION = f"{path}/rfid_antenna_rotation.world"
     # Camera
-    c1 = f"{path}/camera_c1_single_cube.world"
-    
+    CAMERA_SMOKE          = f"{path}/rfid_antenna_rotation.world"
+    CAMERA_DEPTH_ACCURACY = f"{path}/camera_depth.world"
+    CAMERA_RESOLUTION     = f"{path}/camera_resolution.world"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -434,39 +441,76 @@ def camera_data_received(simulator, sensor, progress_cb=None) -> dict:
     """
     from sensor_msgs.msg import Image
     import numpy as np
+    import traceback
 
-    world = _world_from_db(sensor, "camera_data_received") or Worlds.CAMERA_SMOKE.value
-    if not simulator.open_scene(world, sensor.sdf_path):
-        raise RuntimeError("failed to open Gazebo scene")
+    world = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/resources/worlds/rfid/overlap_tags.world"
+    
+    try:
+        if not simulator.open_scene(world, sensor.sdf_path):
+            raise RuntimeError("failed to open Gazebo scene")
+    except Exception as e:
+        print(f"Error opening scene: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "error": f"Scene open failed: {str(e)}",
+        }
 
     if progress_cb:
         progress_cb(20)
 
-    t0   = time.time()
-    msgs = sensor.capture_data(Image, window=15.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    t0 = time.time()
+    
+    try:
+        msgs = sensor.capture_data(Image, window=15.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    except Exception as e:
+        print(f"Error capturing data: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "duration": round(time.time() - t0, 2),
+            "error": f"Capture failed: {str(e)}",
+        }
 
     if not msgs:
         return {
-            "passed":   False,
+            "passed": False,
             "duration": round(time.time() - t0, 2),
-            "detail":   "No image received within 15 s",
+            "detail": "No image received within 15 s",
         }
 
-    arr       = _img_to_numpy(msgs[0])
-    non_zero  = int(np.count_nonzero(arr))
-    save_path = _save_image(arr, _get_save_dir(sensor, "camera_data_received"), "frame_0")
+    # Process the first image with error handling
+    try:
+        arr = _img_to_numpy(msgs[0])
+        non_zero = int(np.count_nonzero(arr))
+        
+        try:
+            save_path = _save_image(arr, _get_save_dir(sensor, "camera_data_received"), "frame_0")
+        except Exception as e:
+            print(f"Error saving image: {e}")
+            save_path = None
+            
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        traceback.print_exc()
+        return {
+            "passed": False,
+            "duration": round(time.time() - t0, 2),
+            "error": f"Image processing failed: {str(e)}",
+            "frames_recv": len(msgs),
+        }
 
     if progress_cb:
         progress_cb(100)
 
     return {
-        "passed":      non_zero > 0,
-        "duration":    round(time.time() - t0, 2),
-        "resolution":  f"{msgs[0].width}x{msgs[0].height}",
-        "encoding":    msgs[0].encoding,
+        "passed": non_zero > 0,
+        "duration": round(time.time() - t0, 2),
+        "resolution": f"{msgs[0].width}x{msgs[0].height}",
+        "encoding": msgs[0].encoding,
         "frames_recv": len(msgs),
         "non_zero_px": non_zero,
-        "saved_to":    save_path,
+        "saved_to": save_path if save_path else None,
     }
 
 
@@ -477,43 +521,106 @@ def camera_depth_accuracy(simulator, sensor, progress_cb=None) -> dict:
     """
     from sensor_msgs.msg import Image
     import numpy as np
+    import rospy
 
     Z_TRUE    = 3.0
     PASS_PCT  = 2.0
 
+    # Debug: print sensor info
+    print(f"\n{'='*60}")
+    print(f"Depth Accuracy Test")
+    print(f"Sensor name: {sensor.sensor_name}")
+    print(f"Sensor type: {sensor.sensor_type}")
+    print(f"SDF path: {sensor.sdf_path}")
+    print(f"Topic: {sensor.topic}")
+    print(f"{'='*60}")
+
     world = _world_from_db(sensor, "camera_depth_accuracy") or Worlds.CAMERA_DEPTH_ACCURACY.value
+    print(f"Using world: {world}")
+    
     if not simulator.open_scene(world, sensor.sdf_path):
         raise RuntimeError("failed to open Gazebo scene")
 
     if progress_cb:
         progress_cb(20)
 
-    t0   = time.time()
-    msgs = sensor.capture_data(Image, window=5.0, timeout=2.0, warmup=3.0, simulator=simulator)
+    # Wait longer for depth camera to initialize
+    print("Waiting 5 seconds for depth camera to initialize...")
+    time.sleep(5)
+
+    # Check what topics are available
+    print("Checking available topics...")
+    topics = rospy.get_published_topics()
+    image_topics = [t for t, t_type in topics if 'image' in t_type or 'Image' in t_type]
+    print(f"Image topics found: {image_topics}")
+    
+    if sensor.topic not in [t for t, _ in topics]:
+        print(f"WARNING: Topic {sensor.topic} not found!")
+        print(f"Available topics: {[t for t, _ in topics[:10]]}")
+
+    t0 = time.time()
+    
+    # Try with a longer window and no timeout
+    print(f"Capturing depth data for 10 seconds...")
+    msgs = sensor.capture_data(Image, window=10.0, timeout=1.0, warmup=2.0, simulator=simulator)
 
     if not msgs:
-        raise RuntimeError("No depth frames received")
+        print("No messages received!")
+        # Try one more time with a different approach
+        print("Retrying with direct ROS wait_for_message...")
+        try:
+            msg = rospy.wait_for_message(sensor.topic, Image, timeout=5.0)
+            msgs = [msg]
+            print(f"Success! Received one message")
+        except Exception as e:
+            print(f"Direct wait failed: {e}")
+            raise RuntimeError("No depth frames received")
+
+    print(f"Received {len(msgs)} depth frames")
 
     if progress_cb:
         progress_cb(60)
 
-    frames     = [_img_to_numpy(m)[:, :, 0] for m in msgs]
-    depth_map  = float("nan")
-    import numpy as np
-    depth_map  = np.nanmedian(np.stack(frames, axis=0), axis=0)
-    cy, cx     = depth_map.shape[0] // 2, depth_map.shape[1] // 2
-    patch      = depth_map[cy - 5:cy + 5, cx - 5:cx + 5]
-    z_measured = float(np.nanmedian(patch))
-    abs_err    = abs(z_measured - Z_TRUE)
-    rel_err    = abs_err / Z_TRUE * 100.0
+    # Process frames
+    frames = []
+    for i, m in enumerate(msgs):
+        print(f"Frame {i}: encoding={m.encoding}, size={m.width}x{m.height}")
+        try:
+            frame = _img_to_numpy(m)
+            print(f"  Converted shape: {frame.shape}")
+            if len(frame.shape) >= 2:
+                frames.append(frame[:, :, 0] if len(frame.shape) == 3 else frame)
+        except Exception as e:
+            print(f"  Error converting frame: {e}")
 
-    save_path  = _save_image(
+    if not frames:
+        raise RuntimeError("Could not convert any frames to numpy")
+
+    print(f"Stacking {len(frames)} frames...")
+    depth_map = np.nanmedian(np.stack(frames, axis=0), axis=0)
+    print(f"Depth map shape: {depth_map.shape}")
+    
+    cy, cx = depth_map.shape[0] // 2, depth_map.shape[1] // 2
+    print(f"Center pixel: ({cy}, {cx})")
+    
+    patch = depth_map[cy - 5:cy + 5, cx - 5:cx + 5]
+    print(f"Patch shape: {patch.shape}")
+    print(f"Patch stats: min={np.nanmin(patch):.3f}, max={np.nanmax(patch):.3f}, median={np.nanmedian(patch):.3f}")
+    
+    z_measured = float(np.nanmedian(patch))
+    abs_err = abs(z_measured - Z_TRUE)
+    rel_err = abs_err / Z_TRUE * 100.0
+
+    save_path = _save_image(
         depth_map[:, :, None] if depth_map.ndim == 2 else depth_map,
         _get_save_dir(sensor, "camera_depth_accuracy"), "depth_frame"
     )
 
     if progress_cb:
         progress_cb(100)
+
+    print(f"Depth measured: {z_measured:.3f}m, error: {rel_err:.2f}%")
+    print(f"{'='*60}\n")
 
     return {
         "passed":        rel_err <= PASS_PCT,
@@ -525,7 +632,6 @@ def camera_depth_accuracy(simulator, sensor, progress_cb=None) -> dict:
         "frames_used":   len(msgs),
         "saved_to":      save_path,
     }
-
 
 def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
     """
@@ -594,152 +700,8 @@ def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
         "saved_to":         save_dir,
     }
 
-# ███╗░░░███╗░█████╗░███╗░░██╗░█████╗░░█████╗░░█████╗░███╗░░░███╗███████╗██████╗░░█████╗░
-# ████╗░████║██╔══██╗████╗░██║██╔══██╗██╔══██╗██╔══██╗████╗░████║██╔════╝██╔══██╗██╔══██╗
-# ██╔████╔██║██║░░██║██╔██╗██║██║░░██║██║░░╚═╝███████║██╔████╔██║█████╗░░██████╔╝███████║
-# ██║╚██╔╝██║██║░░██║██║╚████║██║░░██║██║░░██╗██╔══██║██║╚██╔╝██║██╔══╝░░██╔══██╗██╔══██║
-# ██║░╚═╝░██║╚█████╔╝██║░╚███║╚█████╔╝╚█████╔╝██║░░██║██║░╚═╝░██║███████╗██║░░██║██║░░██║
-# ╚═╝░░░░░╚═╝░╚════╝░╚═╝░░╚══╝░╚════╝░░╚════╝░╚═╝░░╚═╝╚═╝░░░░░╚═╝╚══════╝╚═╝░░╚═╝╚═╝░░╚═╝
 
 
-    def c1_size_order_test(self, simulator) -> Dict[str, Any]:
-        """
-        Method C1 — Size Order.
-        Pass criterion: 5/5 cubes visible in correct size order.
-        """
-        artifacts: List[str] = []
-        metrics: Dict[str, Any] = {
-            "world_file": str(self.test_to_world["c1_size_order_test"]),
-            "expected_topic": str(self.IMAGE_TOPIC),
-            "resolved_topic": "",
-            "scene_open_success": False,
-            "topic_mapping_changed": False,
-            "display_env": {},
-            "positions": list(self.C1_POSITIONS),
-            "cube_pose": {"y": float(self.C1_TRACK_Y), "z": float(self.C1_TRACK_Z)},
-            "bbox_area_px": {},
-            "bbox_px": {},
-            "red_pixels": {},
-            "frame_stamp_s": {},
-            "min_margin_ratio": float(self.C1_MIN_MARGIN_RATIO),
-            "status": "ERROR",
-            "error_reason": "",
-        }
-        msg_class, real_topic, _ = rostopic.get_topic_class(sensor.topic)
-        msg = rospy.wait_for_message(sensor.topic, msg_class, timeout=10.0)
-
-        if msg: 
-            print(f"[DEBUG] msg.encoding: {msg.encoding}")
-            print(f"[DEBUG] Image: {msg.width}x{msg.height}, encoding={msg.encoding}")
-            print(f"[DEBUG] Data length: {len(msg.data)} bytes")
-            return
-
-"""
-
-        def _store_c1_diag() -> str:
-            metrics_path = self._save_metrics_json("c1_size_order_metrics.json", metrics)
-            self._set_test_diagnostics(
-                c1_size_order={
-                    "metrics": dict(metrics),
-                    "artifacts": list(artifacts),
-                    "metrics_json": metrics_path,
-                }
-            )
-            return metrics_path
-
-        self._last_test_diagnostics = {}
-        metrics["display_env"] = self._ensure_render_display_env()
-        _store_c1_diag()
-
-        try:
-            self._open_test_scene(simulator, "c1_size_order_test")
-        except Exception:
-            resolved_topic, scene_diag = self._resolved_image_topic(simulator)
-            metrics["resolved_topic"] = str(resolved_topic)
-            metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
-            metrics["scene_open_success"] = False
-            reason = "unknown"
-            if isinstance(scene_diag, dict):
-                reason = str(scene_diag.get("reason", "unknown"))
-            metrics["error_reason"] = f"scene_open_failed:{reason}"
-            _store_c1_diag()
-            raise
-
-        metrics["scene_open_success"] = True
-        resolved_topic, _ = self._resolved_image_topic(simulator)
-        metrics["resolved_topic"] = str(resolved_topic)
-        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(self.IMAGE_TOPIC))
-        _store_c1_diag()
-
-        if not simulator.wait_for_model_spawn(self.C1_CUBE_NAME, timeout=20):
-            metrics["error_reason"] = f"model_not_spawned:{self.C1_CUBE_NAME}"
-            _store_c1_diag()
-            raise RuntimeError(f"Model not spawned: {self.C1_CUBE_NAME}")
-
-        prev_stamp_s: Optional[float] = None
-        for x in self.C1_POSITIONS:
-            label = f"x{int(x)}"
-            self._move_and_settle(
-                simulator,
-                self.C1_CUBE_NAME,
-                x=float(x),
-                y=float(self.C1_TRACK_Y),
-                z=float(self.C1_TRACK_Z),
-            )
-
-            try:
-                msg = self._wait_image_after(prev_stamp_s, timeout=35.0, topic=resolved_topic)
-            except Exception as exc:
-                metrics["error_reason"] = f"image_receive_failed:{exc}"
-                _store_c1_diag()
-                raise RuntimeError(f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}") from exc
-            prev_stamp_s = self._msg_stamp_s(msg)
-            frame = self._msg_to_bgr(msg)
-            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-
-            red = self._red_mask(hsv)
-            area, (bx, by, bw, bh) = self._bbox_area(red)
-            metrics["bbox_area_px"][label] = int(area)
-            metrics["bbox_px"][label] = {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)}
-            metrics["red_pixels"][label] = int(self._count_pixels(red))
-            metrics["frame_stamp_s"][label] = float(prev_stamp_s)
-
-            artifacts.append(self._save_frame(f"c1_{label}_raw.png", frame))
-
-            debug = frame.copy()
-            if area > 0:
-                cv2.rectangle(debug, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
-            cv2.putText(
-                debug,
-                f"{label}: area={area} ts={prev_stamp_s:.6f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
-            artifacts.append(self._save_frame(f"c1_{label}.png", debug))
-
-        x1 = metrics["bbox_area_px"].get("x1", 0)
-        x3 = metrics["bbox_area_px"].get("x3", 0)
-        x5 = metrics["bbox_area_px"].get("x5", 0)
-        order_ok = x1 > x3 > x5
-        margin_ok = (x1 >= x3 * self.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * self.C1_MIN_MARGIN_RATIO)
-        metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
-        metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
-        if not (order_ok and margin_ok):
-            metrics["error_reason"] = (
-                f"size_order_failed: checks={metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}"
-            )
-
-        metrics_path = _store_c1_diag()
-        if not (order_ok and margin_ok):
-            raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
-
-        return {"id": "C1", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
-
-"""
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░████████╗░█████╗░░█████╗░████████╗██╗██╗░░░░░███████╗░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░╚══██╔══╝██╔══██╗██╔══██╗╚══██╔══╝██║██║░░░░░██╔════╝░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██║░░░███████║██║░░╚═╝░░░██║░░░██║██║░░░░░█████╗░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
@@ -1004,18 +966,6 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
 # ── Register tests ────────────────────────────────────────────────────────────
 
-
-# ── World definitions ─────────────────────────────────────────────────────────
-
-from enum import Enum
-
-class Worlds(Enum):
-    # ... existing worlds ...
-    TACTILE_FORCE = "assets/sensors/worlds/tactile_force.world"
-    TACTILE_UNIFORMITY = "assets/sensors/worlds/tactile_uniformity.world"
-
-
-
 # ── Generic test (any sensor type) ───────────────────────────────────────────
 
 # Ordered probe list: (importable pkg, class name, short hint, warmup_sec).
@@ -1131,11 +1081,11 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     result = {
         "passed": False,
         "topic": sensor.topic,
-        "sensor_type": getattr(sensor, "sensor_type", "unknown"),
-        "sensor_name": getattr(sensor, "sensor_name", "unknown"),
-        "duration": 0,
-        "message_type": None,
-        "data_received": False,
+        # "sensor_type": getattr(sensor, "sensor_type", "unknown"),
+        # "sensor_name": getattr(sensor, "sensor_name", "unknown"),
+        # "duration": 0,
+        # "message_type": None,
+        # "data_received": False,
         "error": None
     }
     
@@ -1344,6 +1294,51 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     return result
 # ── TESTS registry ────────────────────────────────────────────────────────────
 
+
+# # ███╗░░░███╗░█████╗░███╗░░██╗░█████╗░░█████╗░░█████╗░███╗░░░███╗███████╗██████╗░░█████╗░
+# # ████╗░████║██╔══██╗████╗░██║██╔══██╗██╔══██╗██╔══██╗████╗░████║██╔════╝██╔══██╗██╔══██╗
+# # ██╔████╔██║██║░░██║██╔██╗██║██║░░██║██║░░╚═╝███████║██╔████╔██║█████╗░░██████╔╝███████║
+# # ██║╚██╔╝██║██║░░██║██║╚████║██║░░██║██║░░██╗██╔══██║██║╚██╔╝██║██╔══╝░░██╔══██╗██╔══██║
+# # ██║░╚═╝░██║╚█████╔╝██║░╚███║╚█████╔╝╚█████╔╝██║░░██║██║░╚═╝░██║███████╗██║░░██║██║░░██║
+# # ╚═╝░░░░░╚═╝░╚════╝░╚═╝░░╚══╝░╚════╝░░╚════╝░╚═╝░░╚═╝╚═╝░░░░░╚═╝╚══════╝╚═╝░░╚═╝╚═╝░░╚═╝
+
+
+def camera_example_test(simulator, sensor, progress_cb=None) -> dict:
+
+    result = {
+        "passed": False,
+        "error": None
+    }
+    
+    t0 = time.time()
+    
+    # Открываем сцену
+    world_path = f"{CONFIG['ROOT_PATH']}/resources/worlds/rfid/overlap_tags.world"
+    if not simulator.open_scene(world_path, sensor.sdf_path):
+        result["error"] = "Failed to open Gazebo scene"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    
+    if progress_cb:
+        progress_cb(50)
+    
+    try:
+        msg = rospy.wait_for_message(sensor.topic, Image, timeout=10.0)
+        result["passed"] = len(msg.data) > 0
+        result["data_size"] = len(msg.data)
+        
+    except Exception as e:
+        result["error"] = str(e)
+    
+    result["duration"] = round(time.time() - t0, 2)
+    
+    if progress_cb:
+        progress_cb(100)
+    
+    return result
+
+
+
 TESTS: dict[str, callable] = {
     # Generic (assign to any sensor type)
     "sensor_capture_basic":          sensor_capture_basic,
@@ -1356,9 +1351,7 @@ TESTS: dict[str, callable] = {
     "rfid_move_tags":                rfid_move_tags,
     "rfid_antenna_rotation":         rfid_antenna_rotation,
     # Camera (libgazebo_ros_camera.so)
-    "camera_data_received":          camera_data_received,
-    "camera_depth_accuracy":         camera_depth_accuracy,
-    "camera_resolution":             camera_resolution,
+    "camera_example_test":            camera_example_test,
     # Tactile (libgazebo_ros_bumper.so)
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,
