@@ -1,0 +1,80 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="d435_like_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+    <link name="camera_link">
+      <collision name="collision">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </visual>
+
+      <sensor name="d435_like_rgb_sensor" type="camera">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="d435_like_rgb">
+          <horizontal_fov>1.518</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.28</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+        <plugin name="d435_like_rgb_plugin" filename="libgazebo_ros_camera.so">
+          <robotNamespace>/d435_like</robotNamespace>
+          <cameraName></cameraName>
+          <imageTopicName>image_raw</imageTopicName>
+          <cameraInfoTopicName>camera_info</cameraInfoTopicName>
+          <frameName>d435_like_optical_frame</frameName>
+          <updateRate>30</updateRate>
+          <ros>
+            <namespace>/d435_like</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
+          </ros>
+        </plugin>
+      </sensor>
+
+      <sensor name="d435_like_depth_sensor" type="depth">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="d435_like_depth">
+          <horizontal_fov>1.518</horizontal_fov>
+          <image>
+            <width>1280</width>
+            <height>720</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.28</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+        <plugin name="d435_like_depth_plugin" filename="libgazebo_ros_depth_camera.so">
+          <robotNamespace>/d435_like</robotNamespace>
+          <cameraName></cameraName>
+          <imageTopicName>ir/image_raw</imageTopicName>
+          <cameraInfoTopicName>ir/camera_info</cameraInfoTopicName>
+          <depthImageTopicName>depth/image_raw</depthImageTopicName>
+          <depthImageCameraInfoTopicName>depth/camera_info</depthImageCameraInfoTopicName>
+          <pointCloudTopicName>points</pointCloudTopicName>
+          <frameName>d435_like_optical_frame</frameName>
+          <updateRate>30</updateRate>
+          <pointCloudCutoff>0.28</pointCloudCutoff>
+          <ros>
+            <namespace>/d435_like</namespace>
+            <argument>depth/image_raw:=depth/image_raw</argument>
+            <argument>depth/camera_info:=depth/camera_info</argument>
+            <argument>points:=points</argument>
+          </ros>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

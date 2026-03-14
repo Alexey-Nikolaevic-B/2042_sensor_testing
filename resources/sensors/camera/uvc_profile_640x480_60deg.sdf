@@ -1,0 +1,67 @@
+<?xml version="1.0" ?>
+<!--
+  Что это:
+  - SDF-модель виртуальной mono RGB камеры uvc_profile_640x480_60deg.
+
+  Как использовать:
+  - Внутри Python-раннера проекта: модель подмешивается в world через Simulator._generate_world().
+  - В launch-сценариях C1/C4/C7: модель спавнится node'ом gazebo_ros/spawn_model.
+
+  Топики:
+  - /uvc_profile_640x480_60deg/image_raw
+
+  Сцены/тесты:
+  - C1, C4, C7 (см. world/launch/test файлы в scenario_test_pkg).
+-->
+<sdf version="1.6">
+  <model name="uvc_profile_640x480_60deg_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+
+    <link name="camera_link">
+      <collision name="collision">
+        <geometry>
+          <box><size>0.05 0.05 0.05</size></box>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <box><size>0.05 0.05 0.05</size></box>
+        </geometry>
+      </visual>
+
+      <sensor name="uvc_profile_640x480_60deg" type="camera">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+
+        <camera name="uvc_profile_640x480_60deg">
+          <horizontal_fov>1.0471975512</horizontal_fov>
+
+          <image>
+            <width>640</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+
+          <clip>
+            <near>0.1</near>
+            <far>50.0</far>
+          </clip>
+        </camera>
+
+        <plugin name="uvc_profile_camera_plugin" filename="libgazebo_ros_camera.so">
+          <cameraName>uvc_profile_640x480_60deg</cameraName>
+          <ros>
+            <namespace>/uvc_profile_640x480_60deg</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
+          </ros>
+          <frame_name>uvc_profile_optical_frame</frame_name>
+          <optical_frame_id>uvc_profile_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

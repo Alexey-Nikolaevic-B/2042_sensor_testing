@@ -1,0 +1,74 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="bumblebee2_like_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+
+    <link name="stereo_link">
+      <collision name="collision">
+        <geometry><box><size>0.10 0.03 0.03</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.10 0.03 0.03</size></box></geometry>
+      </visual>
+
+      <sensor name="bumblebee2_like_left" type="camera">
+        <pose>0 0.06 0 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="bumblebee2_like_left">
+          <horizontal_fov>1.222</horizontal_fov>
+          <image>
+            <width>1024</width>
+            <height>768</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.3</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+        <plugin name="bumblebee2_like_left_plugin" filename="libgazebo_ros_camera.so">
+          <cameraName>bumblebee2_like_left</cameraName>
+          <ros>
+            <namespace>/bumblebee2_like/left</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
+          </ros>
+          <frame_name>bumblebee2_like_left_optical_frame</frame_name>
+          <optical_frame_id>bumblebee2_like_left_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+
+      <sensor name="bumblebee2_like_right" type="camera">
+        <pose>0 -0.06 0 0 0 0</pose>
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="bumblebee2_like_right">
+          <horizontal_fov>1.222</horizontal_fov>
+          <image>
+            <width>1024</width>
+            <height>768</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.3</near>
+            <far>10.0</far>
+          </clip>
+        </camera>
+        <plugin name="bumblebee2_like_right_plugin" filename="libgazebo_ros_camera.so">
+          <cameraName>bumblebee2_like_right</cameraName>
+          <ros>
+            <namespace>/bumblebee2_like/right</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
+          </ros>
+          <frame_name>bumblebee2_like_right_optical_frame</frame_name>
+          <optical_frame_id>bumblebee2_like_right_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Type, Optional, Tuple, Any
+from typing import Dict, Type, Optional, Tuple, Any, List
 
 
 class Sensor(ABC):
@@ -29,6 +29,10 @@ class Sensor(ABC):
     def get_params(self) -> None:
         """Вернуть текущие параметры"""
         raise NotImplementedError
+
+    def get_expected_topics(self) -> List[str]:
+        """Ожидаемые ROS topics для readiness-check при запуске сцены."""
+        return []
 
 
 REGISTRY: Dict[Tuple[str, str], Type[Sensor]] = {}

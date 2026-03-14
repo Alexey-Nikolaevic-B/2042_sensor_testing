@@ -1,10 +1,12 @@
 import re
 import rospy
+from pathlib import Path
 
 from sensor_msgs.msg import Image
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from .sensor import Sensor, register_sensor
+from .sdf_profile import load_sensor_profile
 
 
 @register_sensor('camera', 'mono_camera')
@@ -15,13 +17,16 @@ class MonoCamera(Sensor):
     def __init__(self, CONFIG):
         super().__init__()
 
-        WORLDS_PATH = CONFIG["WORLDS_PATH"]
-        SENSORS_PATH = CONFIG["SENSORS_PATH"]
+        root = Path(CONFIG.get("ROOT_PATH", "") or "")
+        sensors_root = Path(CONFIG["SENSORS_PATH"])
+        if not sensors_root.is_absolute():
+            sensors_root = root / sensors_root
 
-        self.sensor_sdf_path = f'{SENSORS_PATH}{self.sensor_type}/{self.sensor_name}.sdf'
+        self.sensor_sdf_path = str((sensors_root / self.sensor_type / f"{self.sensor_name}.sdf").resolve())
 
         self.test_to_world = {}
 
+        self._sdf_profile = load_sensor_profile(self.sensor_sdf_path)
         self._load_params_from_sdf()
 
 
@@ -33,7 +38,12 @@ class MonoCamera(Sensor):
         convert2cv = False
     ) -> Optional[Dict[str, Any]]:
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(
+                world_path,
+                self.sensor_sdf_path,
+                expected_topics=self.get_expected_topics(),
+                sensor_name=self.sensor_name,
+            ):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 
@@ -87,58 +97,22 @@ class MonoCamera(Sensor):
 
 
     def _load_params_from_sdf(self) -> None:
-        # дефотные значения
-        self.horizontal_fov = 1.3
-        self.image_width = 1280
-        self.image_height = 720
-        self.image_format = "R8G8B8"
-        self.clip_near = 0.05
-        self.clip_far = 100.0
-        self.noise_type = "gaussian"
-        self.noise_mean = 0.0
-        self.noise_stddev = 0.0
+        profile = dict(getattr(self, "_sdf_profile", {}) or {})
 
-        cam = self._cam_prefix()
+        self.horizontal_fov = float(profile.get("horizontal_fov") or 1.3)
+        self.image_width = int(profile.get("image_width") or 1280)
+        self.image_height = int(profile.get("image_height") or 720)
+        self.image_format = str(profile.get("image_format") or "R8G8B8")
+        self.clip_near = float(profile.get("clip_near") or 0.05)
+        self.clip_far = float(profile.get("clip_far") or 100.0)
+        self.noise_type = str(profile.get("noise_type") or "gaussian")
+        self.noise_mean = float(profile.get("noise_mean") or 0.0)
+        self.noise_stddev = float(profile.get("noise_stddev") or 0.0)
+        self.update_rate = int(profile.get("update_rate") or 30)
 
-        self.horizontal_fov = self._extract_one(
-            cam + r'<horizontal_fov>\s*([^<]+)\s*</horizontal_fov>',
-            float, self.horizontal_fov
-        )
-
-        self.image_width = self._extract_one(
-            cam + r'<image>.*?<width>\s*([^<]+)\s*</width>',
-            int, self.image_width
-        )
-        self.image_height = self._extract_one(
-            cam + r'<image>.*?<height>\s*([^<]+)\s*</height>',
-            int, self.image_height
-        )
-        self.image_format = self._extract_one(
-            cam + r'<image>.*?<format>\s*([^<]+)\s*</format>',
-            str, self.image_format
-        )
-
-        self.clip_near = self._extract_one(
-            cam + r'<clip>.*?<near>\s*([^<]+)\s*</near>',
-            float, self.clip_near
-        )
-        self.clip_far = self._extract_one(
-            cam + r'<clip>.*?<far>\s*([^<]+)\s*</far>',
-            float, self.clip_far
-        )
-
-        self.noise_type = self._extract_one(
-            cam + r'<noise>.*?<type>\s*([^<]+)\s*</type>',
-            str, self.noise_type
-        )
-        self.noise_mean = self._extract_one(
-            cam + r'<noise>.*?<mean>\s*([^<]+)\s*</mean>',
-            float, self.noise_mean
-        )
-        self.noise_stddev = self._extract_one(
-            cam + r'<noise>.*?<stddev>\s*([^<]+)\s*</stddev>',
-            float, self.noise_stddev
-        )
+        image_topic = str(profile.get("image_topic", "") or "").strip()
+        if image_topic:
+            self.IMAGE_TOPIC = image_topic
 
 
     def set_horizontal_fov(self, value: Optional[float] = None) -> None:
@@ -212,6 +186,7 @@ class MonoCamera(Sensor):
             "image_format": self.image_format,
             "clip_near": self.clip_near,
             "clip_far": self.clip_far,
+            "update_rate": self.update_rate,
             "noise_type": self.noise_type,
             "noise_mean": self.noise_mean,
             "noise_stddev": self.noise_stddev,
@@ -237,3 +212,6 @@ class MonoCamera(Sensor):
             self.set_noise_mean(float(params["noise_mean"]))
         if "noise_stddev" in params:
             self.set_noise_stddev(float(params["noise_stddev"]))
+
+    def get_expected_topics(self) -> List[str]:
+        return [str(self.IMAGE_TOPIC)]

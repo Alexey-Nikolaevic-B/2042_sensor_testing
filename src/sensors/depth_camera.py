@@ -1,8 +1,9 @@
 import time
 import numpy as np
+from pathlib import Path
 
 import rospy
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from sensor_msgs.msg import Image
 
@@ -19,13 +20,25 @@ class DepthCamera(MonoCamera):
     def __init__(self, CONFIG):
         super().__init__(CONFIG)
 
-        WORLDS_PATH = CONFIG["WORLDS_PATH"]
-        SENSORS_PATH = CONFIG["SENSORS_PATH"]
+        root = Path(CONFIG.get("ROOT_PATH", "") or "")
+        worlds_root = Path(CONFIG["WORLDS_PATH"])
+        if not worlds_root.is_absolute():
+            worlds_root = root / worlds_root
+        sensors_root = Path(CONFIG["SENSORS_PATH"])
+        if not sensors_root.is_absolute():
+            sensors_root = root / sensors_root
 
-        self.sensor_sdf_path = f'{SENSORS_PATH}{self.sensor_type}/{self.sensor_name}.sdf'
+        self.sensor_sdf_path = str((sensors_root / self.sensor_type / f"{self.sensor_name}.sdf").resolve())
+        profile = dict(getattr(self, "_sdf_profile", {}) or {})
+        image_topic = str(profile.get("image_topic", "") or "").strip()
+        depth_topic = str(profile.get("depth_topic", "") or "").strip()
+        if image_topic:
+            self.IMAGE_TOPIC = image_topic
+        if depth_topic:
+            self.DEPTH_TOPIC = depth_topic
 
         self.test_to_world = {
-            'depth_perception_test': f'{WORLDS_PATH}depth_camera/depth_perception_test.world'
+            'depth_perception_test': str(worlds_root / "depth_camera" / "depth_perception_test.world"),
         }
 
 
@@ -106,7 +119,12 @@ class DepthCamera(MonoCamera):
           - если focused_image=True: dof_cv (картинка с DOF)
         """
         if world_path:
-            if not simulator.open_scene(world_path, self.sensor_sdf_path):
+            if not simulator.open_scene(
+                world_path,
+                self.sensor_sdf_path,
+                expected_topics=self.get_expected_topics(),
+                sensor_name=self.sensor_name,
+            ):
                 return None
             rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
 
@@ -158,7 +176,12 @@ class DepthCamera(MonoCamera):
         reset_x = 50.0
         distances = [1.0, 3.0, 5.0]
 
-        if not simulator.open_scene(world_path, self.sensor_sdf_path):
+        if not simulator.open_scene(
+            world_path,
+            self.sensor_sdf_path,
+            expected_topics=self.get_expected_topics(),
+            sensor_name=self.sensor_name,
+        ):
             return None
 
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
@@ -201,3 +224,10 @@ class DepthCamera(MonoCamera):
             })
 
         return results
+
+    def get_expected_topics(self) -> List[str]:
+        topics: List[str] = [str(self.DEPTH_TOPIC)]
+        image_topic = str(self.IMAGE_TOPIC or "").strip()
+        if image_topic:
+            topics.append(image_topic)
+        return topics

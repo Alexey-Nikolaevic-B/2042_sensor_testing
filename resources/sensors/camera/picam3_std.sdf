@@ -1,0 +1,42 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="picam3_std_model">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+    <link name="camera_link">
+      <collision name="collision">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.05 0.05 0.05</size></box></geometry>
+      </visual>
+      <sensor name="picam3_std" type="camera">
+        <always_on>true</always_on>
+        <update_rate>30</update_rate>
+        <camera name="picam3_std">
+          <horizontal_fov>1.152</horizontal_fov>
+          <image>
+            <width>1920</width>
+            <height>1080</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>50.0</far>
+          </clip>
+        </camera>
+        <plugin name="picam3_std_camera_plugin" filename="libgazebo_ros_camera.so">
+          <cameraName>picam3_std</cameraName>
+          <ros>
+            <namespace>/picam3_std</namespace>
+            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
+          </ros>
+          <frame_name>picam3_std_optical_frame</frame_name>
+          <optical_frame_id>picam3_std_optical_frame</optical_frame_id>
+          <update_rate>30</update_rate>
+        </plugin>
+      </sensor>
+    </link>
+  </model>
+</sdf>
