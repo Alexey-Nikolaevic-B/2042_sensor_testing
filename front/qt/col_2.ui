@@ -34,6 +34,8 @@
      <property name="alignment">
       <set>Qt::AlignCenter</set>
      </property>
+     <property name="minimumHeight"><number>200</number></property>
+     <property name="maximumHeight"><number>200</number></property>
     </widget>
    </item>
    <item>

@@ -113,7 +113,7 @@
          <item>
           <widget class="QWidget" name="wt_editor">
             <layout class="QVBoxLayout" name="editor_layout">
-             <property name="spacing"><number>12</number></property>
+             <property name="spacing"><number>8</number></property>
              <property name="leftMargin"><number>0</number></property>
              <property name="topMargin"><number>0</number></property>
              <property name="rightMargin"><number>0</number></property>
@@ -121,11 +121,6 @@
 
 
              <!-- Image section -->
-             <item>
-              <widget class="QLabel" name="lbl_section_image">
-               <property name="text"><string>IMAGE</string></property>
-              </widget>
-             </item>
              <item>
               <widget class="QWidget" name="wt_image_container">
                <property name="minimumHeight"><number>160</number></property>
@@ -147,11 +142,6 @@
              </item>
 
              <!-- Display name section -->
-             <item>
-              <widget class="QLabel" name="lbl_section_name">
-               <property name="text"><string>DISPLAY NAME</string></property>
-              </widget>
-             </item>
              <item>
               <widget class="QLineEdit" name="input_display_name">
                <property name="placeholderText"><string>Display name</string></property>

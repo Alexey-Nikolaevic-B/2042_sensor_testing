@@ -94,6 +94,7 @@ class EditTestsDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setFixedSize(760, 520)
 
         self._sensor_id   = sensor_id
         self._sensor_name = sensor_name
@@ -111,6 +112,10 @@ class EditTestsDialog(QDialog):
 
         if tests:
             self._select(tests[0]["func_name"])
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._setup_styles()
 
     # ── slots ─────────────────────────────────────────────────────────────────
 
@@ -229,65 +234,30 @@ class EditTestsDialog(QDialog):
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
-            QDialog {{ background: {LC.BG_PANEL}; }}
-            QWidget {{
-                background: {LC.BG_PANEL};
-                color: {LC.TEXT};
-                font-size: 13px;
-            }}
+            QDialog#EditTestsDialog {{ background: {LC.BG}; }}
+
+            /* ── explicit panel backgrounds (no blanket QWidget rule) ── */
             QWidget#wt_titlebar {{
                 background: {LC.BG};
                 border-bottom: 1px solid {LC.BORDER};
-            }}
-            QLabel#lbl_title {{
-                color: {LC.TEXT};
-                font-size: 14px;
-                font-weight: bold;
-                background: transparent;
             }}
             QWidget#wt_list_panel {{
                 background: {LC.BG};
                 border-right: 1px solid {LC.BORDER};
             }}
-            QLabel#row_display {{
-                color: {LC.TEXT};
-                font-size: 13px;
-                background: transparent;
-            }}
-            QLabel#row_func {{
-                color: {LC.TEXT_MUTED};
-                font-size: 10px;
-                background: transparent;
-            }}
-            QLabel#row_warn {{
-                color: {LC.ERROR};
-                font-size: 10px;
-                background: transparent;
-            }}
-            QWidget#wt_editor_panel {{
+            QWidget#wt_editor_panel,
+            QWidget#wt_editor,
+            QScrollArea#scroll_tests_list,
+            QWidget#scroll_tests_list_contents {{
                 background: {LC.BG};
             }}
-            QLabel#lbl_func_badge {{
-                color: {LC.TEXT_MUTED};
-                font-size: 11px;
-                font-family: monospace;
-                background: transparent;
+            QWidget#wt_footer {{
+                background: {LC.BG};
+                border-top: 1px solid {LC.BORDER};
             }}
-            QLabel#lbl_empty {{
-                color: {LC.TEXT_MUTED};
-                font-size: 13px;
-                background: transparent;
-            }}
-            QLabel#lbl_section_image,
-            QLabel#lbl_section_name,
-            QLabel#lbl_section_func,
-            QLabel#lbl_section_desc {{
-                color: {LC.TEXT_SEC};
-                font-size: 10px;
-                font-weight: bold;
-                letter-spacing: 1px;
-                background: transparent;
-            }}
+
+            /* ── image + name group: bottom border removed on image so it
+               flows into the name field visually ── */
             QWidget#wt_image_container {{
                 background: {LC.BG_HOVER};
                 border: 1px solid {LC.BORDER};
@@ -298,6 +268,60 @@ class EditTestsDialog(QDialog):
                 font-size: 12px;
                 background: transparent;
             }}
+            QLineEdit#input_display_name {{
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
+                border-radius: 4px;
+                color: {LC.TEXT};
+                padding: 6px 10px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QLineEdit#input_display_name:focus {{
+                border-color: {LC.ACCENT};
+            }}
+
+            /* ── section labels ── */
+            QLabel#lbl_section_func,
+            QLabel#lbl_section_desc {{
+                color: {LC.TEXT_SEC};
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 1px;
+                background: transparent;
+            }}
+
+            /* ── all other labels ── */
+            QLabel {{
+                background: transparent;
+                color: {LC.TEXT};
+                font-size: 13px;
+            }}
+            QLabel#lbl_title {{
+                font-size: 14px;
+                font-weight: bold;
+            }}
+            QLabel#lbl_func_badge {{
+                color: {LC.TEXT_MUTED};
+                font-size: 11px;
+                font-family: monospace;
+            }}
+            QLabel#lbl_empty {{
+                color: {LC.TEXT_MUTED};
+            }}
+            QLabel#row_display {{
+                font-size: 13px;
+            }}
+            QLabel#row_func {{
+                color: {LC.TEXT_MUTED};
+                font-size: 10px;
+            }}
+            QLabel#row_warn {{
+                color: {LC.ERROR};
+                font-size: 10px;
+            }}
+
+            /* ── inputs ── */
             QLineEdit {{
                 background: {LC.BG_INPUT};
                 border: 1px solid {LC.BORDER};
@@ -321,6 +345,8 @@ class EditTestsDialog(QDialog):
                 font-size: 13px;
             }}
             QPlainTextEdit:focus {{ border-color: {LC.ACCENT}; }}
+
+            /* ── warnings / footer buttons ── */
             QLabel#lbl_missing_warn {{
                 color: {LC.ERROR};
                 background: #ffeaea;
@@ -328,10 +354,6 @@ class EditTestsDialog(QDialog):
                 border-radius: 4px;
                 padding: 8px;
                 font-size: 12px;
-            }}
-            QWidget#wt_footer {{
-                background: {LC.BG};
-                border-top: 1px solid {LC.BORDER};
             }}
             QPushButton#btn_cancel {{
                 background: transparent;
@@ -363,3 +385,9 @@ class EditTestsDialog(QDialog):
         self.btn_close.setIcon(Icons.CLOSE())
         self.btn_close.setIconSize(Layout.ICON_SIZE_SM)
         self.lbl_title.setText("Edit tests")
+
+        # The image container is visually self-evident — hide the redundant
+        # "IMAGE" section header so it doesn't look like a separate group
+        lbl_img_sec = getattr(self, "lbl_section_image", None)
+        if lbl_img_sec:
+            lbl_img_sec.setVisible(False)
