@@ -952,9 +952,9 @@ def _mono_build_ctx(sensor):
     ctx.C7_BACK_CUBE_NAME = "back_cube"
     ctx.C9_SPHERE_NAME = "fov_sphere"
     ctx.C10_CUBE_NAME = "clip_cube"
-    ctx.C1_POSITIONS = (1.0, 3.0, 5.0)
+    ctx.C1_POSITIONS = (2.0, 5.0, 8.0)
     ctx.C1_TRACK_Y = 0.35
-    ctx.C1_TRACK_Z = 0.25
+    ctx.C1_TRACK_Z = 0.15
     ctx.C2_DISTANCES = (0.20, 0.15, 0.10, 0.05, 0.02)
     ctx.C2_MIN_CONTOUR_AREA = 80
     ctx.C1_MIN_MARGIN_RATIO = 1.10
@@ -1735,14 +1735,15 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
     prev_stamp_s: Optional[float] = None
     for x in ctx.C1_POSITIONS:
         label = f"x{int(x)}"
-        _mono__move_and_settle(ctx, 
+        _mono__move_and_settle(ctx,
             simulator,
             ctx.C1_CUBE_NAME,
             x=float(x),
             y=float(ctx.C1_TRACK_Y),
             z=float(ctx.C1_TRACK_Z),
+            settle_s=2.0,
         )
-    
+
         try:
             msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
         except Exception as exc:
@@ -1777,11 +1778,11 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         )
         artifacts.append(_mono__save_frame(ctx, f"c1_{label}.png", debug))
     
-    x1 = metrics["bbox_area_px"].get("x1", 0)
-    x3 = metrics["bbox_area_px"].get("x3", 0)
+    x2 = metrics["bbox_area_px"].get("x2", 0)
     x5 = metrics["bbox_area_px"].get("x5", 0)
-    order_ok = x1 > x3 > x5
-    margin_ok = (x1 >= x3 * ctx.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * ctx.C1_MIN_MARGIN_RATIO)
+    x8 = metrics["bbox_area_px"].get("x8", 0)
+    order_ok = x2 > x5 > x8
+    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO)
     metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
     metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
     if not (order_ok and margin_ok):
@@ -1792,9 +1793,9 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
     metrics_path = _store_c1_diag()
     if not (order_ok and margin_ok):
         raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
-    
-    return {"id": "C1", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
-    
+
+    return {"id": "C1", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
 
 def _mono_c4_geometries_presence_test(ctx, simulator) -> Dict[str, Any]:
     artifacts: List[str] = []
@@ -1875,8 +1876,8 @@ def _mono_c4_geometries_presence_test(ctx, simulator) -> Dict[str, Any]:
     
     if missing:
         raise AssertionError(f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}")
-    
-    return {"id": "C4", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C4", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
@@ -1988,8 +1989,8 @@ def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
             f"C7 checks failed: {metrics['checks']}, blue_pixels={metrics['blue_pixels']}, "
             f"threshold={ctx.C7_MIN_PIXELS}"
         )
-    
-    return {"id": "C7", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C7", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
@@ -2093,8 +2094,8 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
             f"C2 resolution mismatch: expected={ctx.image_width}x{ctx.image_height}, "
             f"actual={actual_width}x{actual_height}, topic={resolved_topic}"
         )
-    
-    return {"id": "C2", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C2", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
@@ -2241,8 +2242,8 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
         raise AssertionError(
             f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
         )
-    
-    return {"id": "C9", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C9", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
@@ -2481,8 +2482,8 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
             f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
             f"far={far_x:.3f} (target {far_target:.3f}, tol={far_tol:.3f})"
         )
-    
-    return {"id": "C10", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C10", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
@@ -2667,8 +2668,8 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             f"C11 failed: fps={fps_actual:.3f} (target>={0.95 * ctx.update_rate:.3f}), "
             f"jitter={jitter:.4f}s (limit<={ctx.C11_MAX_JITTER_S:.4f}s), dropouts={dropouts}"
         )
-    
-    return {"id": "C11", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
+    return {"id": "C11", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
 
 class _DepthProfileTestContext:
@@ -3908,7 +3909,7 @@ class _DepthProfileTestContext:
                 f"max_abs_error={max_abs_error:.4f} (limit={self.C3_MAX_ABS_ERROR_M:.4f})"
             )
 
-        return {"id": "C3", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+        return {"id": "C3", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c5_working_range_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
@@ -4076,7 +4077,7 @@ class _DepthProfileTestContext:
                 f"[{expected_ok_x_values[0]:.2f}, {expected_ok_x_values[-1]:.2f}]"
             )
 
-        return {"id": "C5", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+        return {"id": "C5", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
     def c6_small_displacement_sensitivity_test(self, simulator) -> Dict[str, Any]:
         artifacts: List[str] = []
@@ -4189,7 +4190,7 @@ class _DepthProfileTestContext:
                 f"median_delta={median_delta:.4f}, expected_step={expected_step_m:.4f}, mean_abs_error={mean_abs_error:.4f}"
             )
 
-        return {"id": "C6", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+        return {"id": "C6", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
 class _StereoProfileTestContext:
     LEFT_IMAGE_TOPIC = ""
@@ -4964,7 +4965,7 @@ class _StereoProfileTestContext:
         if missing:
             raise AssertionError(f"Stereo C4 presence failed: {missing}")
 
-        return {"id": "STEREO_TOPICS", "metrics": metrics}
+        return {"id": "STEREO_TOPICS", "passed": True, "metrics": metrics}
 
     def stereo_disparity_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "stereo_disparity_test")
@@ -5155,7 +5156,7 @@ class _StereoProfileTestContext:
                 )
 
         self._set_test_diagnostics(stereo_occlusion={"metrics": copy.deepcopy(metrics)})
-        return {"id": "STEREO_C7", "metrics": metrics}
+        return {"id": "STEREO_C7", "passed": True, "metrics": metrics}
 
     def s1_stereo_accuracy_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "s1_stereo_accuracy_test")
@@ -5258,7 +5259,7 @@ class _StereoProfileTestContext:
                 f"objects={metrics['objects']}"
             )
 
-        return {"id": "S1", "metrics": metrics, "artifacts": artifacts}
+        return {"id": "S1", "passed": True, "metrics": metrics, "artifacts": artifacts}
 
     def s2_texture_vs_smooth_stability_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "s2_texture_vs_smooth_stability_test")
@@ -5405,7 +5406,7 @@ class _StereoProfileTestContext:
                 f"required_gain>={self.S2_MIN_VALID_GAIN:.4f}"
             )
 
-        return {"id": "S2", "metrics": metrics, "artifacts": artifacts}
+        return {"id": "S2", "passed": True, "metrics": metrics, "artifacts": artifacts}
 
 
 def _camera_method_passed(result: dict) -> bool:
@@ -5576,14 +5577,15 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
     prev_stamp_s: Optional[float] = None
     for x in ctx.C1_POSITIONS:
         label = f"x{int(x)}"
-        _mono__move_and_settle(ctx, 
+        _mono__move_and_settle(ctx,
             simulator,
             ctx.C1_CUBE_NAME,
             x=float(x),
             y=float(ctx.C1_TRACK_Y),
             z=float(ctx.C1_TRACK_Z),
+            settle_s=2.0,
         )
-    
+
         try:
             msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
         except Exception as exc:
@@ -5618,11 +5620,11 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         )
         artifacts.append(_mono__save_frame(ctx, f"c1_{label}.png", debug))
     
-    x1 = metrics["bbox_area_px"].get("x1", 0)
-    x3 = metrics["bbox_area_px"].get("x3", 0)
+    x2 = metrics["bbox_area_px"].get("x2", 0)
     x5 = metrics["bbox_area_px"].get("x5", 0)
-    order_ok = x1 > x3 > x5
-    margin_ok = (x1 >= x3 * ctx.C1_MIN_MARGIN_RATIO) and (x3 >= x5 * ctx.C1_MIN_MARGIN_RATIO)
+    x8 = metrics["bbox_area_px"].get("x8", 0)
+    order_ok = x2 > x5 > x8
+    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO)
     metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
     metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
     if not (order_ok and margin_ok):
@@ -5633,13 +5635,13 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
     metrics_path = _store_c1_diag()
     if not (order_ok and margin_ok):
         raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
-    
+
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C1", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C1", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
@@ -5755,8 +5757,8 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C2", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
-    
+    return {"id": "C2", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+
 
 def c3_view_angle_stability_test(simulator, sensor, progress_cb=None) -> dict:
     print(f"\n[DEBUG c3_view_angle_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
@@ -5854,7 +5856,7 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C4", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C4", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def c5_working_range_test(simulator, sensor, progress_cb=None) -> dict:
@@ -5988,7 +5990,7 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C7", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C7", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
@@ -6147,7 +6149,7 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C9", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C9", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
@@ -6398,7 +6400,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C10", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C10", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
     
 
 def c11_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
@@ -6595,7 +6597,7 @@ def c11_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C11", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
+    return {"id": "C11", "passed": True, "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
 def depth_perception_test(simulator, sensor, progress_cb=None) -> dict:
     print(f"\n[DEBUG depth_perception_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
