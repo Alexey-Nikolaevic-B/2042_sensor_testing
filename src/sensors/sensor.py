@@ -163,6 +163,8 @@ class Sensor:
                 "sensor_name": self.sensor_name,
                 "topic":       t,
                 "count":       len(results),
+                "image_path":  self.image_path,
+                "messages":    results,   # raw ROS messages for rendering
             }
             obs_img = simulator.capture_observer_frame() if simulator.gazebo_is_running else None
             simulator.notify_capture(sensor_data, obs_img)

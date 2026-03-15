@@ -31,6 +31,7 @@ class ColCapture(QWidget):
         self._show_observer     = False
         self._last_sensor_data: dict       = {}
         self._last_obs_img:     bytes|None = None
+        self._last_sensor_img:  bytes|None = None
 
         self._setup_heights()
         self._setup_styles()
@@ -150,6 +151,8 @@ class ColCapture(QWidget):
         """Runs on main thread — safe to update widgets."""
         self._last_sensor_data = sensor_data
         self._last_obs_img     = obs_img if obs_img else None
+        # Render sensor image from messages on capture arrival
+        self._last_sensor_img  = self._render_sensor_image(sensor_data)
         self._refresh_display()
 
     # ── display ───────────────────────────────────────────────────────────────
@@ -158,24 +161,116 @@ class ColCapture(QWidget):
         if self._show_observer:
             self._show_image_bytes(self._last_obs_img, "no observer frame")
         else:
-            self._show_sensor_data(self._last_sensor_data)
+            if self._last_sensor_img:
+                self._show_image_bytes(self._last_sensor_img, "no sensor image")
+            elif self._last_sensor_data:
+                self._show_static_image(self._last_sensor_data.get("image_path", ""))
+            else:
+                self._clear_display()
 
-    def _show_sensor_data(self, data: dict) -> None:
-        if not data:
-            self._clear_display()
-            return
-        lines = [
-            f"<b>{data.get('sensor_name', '')} · {data.get('sensor_type', '')}</b>",
-            f"topic: {data.get('topic', '')}",
-            f"frames captured: <b>{data.get('count', 0)}</b>",
-        ]
-        frames = data.get("frames", [])
-        if frames:
-            lines.append("ids: " + ", ".join(str(f) for f in frames[:8]))
-            if len(frames) > 8:
-                lines.append(f"… and {len(frames) - 8} more")
-        self.lbl_capture_image.setPixmap(QPixmap())
-        self.lbl_capture_image.setText("<br>".join(lines))
+    def _render_sensor_image(self, data: dict) -> bytes | None:
+        """Convert raw ROS messages to JPEG bytes for display.
+        - Camera messages  → decode image directly
+        - Tactile messages → build force heatmap
+        - Others           → None (fall back to static image_path)
+        """
+        msgs = data.get("messages", [])
+        if not msgs:
+            return None
+        msg = msgs[-1]  # use most recent
+
+        try:
+            # ── Camera: sensor_msgs/Image ─────────────────────────────────
+            if hasattr(msg, "encoding") and hasattr(msg, "height"):
+                import numpy as np, cv2
+                dtype = np.float32 if "32FC" in msg.encoding else np.uint8
+                arr   = np.frombuffer(msg.data, dtype=dtype).reshape(
+                    msg.height, msg.width, -1)
+                if arr.dtype != np.uint8:
+                    ch = arr[:, :, 0]
+                    fin = ch[np.isfinite(ch)]
+                    if len(fin) and fin.max() > fin.min():
+                        norm = ((ch - fin.min()) / (fin.max() - fin.min()) * 255
+                                ).clip(0, 255).astype(np.uint8)
+                    else:
+                        norm = np.zeros_like(ch, dtype=np.uint8)
+                    bgr = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+                else:
+                    bgr = arr[:, :, ::-1].copy() if arr.shape[2] >= 3 else \
+                          cv2.cvtColor(arr[:, :, 0], cv2.COLOR_GRAY2BGR)
+                ok, buf = cv2.imencode(".jpg", bgr)
+                return bytes(buf) if ok else None
+
+            # ── Tactile: gazebo_msgs/ContactsState → force heatmap ────────
+            if hasattr(msg, "states"):
+                return self._render_tactile_heatmap(msgs)
+
+        except Exception as e:
+            import traceback
+            print(f"[col4] render_sensor_image failed: {e}\n{traceback.format_exc()}")
+        return None
+
+    def _render_tactile_heatmap(self, msgs: list) -> bytes | None:
+        """Aggregate ContactsState messages into a spatial force heatmap."""
+        try:
+            import numpy as np, cv2
+
+            # Collect contact points (x, y, force_magnitude)
+            points = []
+            for msg in msgs:
+                for state in (msg.states or []):
+                    f = state.total_wrench.force
+                    mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
+                    # Use contact position from normals if available
+                    if state.contact_positions:
+                        for pos in state.contact_positions:
+                            points.append((pos.x, pos.y, mag))
+                    else:
+                        points.append((0.0, 0.0, mag))
+
+            H, W = 256, 256
+            if not points:
+                canvas = np.zeros((H, W), dtype=np.uint8)
+            else:
+                xs  = np.array([p[0] for p in points])
+                ys  = np.array([p[1] for p in points])
+                fs  = np.array([p[2] for p in points])
+                # Normalise coordinates to pixel space
+                x_range = xs.max() - xs.min() or 1.0
+                y_range = ys.max() - ys.min() or 1.0
+                pxs = ((xs - xs.min()) / x_range * (W - 20) + 10).astype(int)
+                pys = ((ys - ys.min()) / y_range * (H - 20) + 10).astype(int)
+                canvas = np.zeros((H, W), dtype=np.float32)
+                for px, py, fv in zip(pxs, pys, fs):
+                    cv2.circle(canvas, (int(px), int(py)),
+                               radius=15, color=float(fv), thickness=-1)
+                # Gaussian blur for smooth heatmap
+                canvas = cv2.GaussianBlur(canvas, (31, 31), 0)
+                if canvas.max() > 0:
+                    canvas = (canvas / canvas.max() * 255).astype(np.uint8)
+                else:
+                    canvas = canvas.astype(np.uint8)
+
+            heatmap = cv2.applyColorMap(canvas, cv2.COLORMAP_JET)
+            ok, buf = cv2.imencode(".jpg", heatmap)
+            return bytes(buf) if ok else None
+        except Exception:
+            return None
+
+    def _show_static_image(self, image_path: str) -> None:
+        """Show sensor's assigned image_path photo."""
+        if image_path:
+            px = QPixmap(image_path)
+            if not px.isNull():
+                scaled = px.scaled(
+                    self.lbl_capture_image.width(),
+                    self.lbl_capture_image.height(),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                )
+                self.lbl_capture_image.setPixmap(scaled)
+                self.lbl_capture_image.setText("")
+                return
+        self._clear_display()
 
     def _show_image_bytes(self, data: bytes | None, fallback: str) -> None:
         if data:
