@@ -27,7 +27,10 @@ class ColDetails(QWidget):
         self._load_image(sensor_data.get("image_path", ""))
         self.lbl_sensor_name.setText(sensor_data.get("name", ""))
         self.lbl_description.setText(sensor_data.get("description", ""))
-        self._load_params(sensor_data.get("params", {}))
+        
+        # Create params with topics as separate entries
+        params_with_topics = self._create_params_with_topics(sensor_data)
+        self._load_params(params_with_topics)
 
     def clear(self):
         self._sensor_data = None
@@ -36,6 +39,32 @@ class ColDetails(QWidget):
         self.lbl_sensor_name.setText("")
         self.lbl_description.setText("")
         self._clear_params()
+
+    # ── helper method to create params with topics ────────────────────────────
+
+    def _create_params_with_topics(self, sensor_data: dict) -> dict:
+        """
+        Create a params dictionary with each topic as a separate entry
+        (topic_1, topic_2, etc.), followed by the original params.
+        """
+        topics = sensor_data.get("topics", [])
+        original_params = sensor_data.get("params", {})
+        
+        # Create new dict with topics as separate entries
+        params_with_topics = {}
+        
+        # Add each topic as a separate entry
+        for i, topic in enumerate(topics, 1):
+            params_with_topics[f"topic_{i}"] = topic
+        
+        # If no topics, add a placeholder
+        if not topics:
+            params_with_topics["topics"] = "No topics defined"
+        
+        # Add all original params
+        params_with_topics.update(original_params)
+        
+        return params_with_topics
 
     # ── slots ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +119,8 @@ class ColDetails(QWidget):
             )
             lbl_val.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             lbl_val.setWordWrap(True)
+            lbl_val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            
             h.addWidget(lbl_key)
             h.addWidget(lbl_val)
             layout.addWidget(row)
