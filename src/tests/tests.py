@@ -1101,12 +1101,14 @@ def _mono__wait_image_after(
     prev_stamp_s: Optional[float],
     timeout: float = 35.0,
     topic: Optional[str] = None,
+    skip_frames: int = 0,
 ) -> Image:
     start = time.time()
     target_topic = str(topic or ctx.IMAGE_TOPIC)
     saw_message = False
     attempt = 0
-    print(f"[DEBUG _mono__wait_image_after] topic={target_topic}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s")
+    frames_to_skip = int(skip_frames)
+    print(f"[DEBUG _mono__wait_image_after] topic={target_topic}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s, skip_frames={frames_to_skip}")
 
     while (time.time() - start) < float(timeout):
         remaining = max(0.2, float(timeout) - (time.time() - start))
@@ -1120,11 +1122,18 @@ def _mono__wait_image_after(
         saw_message = True
 
         if prev_stamp_s is None:
+            if frames_to_skip > 0:
+                frames_to_skip -= 1
+                continue
             print(f"[DEBUG _mono__wait_image_after] got first image (no prev_stamp), attempt={attempt}")
             return msg
 
         stamp = _mono__msg_stamp_s(ctx, msg)
         if stamp > float(prev_stamp_s) + 1e-6:
+            if frames_to_skip > 0:
+                frames_to_skip -= 1
+                prev_stamp_s = stamp
+                continue
             print(f"[DEBUG _mono__wait_image_after] got fresh image: stamp={stamp:.6f} > prev={prev_stamp_s:.6f}, attempt={attempt}")
             return msg
         elif attempt <= 3:
@@ -1745,7 +1754,7 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         )
 
         try:
-            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2)
         except Exception as exc:
             metrics["error_reason"] = f"image_receive_failed:{exc}"
             _store_c1_diag()
@@ -5436,6 +5445,22 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
         print(f"[DEBUG _run_camera_context_test] FAILED to create context: {e}")
         print(traceback.format_exc())
         raise
+
+    if context_cls.__name__ == "_DepthProfileTestContext" and not getattr(ctx, "DEPTH_TOPIC", ""):
+        msg = (f"Test {method_name} requires a depth camera, but sensor "
+               f"'{getattr(sensor, 'sensor_name', '?')}' has no depth topic configured. "
+               f"This test is not applicable to mono/RGB cameras.")
+        print(f"[DEBUG _run_camera_context_test] SKIP: {msg}")
+        return {"passed": False, "skipped": True, "error": msg,
+                "metrics": {"status": "SKIP", "error_reason": msg}}
+
+    if context_cls.__name__ == "_StereoProfileTestContext" and not getattr(ctx, "LEFT_TOPIC", ""):
+        msg = (f"Test {method_name} requires a stereo camera, but sensor "
+               f"'{getattr(sensor, 'sensor_name', '?')}' has no stereo topics configured. "
+               f"This test is not applicable to mono/RGB cameras.")
+        print(f"[DEBUG _run_camera_context_test] SKIP: {msg}")
+        return {"passed": False, "skipped": True, "error": msg,
+                "metrics": {"status": "SKIP", "error_reason": msg}}
     method = getattr(ctx, method_name)
     if progress_cb:
         try:
@@ -5587,7 +5612,7 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         )
 
         try:
-            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2)
         except Exception as exc:
             metrics["error_reason"] = f"image_receive_failed:{exc}"
             _store_c1_diag()
