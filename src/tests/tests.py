@@ -101,6 +101,7 @@ def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
         logger.error("get_tests_for_type failed: %s", e)
         return {}
 
+
 # ── How to add a new test ─────────────────────────────────────────────────────
 #
 # 1. Write a plain function:
@@ -627,13 +628,17 @@ def camera_resolution(simulator, sensor, progress_cb=None) -> dict:
 def _camera_worlds_root() -> Path:
     root = Path(str(CONFIG["ROOT_PATH"]))
     assets_worlds = root / "assets" / "worlds"
+    print(f"[DEBUG _camera_worlds_root] ROOT_PATH={root}, assets_worlds={assets_worlds}, exists={assets_worlds.exists()}")
     if assets_worlds.exists():
         return assets_worlds
 
     configured = Path(str(CONFIG.get("WORLDS_PATH", "") or ""))
     if configured.is_absolute():
+        print(f"[DEBUG _camera_worlds_root] using configured absolute: {configured}")
         return configured
-    return root / configured
+    result = root / configured
+    print(f"[DEBUG _camera_worlds_root] using relative: {result}")
+    return result
 
 
 
@@ -789,15 +794,22 @@ def _sensor_payload(sensor_node: ET.Element) -> Dict[str, Any]:
 
 
 def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
+    print(f"[DEBUG _camera_load_sensor_profile] path={sensor_sdf_path}")
     path = Path(sensor_sdf_path)
+    if not path.exists():
+        print(f"[DEBUG _camera_load_sensor_profile] FILE NOT FOUND: {sensor_sdf_path}")
     tree = ET.parse(path)
     root = tree.getroot()
     model = root.find("model")
     model_name = str(model.get("name", "")).strip() if model is not None else ""
+    print(f"[DEBUG _camera_load_sensor_profile] model_name={model_name}")
 
     sensors = [_sensor_payload(node) for node in root.findall(".//sensor")]
     camera_sensors = [item for item in sensors if item["sensor_type"] == "camera"]
     depth_sensors = [item for item in sensors if item["sensor_type"] == "depth"]
+    print(f"[DEBUG _camera_load_sensor_profile] found {len(sensors)} sensors total: {len(camera_sensors)} camera, {len(depth_sensors)} depth")
+    for i, s in enumerate(sensors):
+        print(f"[DEBUG _camera_load_sensor_profile]   sensor[{i}]: type={s.get('sensor_type')}, name={s.get('name')}, image_topic={s.get('image_topic', 'N/A')}, depth_topic={s.get('depth_topic', 'N/A')}")
 
     family = "mono"
     if depth_sensors:
@@ -810,6 +822,7 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
         if "left" in names and "right" in names:
             family = "stereo"
 
+    print(f"[DEBUG _camera_load_sensor_profile] family={family}")
     profile: Dict[str, Any] = {
         "sensor_name": path.stem,
         "model_name": model_name,
@@ -850,6 +863,7 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
                 "update_rate": primary.get("update_rate"),
             }
         )
+        print(f"[DEBUG _camera_load_sensor_profile] depth profile: image_topic={profile['image_topic']}, depth_topic={profile['depth_topic']}, {profile.get('image_width')}x{profile.get('image_height')}")
         return profile
 
     if family == "stereo":
@@ -893,6 +907,7 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
                 "baseline": baseline,
             }
         )
+        print(f"[DEBUG _camera_load_sensor_profile] stereo profile: left={profile['left_topic']}, right={profile['right_topic']}, baseline={baseline}, {profile.get('image_width')}x{profile.get('image_height')}")
         return profile
 
     primary = camera_sensors[0] if camera_sensors else (depth_sensors[0] if depth_sensors else {})
@@ -911,6 +926,7 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
             "update_rate": primary.get("update_rate"),
         }
     )
+    print(f"[DEBUG _camera_load_sensor_profile] mono profile: image_topic={profile['image_topic']}, {profile.get('image_width')}x{profile.get('image_height')}")
     return profile
 
 
@@ -918,6 +934,9 @@ def _camera_classify_sensor_profile(sensor_sdf_path: str) -> str:
     return str(_camera_load_sensor_profile(sensor_sdf_path).get("family", "mono"))
 
 def _mono_build_ctx(sensor):
+    print(f"[DEBUG _mono_build_ctx] building context for sensor_name={getattr(sensor, 'sensor_name', '?')}")
+    print(f"[DEBUG _mono_build_ctx] sensor.sdf_path={getattr(sensor, 'sdf_path', '?')}")
+    print(f"[DEBUG _mono_build_ctx] sensor.topic={getattr(sensor, 'topic', '?')}")
     ctx = SimpleNamespace()
     ctx.IMAGE_TOPIC = ""
     ctx.IMAGE_WIDTH = 640
@@ -962,6 +981,8 @@ def _mono_build_ctx(sensor):
     ctx.sensor_sdf_path = str(getattr(sensor, "sdf_path", ""))
     ctx.CONFIG = {"ROOT_PATH": str(CONFIG["ROOT_PATH"])}
     profile = _camera_load_sensor_profile(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else {}
+    print(f"[DEBUG _mono_build_ctx] SDF profile loaded: {list(profile.keys()) if profile else 'EMPTY'}")
+    print(f"[DEBUG _mono_build_ctx] profile.image_topic={profile.get('image_topic', 'N/A')}, profile.family={profile.get('family', 'N/A')}")
     ctx.IMAGE_TOPIC = str(profile.get("image_topic", "") or getattr(sensor, "topic", "") or ctx.IMAGE_TOPIC)
     ctx.image_width = int(profile.get("image_width") or ctx.IMAGE_WIDTH)
     ctx.image_height = int(profile.get("image_height") or ctx.IMAGE_HEIGHT)
@@ -969,7 +990,9 @@ def _mono_build_ctx(sensor):
     ctx.clip_near = float(profile.get("clip_near") or ctx.CLIP_NEAR)
     ctx.clip_far = float(profile.get("clip_far") or ctx.CLIP_FAR)
     ctx.update_rate = int(profile.get("update_rate") or ctx.UPDATE_RATE)
+    print(f"[DEBUG _mono_build_ctx] resolved: IMAGE_TOPIC={ctx.IMAGE_TOPIC}, {ctx.image_width}x{ctx.image_height}, fov={ctx.horizontal_fov:.3f}, clip=[{ctx.clip_near}, {ctx.clip_far}], rate={ctx.update_rate}")
     worlds_root = _camera_worlds_root()
+    print(f"[DEBUG _mono_build_ctx] worlds_root={worlds_root}, exists={worlds_root.exists()}")
     ctx.test_to_world = {
         "c1_size_order_test": str(worlds_root / "camera_c1_single_cube.world"),
         "c2_resolution_test": str(worlds_root / "camera_c2_resolution.world"),
@@ -1018,7 +1041,21 @@ def _mono__save_metrics_json(ctx, name: str, payload: Dict[str, Any]) -> str:
 
 def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None) -> Image:
     target_topic = str(topic or ctx.IMAGE_TOPIC)
-    return rospy.wait_for_message(target_topic, Image, timeout=timeout)
+    print(f"[DEBUG _mono__wait_image] topic={target_topic}, timeout={timeout:.1f}s")
+    try:
+        msg = rospy.wait_for_message(target_topic, Image, timeout=timeout)
+        print(f"[DEBUG _mono__wait_image] GOT image: {msg.width}x{msg.height}, enc={msg.encoding}, data_len={len(msg.data)}")
+        return msg
+    except rospy.ROSException as e:
+        print(f"[DEBUG _mono__wait_image] TIMEOUT on {target_topic} after {timeout:.1f}s: {e}")
+        # список активных топиков для диагностики
+        try:
+            topics = rospy.get_published_topics()
+            image_topics = [t for t, tp in topics if 'image' in t.lower() or 'camera' in t.lower()]
+            print(f"[DEBUG _mono__wait_image] active image/camera topics: {image_topics[:15]}")
+        except Exception:
+            pass
+        raise
     
 
 def _mono__scene_diag(ctx, simulator) -> Dict[str, Any]:
@@ -1068,24 +1105,35 @@ def _mono__wait_image_after(
     start = time.time()
     target_topic = str(topic or ctx.IMAGE_TOPIC)
     saw_message = False
-    
+    attempt = 0
+    print(f"[DEBUG _mono__wait_image_after] topic={target_topic}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s")
+
     while (time.time() - start) < float(timeout):
         remaining = max(0.2, float(timeout) - (time.time() - start))
+        attempt += 1
         try:
             msg = _mono__wait_image(ctx, timeout=min(remaining, 5.0), topic=target_topic)
         except rospy.ROSException:
+            if attempt <= 3 or attempt % 5 == 0:
+                print(f"[DEBUG _mono__wait_image_after] attempt {attempt}: timeout, retrying... elapsed={time.time()-start:.1f}s")
             continue
         saw_message = True
-    
+
         if prev_stamp_s is None:
+            print(f"[DEBUG _mono__wait_image_after] got first image (no prev_stamp), attempt={attempt}")
             return msg
-    
+
         stamp = _mono__msg_stamp_s(ctx, msg)
         if stamp > float(prev_stamp_s) + 1e-6:
+            print(f"[DEBUG _mono__wait_image_after] got fresh image: stamp={stamp:.6f} > prev={prev_stamp_s:.6f}, attempt={attempt}")
             return msg
-    
+        elif attempt <= 3:
+            print(f"[DEBUG _mono__wait_image_after] attempt {attempt}: stamp={stamp:.6f} not fresh enough (need > {prev_stamp_s:.6f})")
+
     if not saw_message:
+        print(f"[DEBUG _mono__wait_image_after] FAIL: no image at all on {target_topic}")
         raise RuntimeError(f"No image received on {target_topic} within {timeout:.1f}s")
+    print(f"[DEBUG _mono__wait_image_after] FAIL: no fresh image after {prev_stamp_s:.6f}")
     raise RuntimeError(
         f"No fresh image received on {target_topic} after stamp {float(prev_stamp_s):.6f} "
         f"within {timeout:.1f}s"
@@ -1095,18 +1143,26 @@ def _mono__wait_image_after(
 def _mono__msg_to_bgr(ctx, msg: Image) -> np.ndarray:
     h, w = msg.height, msg.width
     enc = (msg.encoding or "").lower()
-    
+    print(f"[DEBUG _mono__msg_to_bgr] {w}x{h}, encoding={msg.encoding}, data_len={len(msg.data)}")
+
     if enc in ("rgb8", "r8g8b8"):
         rgb = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
-        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        print(f"[DEBUG _mono__msg_to_bgr] converted rgb8 -> bgr, shape={bgr.shape}, mean={bgr.mean():.1f}")
+        return bgr
+
     if enc == "bgr8":
-        return np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
-    
+        bgr = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+        print(f"[DEBUG _mono__msg_to_bgr] bgr8 direct, shape={bgr.shape}, mean={bgr.mean():.1f}")
+        return bgr
+
     if enc in ("mono8", "8uc1"):
         gray = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w)
-        return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-    
+        bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        print(f"[DEBUG _mono__msg_to_bgr] converted mono8 -> bgr, shape={bgr.shape}")
+        return bgr
+
+    print(f"[DEBUG _mono__msg_to_bgr] UNSUPPORTED encoding: {msg.encoding}")
     raise ValueError(f"Unsupported image encoding: {msg.encoding}")
     
 
@@ -1281,15 +1337,21 @@ def _mono__save_frame(ctx, name: str, frame: np.ndarray) -> str:
     
 
 def _mono__open_test_scene(ctx, simulator, test_name: str) -> None:
+    print(f"[DEBUG _mono__open_test_scene] test_name={test_name}")
     ctx._last_test_diagnostics = {}
     world = ctx.test_to_world[test_name]
+    print(f"[DEBUG _mono__open_test_scene] world={world}, exists={os.path.exists(world)}")
+    print(f"[DEBUG _mono__open_test_scene] sdf_path={ctx.sensor_sdf_path}, exists={os.path.exists(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else False}")
+    print(f"[DEBUG _mono__open_test_scene] calling simulator.open_scene()...")
     if not simulator.open_scene(world, ctx.sensor_sdf_path):
         diag = _mono__scene_diag(ctx, simulator)
         reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+        print(f"[DEBUG _mono__open_test_scene] FAILED to open scene: reason={reason}, diag={diag}")
         raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
-    
+    print(f"[DEBUG _mono__open_test_scene] scene opened OK, waiting for services...")
     rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
     rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+    print(f"[DEBUG _mono__open_test_scene] services ready")
     
 
 def _mono__move_and_settle(ctx, simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8) -> None:
@@ -2659,6 +2721,7 @@ class _DepthProfileTestContext:
     C3_MAX_ABS_ERROR_M = 0.15
 
     def __init__(self, sensor):
+        print(f"[DEBUG DepthCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}")
         self.sensor = sensor
         self.sensor_name = str(getattr(sensor, "sensor_name", ""))
         self.sensor_type = str(getattr(sensor, "sensor_type", ""))
@@ -2667,6 +2730,8 @@ class _DepthProfileTestContext:
         self._last_test_diagnostics: Dict[str, Any] = {}
 
         profile = _camera_load_sensor_profile(self.sensor_sdf_path) if self.sensor_sdf_path else {}
+        print(f"[DEBUG DepthCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}")
+        print(f"[DEBUG DepthCtx.__init__] profile.depth_topic={profile.get('depth_topic', 'N/A')}, profile.image_topic={profile.get('image_topic', 'N/A')}")
         self.DEPTH_TOPIC = str(profile.get("depth_topic", "") or self.DEPTH_TOPIC)
         self.IMAGE_TOPIC = str(profile.get("image_topic", "") or getattr(sensor, "topic", "") or self.IMAGE_TOPIC)
         self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
@@ -2675,6 +2740,8 @@ class _DepthProfileTestContext:
         self.clip_near = float(profile.get("clip_near") or self.CLIP_NEAR)
         self.clip_far = float(profile.get("clip_far") or self.CLIP_FAR)
         self.update_rate = int(profile.get("update_rate") or self.UPDATE_RATE)
+        print(f"[DEBUG DepthCtx.__init__] resolved: DEPTH_TOPIC={self.DEPTH_TOPIC}, IMAGE_TOPIC={self.IMAGE_TOPIC}")
+        print(f"[DEBUG DepthCtx.__init__] {self.image_width}x{self.image_height}, clip=[{self.clip_near}, {self.clip_far}], rate={self.update_rate}")
 
         worlds_root = _camera_worlds_root()
         self.test_to_world = {
@@ -2683,7 +2750,10 @@ class _DepthProfileTestContext:
             "c5_working_range_test": str(worlds_root / "camera_c5_working_range.world"),
             "c6_small_displacement_sensitivity_test": str(worlds_root / "camera_c6_small_shifts.world"),
         }
+        for test_name, wpath in self.test_to_world.items():
+            print(f"[DEBUG DepthCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}")
         self.camera_model_name = self._read_camera_model_name()
+        print(f"[DEBUG DepthCtx.__init__] camera_model_name={self.camera_model_name}")
         self._resolved_depth_topic = ""
         self._resolved_image_topic = ""
 
@@ -2720,18 +2790,26 @@ class _DepthProfileTestContext:
         return out
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
+        print(f"[DEBUG DepthCtx._open_test_scene] test_name={test_name}")
         self._last_test_diagnostics = {}
         self._resolved_depth_topic = ""
         self._resolved_image_topic = ""
         world = self.test_to_world[test_name]
+        print(f"[DEBUG DepthCtx._open_test_scene] world={world}, exists={os.path.exists(world)}")
+        print(f"[DEBUG DepthCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}")
         display_env = self._ensure_render_display_env()
         if display_env:
+            print(f"[DEBUG DepthCtx._open_test_scene] display_env={display_env}")
             self._set_test_diagnostics(render_display_env=display_env)
+        print(f"[DEBUG DepthCtx._open_test_scene] calling simulator.open_scene()...")
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = self._scene_diag(simulator)
             reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            print(f"[DEBUG DepthCtx._open_test_scene] FAILED: reason={reason}")
             raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
+        print(f"[DEBUG DepthCtx._open_test_scene] scene opened OK, resolving topics...")
         self._update_resolved_topics(simulator)
+        print(f"[DEBUG DepthCtx._open_test_scene] resolved_depth={self._resolved_depth_topic}, resolved_image={self._resolved_image_topic}")
         self._set_test_diagnostics(
             scene_open_success=True,
             world_file=str(world),
@@ -2740,8 +2818,10 @@ class _DepthProfileTestContext:
             resolved_depth_topic=str(self._resolved_depth_topic or self.DEPTH_TOPIC),
             resolved_image_topic=str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
         )
+        print(f"[DEBUG DepthCtx._open_test_scene] waiting for services...")
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+        print(f"[DEBUG DepthCtx._open_test_scene] services ready")
 
     @staticmethod
     def _iter_float_range(start: float, stop: float, step: float) -> List[float]:
@@ -3257,6 +3337,14 @@ class _DepthProfileTestContext:
         scene_diag = self._scene_diag(simulator)
         self._resolved_depth_topic = str(self.DEPTH_TOPIC)
         self._resolved_image_topic = str(self.IMAGE_TOPIC or "")
+        print(f"[DEBUG DepthCtx._update_resolved_topics] depth={self._resolved_depth_topic}, image={self._resolved_image_topic}")
+        # вывести все активные image/depth топики для диагностики
+        try:
+            topics = rospy.get_published_topics()
+            img_topics = [t for t, _ in topics if 'image' in t.lower() or 'depth' in t.lower() or 'camera' in t.lower()]
+            print(f"[DEBUG DepthCtx._update_resolved_topics] active image/depth/camera topics: {img_topics[:20]}")
+        except Exception:
+            pass
         return scene_diag
 
     def _resolved_color_topic(self) -> str:
@@ -3271,26 +3359,44 @@ class _DepthProfileTestContext:
     ) -> Image:
         target_topic = str(topic or "").strip()
         if not target_topic:
+            print(f"[DEBUG DepthCtx._wait_message_after] NO TOPIC for stage={stage}")
             raise RuntimeError(f"No topic configured for stage={stage}")
 
+        print(f"[DEBUG DepthCtx._wait_message_after] topic={target_topic}, stage={stage}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s")
         start = time.time()
         saw_message = False
+        attempt = 0
         while (time.time() - start) < float(timeout):
             remaining = max(0.2, float(timeout) - (time.time() - start))
+            attempt += 1
             try:
                 msg = rospy.wait_for_message(target_topic, Image, timeout=min(1.0, remaining))
             except rospy.ROSException:
+                if attempt <= 3:
+                    print(f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: timeout on {target_topic}")
                 continue
 
             saw_message = True
             stamp_s = self._msg_stamp_s(msg)
             if prev_stamp_s is None or stamp_s > (float(prev_stamp_s) + 1e-6):
+                print(f"[DEBUG DepthCtx._wait_message_after] GOT fresh frame: {msg.width}x{msg.height}, enc={msg.encoding}, stamp={stamp_s:.6f}, stage={stage}")
                 return msg
+            elif attempt <= 3:
+                print(f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: stamp={stamp_s:.6f} not fresh (need > {prev_stamp_s:.6f})")
 
         if saw_message:
+            print(f"[DEBUG DepthCtx._wait_message_after] FAIL: no fresh frame for stage={stage}")
             raise RuntimeError(
                 f"No fresh frame on topic={target_topic} after stage={stage}; prev_stamp_s={prev_stamp_s}"
             )
+        print(f"[DEBUG DepthCtx._wait_message_after] FAIL: no frame at all on {target_topic} for stage={stage}")
+        # диагностика: какие топики вообще есть?
+        try:
+            topics = rospy.get_published_topics()
+            img_topics = [t for t, _ in topics if 'image' in t.lower() or 'depth' in t.lower()]
+            print(f"[DEBUG DepthCtx._wait_message_after] available image/depth topics: {img_topics[:15]}")
+        except Exception:
+            pass
         raise RuntimeError(f"No frame received on topic={target_topic} during stage={stage}")
 
     def _wait_depth_after(self, prev_stamp_s: Optional[float], timeout: Optional[float] = None, stage: str = "") -> Image:
@@ -4129,6 +4235,7 @@ class _StereoProfileTestContext:
     TOPIC_WARMUP_TIMEOUT_S = 25.0
 
     def __init__(self, sensor):
+        print(f"[DEBUG StereoCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}")
         self.sensor = sensor
         self.sensor_name = str(getattr(sensor, "sensor_name", ""))
         self.sensor_type = str(getattr(sensor, "sensor_type", ""))
@@ -4137,6 +4244,8 @@ class _StereoProfileTestContext:
 
         worlds_root = _camera_worlds_root()
         profile = _camera_load_sensor_profile(self.sensor_sdf_path) if self.sensor_sdf_path else {}
+        print(f"[DEBUG StereoCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}")
+        print(f"[DEBUG StereoCtx.__init__] profile.left_topic={profile.get('left_topic', 'N/A')}, profile.right_topic={profile.get('right_topic', 'N/A')}")
 
         self.test_to_world = {
             "stereo_topics_presence_test": str(worlds_root / "camera_c4_geometries.world"),
@@ -4145,8 +4254,11 @@ class _StereoProfileTestContext:
             "s1_stereo_accuracy_test": str(worlds_root / "camera_c8_stereo_complex.world"),
             "s2_texture_vs_smooth_stability_test": str(worlds_root / "camera_c8_stereo_complex.world"),
         }
+        for test_name, wpath in self.test_to_world.items():
+            print(f"[DEBUG StereoCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}")
 
         sensor_topics = list(getattr(sensor, "topics", []) or [])
+        print(f"[DEBUG StereoCtx.__init__] sensor.topics={sensor_topics}")
         self.LEFT_IMAGE_TOPIC = str(profile.get("left_topic", "") or (sensor_topics[0] if len(sensor_topics) > 0 else self.LEFT_IMAGE_TOPIC))
         self.RIGHT_IMAGE_TOPIC = str(profile.get("right_topic", "") or (sensor_topics[1] if len(sensor_topics) > 1 else self.RIGHT_IMAGE_TOPIC))
         self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
@@ -4156,6 +4268,8 @@ class _StereoProfileTestContext:
         self.clip_far = float(profile.get("clip_far") or self.CLIP_FAR)
         self.update_rate = int(profile.get("update_rate") or self.UPDATE_RATE)
         self.baseline = float(profile.get("baseline") or self.BASELINE_M)
+        print(f"[DEBUG StereoCtx.__init__] resolved: LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}")
+        print(f"[DEBUG StereoCtx.__init__] {self.image_width}x{self.image_height}, baseline={self.baseline}m, clip=[{self.clip_near}, {self.clip_far}]")
         self._last_test_diagnostics: Dict[str, Any] = {}
         self._last_scene_diag: Dict[str, Any] = {}
         self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
@@ -4221,21 +4335,30 @@ class _StereoProfileTestContext:
         return scene_diag
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
+        print(f"[DEBUG StereoCtx._open_test_scene] test_name={test_name}")
         self._last_test_diagnostics = {}
         self._reset_resolved_stereo_topics()
         display_env = self._ensure_render_display_env()
         if display_env:
+            print(f"[DEBUG StereoCtx._open_test_scene] display_env={display_env}")
             self._set_test_diagnostics(stereo_render_env={"display_env": dict(display_env)})
         world = self.test_to_world[test_name]
+        print(f"[DEBUG StereoCtx._open_test_scene] world={world}, exists={os.path.exists(world)}")
+        print(f"[DEBUG StereoCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}")
+        print(f"[DEBUG StereoCtx._open_test_scene] calling simulator.open_scene()...")
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = self._scene_diag(simulator)
             self._last_scene_diag = copy.deepcopy(diag) if isinstance(diag, dict) else {}
             reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            print(f"[DEBUG StereoCtx._open_test_scene] FAILED: reason={reason}")
             raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
 
+        print(f"[DEBUG StereoCtx._open_test_scene] scene opened OK, waiting for services...")
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
         rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+        print(f"[DEBUG StereoCtx._open_test_scene] services ready, resolving topics...")
         scene_diag = self._update_resolved_stereo_topics(simulator)
+        print(f"[DEBUG StereoCtx._open_test_scene] resolved_left={self._resolved_left_topic}, resolved_right={self._resolved_right_topic}")
         self._set_test_diagnostics(
             stereo_scene={
                 "display_env": dict(display_env),
@@ -4312,11 +4435,14 @@ class _StereoProfileTestContext:
         return bool(cls._looks_like_side_topic(left, "left") and cls._looks_like_side_topic(right, "right"))
 
     def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
+        print(f"[DEBUG StereoCtx._resolve_stereo_topics] warmup_timeout={warmup_timeout}s")
         expected_left = str(self.LEFT_IMAGE_TOPIC)
         expected_right = str(self.RIGHT_IMAGE_TOPIC)
         cached_left = str(self._resolved_left_topic or "").strip()
         cached_right = str(self._resolved_right_topic or "").strip()
         sensor_name = str(self.sensor_name)
+        print(f"[DEBUG StereoCtx._resolve_stereo_topics] expected_left={expected_left}, expected_right={expected_right}")
+        print(f"[DEBUG StereoCtx._resolve_stereo_topics] cached_left={cached_left}, cached_right={cached_right}")
 
         preferred_pairs: List[Tuple[str, str, str]] = []
         if self._is_valid_stereo_pair(cached_left, cached_right):
@@ -4410,13 +4536,18 @@ class _StereoProfileTestContext:
         max_skew_s: float = 0.08,
         min_pair_stamp_s: Optional[float] = None,
     ) -> Tuple[Image, Image, float]:
+        print(f"[DEBUG StereoCtx._wait_pair_closest] timeout={timeout}, retries={retries}, max_skew={max_skew_s}")
+        print(f"[DEBUG StereoCtx._wait_pair_closest] LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}")
         try:
             import message_filters
+            print(f"[DEBUG StereoCtx._wait_pair_closest] message_filters imported OK")
         except Exception as exc:  # noqa: BLE001
+            print(f"[DEBUG StereoCtx._wait_pair_closest] FAILED to import message_filters: {exc}")
             self._set_test_diagnostics(stereo_pair_capture={"reason": "message_filters_import_error", "error": str(exc)})
             raise RuntimeError(f"message_filters import failed: {exc}")
 
         left_topic, right_topic, topic_diag = self._resolve_stereo_topics(self.TOPIC_WARMUP_TIMEOUT_S)
+        print(f"[DEBUG StereoCtx._wait_pair_closest] resolved: left={left_topic}, right={right_topic}")
         pair_diag: Dict[str, Any] = dict(topic_diag)
         pair_diag.update(
             {
@@ -5291,19 +5422,40 @@ def _camera_method_passed(result: dict) -> bool:
 
 
 def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, progress_cb=None) -> dict:
-    ctx = context_cls(sensor)
+    print(f"\n[DEBUG _run_camera_context_test] ═══════════════════════════════════════")
+    print(f"[DEBUG _run_camera_context_test] context_cls={context_cls.__name__}, method={method_name}")
+    print(f"[DEBUG _run_camera_context_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}")
+    print(f"[DEBUG _run_camera_context_test] sdf_path={getattr(sensor, 'sdf_path', '?')}")
+    print(f"[DEBUG _run_camera_context_test] topic={getattr(sensor, 'topic', '?')}")
+    try:
+        ctx = context_cls(sensor)
+        print(f"[DEBUG _run_camera_context_test] context created OK")
+    except Exception as e:
+        import traceback
+        print(f"[DEBUG _run_camera_context_test] FAILED to create context: {e}")
+        print(traceback.format_exc())
+        raise
     method = getattr(ctx, method_name)
     if progress_cb:
         try:
             progress_cb(5)
         except Exception:
             pass
-    result = method(simulator)
+    try:
+        print(f"[DEBUG _run_camera_context_test] calling ctx.{method_name}(simulator)...")
+        result = method(simulator)
+        print(f"[DEBUG _run_camera_context_test] method returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+    except Exception as e:
+        import traceback
+        print(f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise
     if not isinstance(result, dict):
         result = {"result": result}
     else:
         result = dict(result)
     result.setdefault("passed", _camera_method_passed(result))
+    print(f"[DEBUG _run_camera_context_test] passed={result.get('passed')}")
     if progress_cb:
         try:
             progress_cb(100)
@@ -5313,18 +5465,40 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
 
 
 def _run_camera_function_test(build_ctx, test_fn, simulator, sensor, progress_cb=None) -> dict:
-    ctx = build_ctx(sensor)
+    print(f"\n[DEBUG _run_camera_function_test] ═══════════════════════════════════════")
+    print(f"[DEBUG _run_camera_function_test] test_fn={test_fn.__name__}")
+    print(f"[DEBUG _run_camera_function_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}")
+    print(f"[DEBUG _run_camera_function_test] sdf_path={getattr(sensor, 'sdf_path', '?')}")
+    print(f"[DEBUG _run_camera_function_test] topic={getattr(sensor, 'topic', '?')}")
+    try:
+        ctx = build_ctx(sensor)
+        print(f"[DEBUG _run_camera_function_test] ctx created: IMAGE_TOPIC={getattr(ctx, 'IMAGE_TOPIC', '?')}, image_width={getattr(ctx, 'image_width', '?')}x{getattr(ctx, 'image_height', '?')}")
+        print(f"[DEBUG _run_camera_function_test] ctx.test_to_world keys={list(getattr(ctx, 'test_to_world', {}).keys())}")
+    except Exception as e:
+        import traceback
+        print(f"[DEBUG _run_camera_function_test] FAILED to build ctx: {e}")
+        print(traceback.format_exc())
+        raise
     if progress_cb:
         try:
             progress_cb(5)
         except Exception:
             pass
-    result = test_fn(ctx, simulator)
+    try:
+        print(f"[DEBUG _run_camera_function_test] calling {test_fn.__name__}(ctx, simulator)...")
+        result = test_fn(ctx, simulator)
+        print(f"[DEBUG _run_camera_function_test] returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+    except Exception as e:
+        import traceback
+        print(f"[DEBUG _run_camera_function_test] RAISED: {type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        raise
     if not isinstance(result, dict):
         result = {"result": result}
     else:
         result = dict(result)
     result.setdefault("passed", _camera_method_passed(result))
+    print(f"[DEBUG _run_camera_function_test] passed={result.get('passed')}")
     if progress_cb:
         try:
             progress_cb(100)
@@ -5585,6 +5759,7 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
     
 
 def c3_view_angle_stability_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG c3_view_angle_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_DepthProfileTestContext, "c3_view_angle_stability_test", simulator, sensor, progress_cb)
 
 
@@ -5683,10 +5858,12 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
     
 
 def c5_working_range_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG c5_working_range_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_DepthProfileTestContext, "c5_working_range_test", simulator, sensor, progress_cb)
 
 
 def c6_small_displacement_sensitivity_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG c6_small_displacement_sensitivity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_DepthProfileTestContext, "c6_small_displacement_sensitivity_test", simulator, sensor, progress_cb)
 
 
@@ -6421,26 +6598,32 @@ def c11_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C11", "metrics": metrics, "artifacts": artifacts, "metrics_json": metrics_path}
 
 def depth_perception_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG depth_perception_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_DepthProfileTestContext, "depth_perception_test", simulator, sensor, progress_cb)
 
 
 def stereo_topics_presence_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG stereo_topics_presence_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_StereoProfileTestContext, "stereo_topics_presence_test", simulator, sensor, progress_cb)
 
 
 def stereo_disparity_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG stereo_disparity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_StereoProfileTestContext, "stereo_disparity_test", simulator, sensor, progress_cb)
 
 
 def stereo_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG stereo_occlusion_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_StereoProfileTestContext, "stereo_occlusion_test", simulator, sensor, progress_cb)
 
 
 def s1_stereo_accuracy_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG s1_stereo_accuracy_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_StereoProfileTestContext, "s1_stereo_accuracy_test", simulator, sensor, progress_cb)
 
 
 def s2_texture_vs_smooth_stability_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG s2_texture_vs_smooth_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_context_test(_StereoProfileTestContext, "s2_texture_vs_smooth_stability_test", simulator, sensor, progress_cb)
 
 # ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░████████╗░█████╗░░█████╗░████████╗██╗██╗░░░░░███████╗░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
