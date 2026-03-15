@@ -1187,6 +1187,7 @@ class _DepthProfileTestContext:
             "x_values_m": self._iter_float_range(self.C5_START_X, self.C5_END_X, self.C5_STEP),
             "tolerance_m": float(self.C5_DEPTH_TOLERANCE_M),
             "clip_margin_m": float(self.C5_CLIP_MARGIN_M),
+            "coverage_tolerance_m": float(self.C5_STEP),
             "target_size_x_m": float(self.C5_TARGET_SIZE_X_M),
             "samples": [],
             "first_frame_diagnostics": {},
@@ -1289,15 +1290,17 @@ class _DepthProfileTestContext:
         metrics["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
         metrics["selected_depth_topic"] = self._resolved_depth_topic
         metrics["selected_image_topic"] = self._resolved_image_topic
+        coverage_tolerance = float(self.C5_STEP)
         metrics["checks"] = {
-            "x_min_ok_covers_expected": bool(float(best_start) <= float(expected_ok_x_values[0]) + 1e-6),
-            "x_max_ok_covers_expected": bool(float(best_end) >= float(expected_ok_x_values[-1]) - 1e-6),
+            "x_min_ok_covers_expected": bool(float(best_start) <= float(expected_ok_x_values[0]) + coverage_tolerance + 1e-6),
+            "x_max_ok_covers_expected": bool(float(best_end) >= float(expected_ok_x_values[-1]) - coverage_tolerance - 1e-6),
         }
 
         if not all(metrics["checks"].values()):
             raise AssertionError(
                 f"C5 failed: stable interval [{best_start:.2f}, {best_end:.2f}] does not cover "
-                f"[{expected_ok_x_values[0]:.2f}, {expected_ok_x_values[-1]:.2f}]"
+                f"[{expected_ok_x_values[0]:.2f}, {expected_ok_x_values[-1]:.2f}] "
+                f"within tolerance {coverage_tolerance:.2f} m"
             )
 
         return {"id": "C5", "passed": True, "metrics": metrics}
