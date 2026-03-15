@@ -243,6 +243,10 @@ class Icons:
     def TARGET_SENSOR(cls):  return cls.get("target_sensor.png")
     @classmethod
     def OBSERVER(cls):       return cls.get("observer.png")
+    @classmethod
+    def IMAGE(cls):       return cls.get("observer.png")
+    @classmethod
+    def RESULTS(cls):       return cls.get("observer.png")
 
     @classmethod
     def RUNNING_MOVIE(cls, label=None):

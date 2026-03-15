@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 
-from PyQt5.QtWidgets import QWidget, QApplication
+from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QFrame, QHBoxLayout, QSizePolicy
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor, QPixmap, QImage
 from PyQt5 import uic
@@ -34,8 +34,65 @@ class ColCapture(QWidget):
         self._setup_styles()
         self._connect_signals()
         self._capture_arrived.connect(self._on_capture_main)
+        # Give the result panel a sensible default split; user can resize freely
+        self.splitter_result_log.setSizes([150, 300])
 
     # ── public API ────────────────────────────────────────────────────────────
+
+    def load_test_result(self, func_name: str, result: dict) -> None:
+        """Replace the result panel contents with the latest test result."""
+        self._clear_result_panel()
+        layout = self.scroll_test_result_contents.layout()
+
+        if not result:
+            lbl = QLabel("no result yet")
+            lbl.setStyleSheet(
+                f"color: {Colors.TEXT_MUTED}; font-size: 12px;"
+                f" padding: 10px; background: transparent;"
+            )
+            layout.addWidget(lbl)
+        else:
+            for key, value in result.items():
+                row = QFrame()
+                row.setStyleSheet(
+                    f"QFrame {{ border-bottom: 1px solid {Colors.BORDER};"
+                    f" background: transparent; }}"
+                )
+                h = QHBoxLayout(row)
+                h.setContentsMargins(12, 6, 12, 6)
+                h.setSpacing(12)
+
+                lbl_key = QLabel(str(key))
+                lbl_key.setStyleSheet(
+                    f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
+                    f" min-width: 110px; max-width: 110px;"
+                    f" background: transparent; border: none;"
+                )
+
+                lbl_val = QLabel(str(value))
+                lbl_val.setStyleSheet(
+                    f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
+                    f" background: transparent; border: none;"
+                )
+                lbl_val.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                lbl_val.setWordWrap(True)
+                lbl_val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+                h.addWidget(lbl_key)
+                h.addWidget(lbl_val)
+                layout.addWidget(row)
+
+        filler = QWidget()
+        filler.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        filler.setStyleSheet("background-color: transparent;")
+        layout.addWidget(filler)
+
+    def _clear_result_panel(self) -> None:
+        layout = self.scroll_test_result_contents.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
     def set_simulator(self, simulator) -> None:
         self._simulator = simulator
@@ -199,6 +256,21 @@ class ColCapture(QWidget):
             QPushButton:checked {{
                 background-color: {Colors.ACCENT_DIM};
                 border: 1px solid {Colors.ACCENT};
+            }}
+            QSplitter#splitter_result_log::handle {{
+                background-color: {Colors.BORDER};
+                height: 3px;
+            }}
+            QSplitter#splitter_result_log::handle:hover {{
+                background-color: {Colors.ACCENT};
+            }}
+            QScrollArea#scroll_test_result {{
+                border: none;
+                background-color: transparent;
+                border-bottom: 1px solid {Colors.BORDER};
+            }}
+            QWidget#scroll_test_result_contents {{
+                background-color: transparent;
             }}
             {Styles.SCROLLBAR}
         """)

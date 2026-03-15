@@ -86,6 +86,7 @@ class Main_UI(QMainWindow):
 
 
         self.col_3._runner_log_forward = self.col_4.append_log
+        self.col_3.test_result_ready.connect(self.col_4.load_test_result)
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()

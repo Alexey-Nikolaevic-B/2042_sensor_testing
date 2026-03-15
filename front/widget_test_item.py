@@ -21,7 +21,6 @@ class TestItem(QWidget):
         self.func_name        = ""
         self.test_name        = ""
         self.test_description = ""
-        self.test_result      = ""
         self._image_path      = ""
         self._progress        = 0
         self._movie           = None
@@ -55,16 +54,8 @@ class TestItem(QWidget):
         self._progress        = 0
         self.is_selected      = False
 
-        db_status  = test_data.get("status", "Pending")
-        db_result  = test_data.get("result", "")
+        db_status        = test_data.get("status", "Pending")
         self.test_status = self._DB_STATUS_MAP.get(db_status, TestStatus.IDLE)
-
-        if isinstance(db_result, dict):
-            parts = [f"{k}: {v}" for k, v in db_result.items()
-                     if k not in ("passed", "duration")]
-            self.test_result = "  |  ".join(parts)
-        else:
-            self.test_result = str(db_result) if db_result else ""
 
         self._refresh_all()
 
@@ -72,7 +63,6 @@ class TestItem(QWidget):
         old = self.test_status
         self.test_status = status
 
-        # Gif: pending.gif while QUEUED, running.gif while RUNNING
         if status == TestStatus.QUEUED:
             self._start_movie(Icons.QUEUED)
         elif status == TestStatus.RUNNING:
@@ -80,7 +70,6 @@ class TestItem(QWidget):
         elif old in (TestStatus.QUEUED, TestStatus.RUNNING):
             self._stop_movie()
 
-        # Reset progress when leaving RUNNING
         if old == TestStatus.RUNNING and status != TestStatus.RUNNING:
             self._progress = 0
 
@@ -93,12 +82,8 @@ class TestItem(QWidget):
         self.progress_bar.setValue(self._progress)
 
     def set_result(self, result: dict) -> None:
-        if not isinstance(result, dict):
-            return
-        skip = {"passed", "duration"}
-        parts = [f"{k}: {v}" for k, v in result.items() if k not in skip]
-        self.test_result = "  |  ".join(parts) if parts else ""
-        self.test_result_label.setText(self.test_result)
+        # Results are now shown in the col_3 result panel — nothing to do here.
+        pass
 
     def set_selected(self, selected: bool):
         self.is_selected = selected
@@ -187,22 +172,14 @@ class TestItem(QWidget):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(self._progress)
             self.progress_bar.show()
-            self.test_result_label.hide()
-        elif self.test_status == TestStatus.IDLE:
-            self.progress_bar.hide()
-            self.test_result_label.show()
-            self.test_result_label.setText("")
         else:
             self.progress_bar.hide()
-            self.test_result_label.show()
-            self.test_result_label.setText(self.test_result)
 
     def _refresh_icon(self):
         if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
             return  # movie owns the label
-        is_running = False
         self.status_icon.setPixmap(
-            Icons.for_status(self.test_status.value, is_running)
+            Icons.for_status(self.test_status.value, False)
             .pixmap(Layout.ICON_SIZE_MD)
         )
 
@@ -214,7 +191,6 @@ class TestItem(QWidget):
         )
 
     def _setup_button_icons(self):
-        import os
         from PyQt5.QtGui import QIcon
         icon_dir = os.path.join(os.path.dirname(__file__), "icon")
         def _ico(name):
@@ -233,9 +209,5 @@ class TestItem(QWidget):
         self.status_icon.setStyleSheet("background-color: transparent;")
         self.lbl_test_name.setStyleSheet(
             f"color: {Colors.TEXT_PRIMARY}; font-weight: bold; font-size: 13px;"
-            f" background-color: transparent;"
-        )
-        self.test_result_label.setStyleSheet(
-            f"color: {Colors.TEXT_SECONDARY}; font-size: 11px;"
             f" background-color: transparent;"
         )

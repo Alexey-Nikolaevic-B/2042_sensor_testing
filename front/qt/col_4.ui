@@ -63,12 +63,37 @@
     </widget>
    </item>
 
-   <!-- Log -->
+   <!-- Vertical splitter: test results (top) / log (bottom) -->
    <item>
-    <widget class="QPlainTextEdit" name="log_view">
-     <property name="readOnly"><bool>true</bool></property>
-     <property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property>
-     <property name="maximumBlockCount"><number>2000</number></property>
+    <widget class="QSplitter" name="splitter_result_log">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="childrenCollapsible"><bool>false</bool></property>
+
+     <widget class="QScrollArea" name="scroll_test_result">
+      <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+      <property name="verticalScrollBarPolicy"><enum>Qt::ScrollBarAsNeeded</enum></property>
+      <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+      <property name="widgetResizable"><bool>true</bool></property>
+      <widget class="QWidget" name="scroll_test_result_contents">
+       <property name="geometry">
+        <rect><x>0</x><y>0</y><width>220</width><height>150</height></rect>
+       </property>
+       <layout class="QVBoxLayout" name="test_result_layout">
+        <property name="spacing"><number>0</number></property>
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+       </layout>
+      </widget>
+     </widget>
+
+     <widget class="QPlainTextEdit" name="log_view">
+      <property name="readOnly"><bool>true</bool></property>
+      <property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property>
+      <property name="maximumBlockCount"><number>2000</number></property>
+     </widget>
+
     </widget>
    </item>
 
