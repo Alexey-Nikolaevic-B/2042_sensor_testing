@@ -83,10 +83,11 @@ class Main_UI(QMainWindow):
         self.col_1.sensor_selected.connect(self._on_sensor_selected)
         self.col_1.add_requested.connect(self._on_add_sensor)
         self.col_1.delete_requested.connect(self._on_delete_sensor)
+        self.col_2.sensor_updated.connect(self._on_sensor_edited)
+        self.col_3.test_result_ready.connect(self.col_4.load_test_result)
 
 
         self.col_3._runner_log_forward = self.col_4.append_log
-        self.col_3.test_result_ready.connect(self.col_4.load_test_result)
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()
@@ -144,6 +145,8 @@ class Main_UI(QMainWindow):
         try:
             updated = repo.update_sensor(sensor_id, sensor_dict)
             self.col_1.refresh_sensor(updated)
+            self.col_2.load_sensor(updated)
+            self.col_3.load_sensor(updated)
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Update failed', str(e))

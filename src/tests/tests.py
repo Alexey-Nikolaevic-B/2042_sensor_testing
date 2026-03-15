@@ -1065,225 +1065,237 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     import time
     import rospy
     import rostopic
-    
-    print(f"\n{'='*60}")
-    print(f"TESTING SENSOR: {getattr(sensor, 'sensor_name', 'unknown')} ({getattr(sensor, 'sensor_type', 'unknown')})")
-    print(f"TOPIC: {sensor.topic}")
-    print(f"{'='*60}")
-    
-    result = {
-        "passed": False,
-        "topic": sensor.topic,
-        # "sensor_type": getattr(sensor, "sensor_type", "unknown"),
-        # "sensor_name": getattr(sensor, "sensor_name", "unknown"),
-        # "duration": 0,
-        # "message_type": None,
-        # "data_received": False,
-        "error": None
-    }
-    
+ 
+    def _progress(value):
+        if progress_cb:
+            try:
+                progress_cb(value)
+            except Exception:
+                return False
+        return True
+ 
     t0 = time.time()
-    
+ 
+    # ── Sensor identity ───────────────────────────────────────────────────────
+    result = {
+        "passed":         False,
+ 
+        # Sensor identity
+        "sensor_name":    getattr(sensor, "sensor_name",  "unknown"),
+        "sensor_type":    getattr(sensor, "sensor_type",  "unknown"),
+        "sdf_path":       getattr(sensor, "sdf_path",     ""),
+        "sdf_exists":     os.path.exists(getattr(sensor, "sdf_path", "") or ""),
+        "topics":         list(getattr(sensor, "topics",  [])),
+        "topic":          getattr(sensor, "topic",        ""),
+ 
+        # Sensor params (all fields)
+        "params":         dict(getattr(sensor, "params",  {})),
+ 
+        # Runtime
+        "world_path":     "",
+        "world_exists":   False,
+        "available_topics": [],
+        "topic_found":    False,
+        "message_type":   None,
+        "data_received":  False,
+        "duration":       0.0,
+        "error":          None,
+    }
+ 
+    # ── World path ────────────────────────────────────────────────────────────
     world_path = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/resources/worlds/rfid/overlap_tags.world"
-    print(f"[DEBUG] World path: {world_path}")
-    print(f"[DEBUG] World exists: {os.path.exists(world_path)}")
-    print(f"[DEBUG] Sensor SDF path: {sensor.sdf_path}")
-    print(f"[DEBUG] Sensor SDF exists: {os.path.exists(sensor.sdf_path)}")
-    
-    if not os.path.exists(world_path):
-        print(f"[WARN] World file not found, using fallback")
+    world_exists = os.path.exists(world_path)
+ 
+    if not world_exists:
         fallback = "/tmp/default_world.world"
-        with open(fallback, 'w') as f:
-            f.write('''<?xml version="1.0"?>
-<sdf version="1.6">
-  <world name="default">
-    <include><uri>model://sun</uri></include>
-    <include><uri>model://ground_plane</uri></include>
-  </world>
-</sdf>''')
+        with open(fallback, "w") as f:
+            f.write(
+                '<?xml version="1.0"?>\n'
+                '<sdf version="1.6">\n'
+                '  <world name="default">\n'
+                '    <include><uri>model://sun</uri></include>\n'
+                '    <include><uri>model://ground_plane</uri></include>\n'
+                '  </world>\n'
+                '</sdf>\n'
+            )
         world_path = fallback
-        print(f"[DEBUG] Created fallback world: {world_path}")
-    
-    print(f"[DEBUG] Opening Gazebo scene...")
+        world_exists = True
+ 
+    result["world_path"]  = world_path
+    result["world_exists"] = world_exists
+ 
+    # ── Open Gazebo scene ─────────────────────────────────────────────────────
     if not simulator.open_scene(world_path, sensor.sdf_path):
-        result["error"] = "Failed to open Gazebo scene"
+        result["error"]    = "Failed to open Gazebo scene"
         result["duration"] = round(time.time() - t0, 2)
-        print(f"[ERROR] Failed to open Gazebo scene")
         return result
-    
-    print(f"[DEBUG] Gazebo scene opened successfully")
-    
-    if progress_cb:
-        try:
-            progress_cb(20)
-            print(f"[DEBUG] Progress callback 20%")
-        except:
-            result["cancelled"] = True
-            result["duration"] = round(time.time() - t0, 2)
-            return result
-    
-    print(f"[DEBUG] Waiting 3 seconds for plugins to initialize...")
+ 
+    if not _progress(20):
+        result["cancelled"] = True
+        result["duration"]  = round(time.time() - t0, 2)
+        return result
+ 
+    # ── Wait for plugins ──────────────────────────────────────────────────────
     time.sleep(3)
-    
-    print(f"[DEBUG] Getting published topics...")
-    topics = rospy.get_published_topics()
-    print(f"[DEBUG] Found {len(topics)} topics total")
-    
-    # Print all available topics for debugging
-    print(f"[DEBUG] Available topics:")
-    for t, t_type in topics[:15]:  # Show first 15
-        if not t.startswith('/rosout'):
-            print(f"        {t} -> {t_type}")
-    
-    topic_exists = any(t == sensor.topic for t, _ in topics)
-    print(f"[DEBUG] Topic '{sensor.topic}' exists: {topic_exists}")
-    
-    if not topic_exists:
-        result["error"] = f"Topic {sensor.topic} not found"
-        result["available_topics"] = [t for t, _ in topics[:20] if not t.startswith('/rosout')]
+ 
+    # ── Discover published topics ─────────────────────────────────────────────
+    all_topics = rospy.get_published_topics()
+    visible = [t for t, _ in all_topics if not t.startswith("/rosout")]
+    result["available_topics"] = visible
+ 
+    topic_found = any(t == sensor.topic for t, _ in all_topics)
+    result["topic_found"] = topic_found
+ 
+    if not topic_found:
+        result["error"]    = f"Topic '{sensor.topic}' not found in published topics"
         result["duration"] = round(time.time() - t0, 2)
-        print(f"[ERROR] Topic not found!")
         return result
-    
-    if progress_cb:
-        try:
-            progress_cb(40)
-            print(f"[DEBUG] Progress callback 40%")
-        except:
-            result["cancelled"] = True
-            result["duration"] = round(time.time() - t0, 2)
-            return result
-    
-    print(f"[DEBUG] Getting message class for topic: {sensor.topic}")
-    msg_class, real_topic, _ = rostopic.get_topic_class(sensor.topic)
-    print(f"[DEBUG] rostopic.get_topic_class returned: {msg_class}")
-    print(f"[DEBUG] Real topic: {real_topic}")
-    
+ 
+    if not _progress(40):
+        result["cancelled"] = True
+        result["duration"]  = round(time.time() - t0, 2)
+        return result
+ 
+    # ── Resolve message class ─────────────────────────────────────────────────
+    msg_class, _, _ = rostopic.get_topic_class(sensor.topic)
+ 
     if msg_class is None:
-        print(f"[DEBUG] Message class is None, trying fallback by sensor type")
-        common_types = {
-            "camera": "sensor_msgs/Image",
-            "image": "sensor_msgs/Image",
-            "laser": "sensor_msgs/LaserScan",
-            "scan": "sensor_msgs/LaserScan",
-            "imu": "sensor_msgs/Imu",
-            "contact": "gazebo_msgs/ContactsState",
-            "bumper": "gazebo_msgs/ContactsState",
-            "pointcloud": "sensor_msgs/PointCloud2",
-            "depth": "sensor_msgs/Image",
-            "sonar": "sensor_msgs/Range",
-            "gps": "sensor_msgs/NavSatFix",
-            "joint": "sensor_msgs/JointState",
+        _FALLBACK_TYPES = {
+            "camera":      "sensor_msgs/Image",
+            "image":       "sensor_msgs/Image",
+            "depth":       "sensor_msgs/Image",
+            "laser":       "sensor_msgs/LaserScan",
+            "scan":        "sensor_msgs/LaserScan",
+            "imu":         "sensor_msgs/Imu",
+            "contact":     "gazebo_msgs/ContactsState",
+            "bumper":      "gazebo_msgs/ContactsState",
+            "pointcloud":  "sensor_msgs/PointCloud2",
+            "sonar":       "sensor_msgs/Range",
+            "gps":         "sensor_msgs/NavSatFix",
+            "joint":       "sensor_msgs/JointState",
             "temperature": "sensor_msgs/Temperature",
-            "fluid": "sensor_msgs/FluidPressure",
-            "magnetic": "sensor_msgs/MagneticField"
+            "fluid":       "sensor_msgs/FluidPressure",
+            "magnetic":    "sensor_msgs/MagneticField",
         }
-        
-        sensor_type = getattr(sensor, "sensor_type", "").lower()
-        print(f"[DEBUG] Sensor type: {sensor_type}")
-        msg_type_name = common_types.get(sensor_type)
-        print(f"[DEBUG] Fallback message type: {msg_type_name}")
-        
+        sensor_type   = getattr(sensor, "sensor_type", "").lower()
+        msg_type_name = _FALLBACK_TYPES.get(sensor_type)
         if msg_type_name:
             try:
-                package, msg_name = msg_type_name.split('/')
-                print(f"[DEBUG] Importing {package}.msg.{msg_name}")
-                module = __import__(f"{package}.msg", fromlist=[msg_name])
-                msg_class = getattr(module, msg_name)
-                print(f"[DEBUG] Successfully imported: {msg_class}")
-            except Exception as e:
-                print(f"[DEBUG] Failed to import: {e}")
+                pkg, name  = msg_type_name.split("/")
+                module     = __import__(f"{pkg}.msg", fromlist=[name])
+                msg_class  = getattr(module, name)
+            except Exception:
                 pass
-    
+ 
     if msg_class is None:
-        result["error"] = "Could not determine message type"
+        result["error"]    = "Could not determine message type for topic"
         result["duration"] = round(time.time() - t0, 2)
-        print(f"[ERROR] Could not determine message type")
         return result
-    
+ 
     result["message_type"] = msg_class.__name__
-    print(f"[DEBUG] Using message class: {msg_class.__name__}")
-    
-    if progress_cb:
-        try:
-            progress_cb(60)
-            print(f"[DEBUG] Progress callback 60%")
-        except:
-            result["cancelled"] = True
-            result["duration"] = round(time.time() - t0, 2)
-            return result
-    
-    print(f"[DEBUG] Waiting for message on {sensor.topic} (timeout=10s)...")
+ 
+    if not _progress(60):
+        result["cancelled"] = True
+        result["duration"]  = round(time.time() - t0, 2)
+        return result
+ 
+    # ── Capture one message ───────────────────────────────────────────────────
     try:
         msg = rospy.wait_for_message(sensor.topic, msg_class, timeout=10.0)
-        print(f"[DEBUG] ✓ Message received! Type: {type(msg).__name__}")
         result["data_received"] = True
-        result["passed"] = True
-        
-        if hasattr(msg, 'header'):
-            result["timestamp"] = msg.header.stamp.to_sec() if msg.header.stamp else None
-            result["frame_id"] = msg.header.frame_id
-            print(f"[DEBUG] Header: frame={msg.header.frame_id}, stamp={msg.header.stamp}")
-        
-        if hasattr(msg, 'states'):
+        result["passed"]        = True
+ 
+        # Common header fields
+        if hasattr(msg, "header"):
+            result["frame_id"]  = msg.header.frame_id
+            result["timestamp"] = (
+                round(msg.header.stamp.to_sec(), 3)
+                if msg.header.stamp else None
+            )
+ 
+        # Image
+        if hasattr(msg, "encoding"):
+            result["width"]    = msg.width
+            result["height"]   = msg.height
+            result["encoding"] = msg.encoding
+            result["data_size_bytes"] = len(msg.data)
+ 
+        # Laser scan
+        elif hasattr(msg, "ranges"):
+            result["num_ranges"] = len(msg.ranges)
+            result["angle_min"]  = round(msg.angle_min, 4)
+            result["angle_max"]  = round(msg.angle_max, 4)
+            result["range_min"]  = round(msg.range_min, 4)
+            result["range_max"]  = round(msg.range_max, 4)
+ 
+        # IMU
+        elif hasattr(msg, "angular_velocity") and hasattr(msg, "linear_acceleration"):
+            av = msg.angular_velocity
+            la = msg.linear_acceleration
+            result["angular_velocity"]    = [round(av.x, 4), round(av.y, 4), round(av.z, 4)]
+            result["linear_acceleration"] = [round(la.x, 4), round(la.y, 4), round(la.z, 4)]
+ 
+        # Contact / bumper
+        elif hasattr(msg, "states"):
             result["contact_count"] = len(msg.states)
-            print(f"[DEBUG] Contact count: {len(msg.states)}")
             if msg.states:
                 result["first_contact"] = {
                     "collision1": msg.states[0].collision1_name,
-                    "collision2": msg.states[0].collision2_name
+                    "collision2": msg.states[0].collision2_name,
                 }
-                print(f"[DEBUG] First contact: {msg.states[0].collision1_name} -> {msg.states[0].collision2_name}")
-        elif hasattr(msg, 'data') and hasattr(msg, 'height'):
-            result["width"] = msg.width
-            result["height"] = msg.height
-            result["encoding"] = msg.encoding
-            print(f"[DEBUG] Image: {msg.width}x{msg.height}, encoding={msg.encoding}")
-            print(f"[DEBUG] Data length: {len(msg.data)} bytes")
-        elif hasattr(msg, 'ranges'):
-            result["num_ranges"] = len(msg.ranges)
-            result["angle_min"] = msg.angle_min
-            result["angle_max"] = msg.angle_max
-            print(f"[DEBUG] Laser scan: {len(msg.ranges)} ranges")
-        elif hasattr(msg, 'angular_velocity'):
-            result["angular_velocity"] = [msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z]
-            result["linear_acceleration"] = [msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z]
-            print(f"[DEBUG] IMU data received")
-        
-    except rospy.ROSException as e:
-        result["error"] = f"Timeout: No message received within 10s"
-        print(f"[ERROR] Timeout: No message received on {sensor.topic}")
-    except Exception as e:
-        result["error"] = str(e)
-        print(f"[ERROR] Exception: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    if progress_cb:
-        try:
-            progress_cb(100)
-            print(f"[DEBUG] Progress callback 100%")
-        except:
-            pass
-    
+ 
+        # PointCloud2
+        elif hasattr(msg, "point_step"):
+            result["width"]        = msg.width
+            result["height"]       = msg.height
+            result["point_step"]   = msg.point_step
+            result["fields"]       = [f.name for f in msg.fields]
+ 
+        # NavSatFix (GPS)
+        elif hasattr(msg, "latitude"):
+            result["latitude"]  = round(msg.latitude,  6)
+            result["longitude"] = round(msg.longitude, 6)
+            result["altitude"]  = round(msg.altitude,  3)
+ 
+        # Range (sonar)
+        elif hasattr(msg, "range"):
+            result["range"]     = round(msg.range, 4)
+            result["min_range"] = round(msg.min_range, 4)
+            result["max_range"] = round(msg.max_range, 4)
+ 
+        # Temperature
+        elif hasattr(msg, "temperature"):
+            result["temperature"] = round(msg.temperature, 3)
+ 
+        # MagneticField
+        elif hasattr(msg, "magnetic_field"):
+            mf = msg.magnetic_field
+            result["magnetic_field"] = [round(mf.x, 6), round(mf.y, 6), round(mf.z, 6)]
+ 
+    except rospy.ROSException:
+        result["error"] = f"Timeout: no message received on '{sensor.topic}' within 10 s"
+    except Exception as exc:
+        result["error"] = str(exc)
+ 
+    _progress(100)
+ 
     result["duration"] = round(time.time() - t0, 2)
-    print(f"[DEBUG] Test completed in {result['duration']}s")
-    print(f"[DEBUG] Result: {'PASSED' if result['passed'] else 'FAILED'}")
-    if result.get('error'):
-        print(f"[DEBUG] Error: {result['error']}")
-    print(f"{'='*60}\n")
-    
+ 
+    # ── Notify UI ─────────────────────────────────────────────────────────────
     if simulator:
         try:
-            simulator.notify_capture({
-                "sensor_type": result["sensor_type"],
-                "sensor_name": result["sensor_name"],
-                "topic": sensor.topic,
-                "success": result["passed"]
-            }, None)
-        except:
+            simulator.notify_capture(
+                {
+                    "sensor_type": result["sensor_type"],
+                    "sensor_name": result["sensor_name"],
+                    "topic":       result["topic"],
+                    "success":     result["passed"],
+                },
+                None,
+            )
+        except Exception:
             pass
-    
+ 
     return result
 # ── TESTS registry ────────────────────────────────────────────────────────────
 

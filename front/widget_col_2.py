@@ -7,6 +7,9 @@ from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 from .dialog_add_sensor import AddSensorDialog
 
 
+_fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) else str(v)
+
+
 class ColDetails(QWidget):
     save_requested    = pyqtSignal(dict)
     save_as_requested = pyqtSignal(dict)
@@ -113,7 +116,7 @@ class ColDetails(QWidget):
                 f"color: {Colors.TEXT_SECONDARY}; font-size: 12px;"
                 f" min-width: 110px; max-width: 110px; background: transparent; border: none;"
             )
-            lbl_val = QLabel(str(value))
+            lbl_val = QLabel(_fmt_value(value))
             lbl_val.setStyleSheet(
                 f"color: {Colors.TEXT_PRIMARY}; font-size: 12px; background: transparent; border: none;"
             )

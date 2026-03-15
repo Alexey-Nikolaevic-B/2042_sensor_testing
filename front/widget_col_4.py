@@ -8,6 +8,7 @@ from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 
+
 _LEVEL_FMT: dict[str, tuple[str, str]] = {
     "debug":    ("[DEBG]", "#6b7280"),
     "info":     ("[INFO]", "#9ca3af"),
@@ -15,6 +16,9 @@ _LEVEL_FMT: dict[str, tuple[str, str]] = {
     "error":    ("[ERRO]", "#ef4444"),
     "critical": ("[CRIT]", "#dc2626"),
 }
+
+
+_fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) else str(v)
 
 
 class ColCapture(QWidget):
@@ -69,7 +73,7 @@ class ColCapture(QWidget):
                     f" background: transparent; border: none;"
                 )
 
-                lbl_val = QLabel(str(value))
+                lbl_val = QLabel(_fmt_value(value))
                 lbl_val.setStyleSheet(
                     f"color: {Colors.TEXT_PRIMARY}; font-size: 12px;"
                     f" background: transparent; border: none;"
