@@ -7,12 +7,6 @@ logger = logging.getLogger(__name__)
 
 
 def detect_topics_from_sdf(sdf_path: str) -> list[str]:
-    """
-    Scan an SDF file and extract all topic-like values.
-    Looks for any XML tag whose name ends with 'topic'
-    and whose value starts with '/'.
-    Returns a deduplicated list preserving order.
-    """
     try:
         with open(sdf_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -20,13 +14,62 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
         logger.error("detect_topics_from_sdf: cannot read %r: %s", sdf_path, e)
         return []
 
-    seen   = set()
+    seen = set()
     topics = []
+    
+    namespace = ""
+    namespace_match = re.search(r"<namespace>\s*(/[^<\s]+)\s*</namespace>", content)
+    if namespace_match:
+        namespace = namespace_match.group(1).rstrip('/')
+    
     for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
         t = m.group(1).strip()
         if t and t not in seen:
             seen.add(t)
             topics.append(t)
+    
+    for m in re.finditer(r"<argument>\s*([^<]+?)\s*</argument>", content):
+        arg = m.group(1).strip()
+        
+        if ":= " in arg or ":=" in arg:
+            parts = re.split(r":=\s*", arg)
+            if len(parts) == 2:
+                remapped = parts[1].strip()
+                if not remapped.startswith('/') and namespace:
+                    topic = f"{namespace}/{remapped}"
+                elif remapped.startswith('/'):
+                    topic = remapped
+                else:
+                    topic = remapped
+                
+                if topic and topic not in seen:
+                    seen.add(topic)
+                    topics.append(topic)
+        else:
+            if not arg.startswith('/') and namespace:
+                topic = f"{namespace}/{arg}"
+            elif arg.startswith('/'):
+                topic = arg
+            else:
+                topic = arg
+            
+            if topic and topic not in seen and not topic.startswith('--') and not topic.startswith('-'):
+                seen.add(topic)
+                topics.append(topic)
+    
+    for m in re.finditer(r"<(\w*[Tt]opic\w*)>\s*([^<\s]+)\s*</\1>", content):
+        topic_name = m.group(2).strip()
+        if not topic_name.startswith('/') and namespace:
+            topic = f"{namespace}/{topic_name}"
+        elif topic_name.startswith('/'):
+            topic = topic_name
+        else:
+            topic = topic_name
+            
+        if topic and topic not in seen and not topic.startswith('--'):
+            seen.add(topic)
+            topics.append(topic)
+    
     return topics
 
 
