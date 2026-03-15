@@ -26,8 +26,7 @@ class Core:
         return _detect(sdf_path)
 
     def read_sensor_params(self, sensor) -> dict:
-        """Read param values from SDF using tag names stored in the sensor type DB definition."""
-        import re
+        """Read param values from SDF using the path/name defs stored in the sensor type DB."""
         import src.database.sensor_storage as db
 
         sensor_type = getattr(sensor, "sensor_type", None)
@@ -39,23 +38,11 @@ class Core:
         if not type_def:
             return {}
 
-        param_names = [p["name"] for p in type_def.get("params", []) if p.get("name")]
-        if not param_names:
+        param_defs = [p for p in type_def.get("params", []) if p.get("name")]
+        if not param_defs:
             return {}
 
-        try:
-            with open(sdf_path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except OSError:
-            return {}
-
-        result = {}
-        for name in param_names:
-            m = re.search(rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
-                          content, re.DOTALL)
-            if m:
-                result[name] = m.group(1).strip()
-        return result
+        return sensor.read_params_from_sdf(param_defs)
 
     def save_sensor_params(self, sensor_id: str, params: dict, repo) -> None:
         sensor_data = repo.get_sensor(sensor_id)

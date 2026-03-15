@@ -244,9 +244,9 @@ class Icons:
     @classmethod
     def OBSERVER(cls):       return cls.get("observer.png")
     @classmethod
-    def IMAGE(cls):       return cls.get("observer.png")
+    def LOCK(cls):       return cls.get("lock.png")
     @classmethod
-    def RESULTS(cls):       return cls.get("observer.png")
+    def STEP(cls):       return cls.get("step.png")
 
     @classmethod
     def RUNNING_MOVIE(cls, label=None):

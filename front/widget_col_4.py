@@ -8,7 +8,6 @@ from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 
-
 _LEVEL_FMT: dict[str, tuple[str, str]] = {
     "debug":    ("[DEBG]", "#6b7280"),
     "info":     ("[INFO]", "#9ca3af"),
@@ -101,6 +100,29 @@ class ColCapture(QWidget):
     def set_simulator(self, simulator) -> None:
         self._simulator = simulator
         simulator.on_capture = self._on_capture_from_thread
+        # When the simulator blocks on wait_for_step, it calls this to enable btn_step
+        simulator.on_waiting_for_step = self._on_sim_waiting_for_step
+
+    # ── lock / step ───────────────────────────────────────────────────────────
+
+    def _on_lock_toggled(self, checked: bool) -> None:
+        if self._simulator:
+            self._simulator.set_step_mode(checked)
+        if not checked:
+            # Unlocking — release any pending gate and disable step button
+            self.btn_step.setEnabled(False)
+            if self._simulator:
+                self._simulator.continue_all()
+
+    def _on_step_clicked(self) -> None:
+        self.btn_step.setEnabled(False)
+        if self._simulator:
+            self._simulator.advance_step()
+
+    @pyqtSlot()
+    def _on_sim_waiting_for_step(self) -> None:
+        """Called from simulator (via invokeMethod) when it's blocked on wait_for_step."""
+        self.btn_step.setEnabled(True)
 
     def append_log(self, level: str, source: str, message: str) -> None:
         from PyQt5.QtCore import QThread
@@ -229,6 +251,8 @@ class ColCapture(QWidget):
         self.btn_view_observer.clicked.connect(self._on_view_observer)
         self.btn_clear_log.clicked.connect(self._on_clear)
         self.btn_copy_log.clicked.connect(self._on_copy)
+        self.btn_lock.toggled.connect(self._on_lock_toggled)
+        self.btn_step.clicked.connect(self._on_step_clicked)
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
@@ -279,6 +303,8 @@ class ColCapture(QWidget):
             {Styles.SCROLLBAR}
         """)
         for btn, icon in [
+            (self.btn_lock,          Icons.LOCK()),
+            (self.btn_step,          Icons.STEP()),
             (self.btn_view_sensor,   Icons.TARGET_SENSOR()),
             (self.btn_view_observer, Icons.OBSERVER()),
             (self.btn_clear_log,     Icons.CLEAR()),

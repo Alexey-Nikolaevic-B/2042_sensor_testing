@@ -11,8 +11,6 @@ class TestItem(QWidget):
     run_requested   = pyqtSignal(str)
     stop_requested  = pyqtSignal(str)
     selected        = pyqtSignal(str)
-    step_requested  = pyqtSignal(str)   # func_name — advance one step
-    lock_changed    = pyqtSignal(str, bool)  # func_name, is_locked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -26,16 +24,12 @@ class TestItem(QWidget):
         self._movie           = None
         self.is_selected      = False
         self.test_status      = TestStatus.IDLE
-        self._is_locked       = False  # True = step-by-step mode
-
         self.setObjectName("TestItem")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
         self._setup_styles()
         self._setup_button_icons()
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
-        self.btn_lock.toggled.connect(self._on_lock_toggled)
-        self.btn_step.clicked.connect(self._on_step_clicked)
 
     _DB_STATUS_MAP = {
         "Passed":  TestStatus.PASSED,
@@ -104,19 +98,8 @@ class TestItem(QWidget):
             self.setStyleSheet(self._bg_style(Colors.BG_CARD))
         super().leaveEvent(event)
 
-    def _on_lock_toggled(self, checked: bool):
-        self._is_locked = checked
-        print(f"[DEBUG test_item] lock toggled: func={self.func_name} locked={checked}")
-        self.btn_step.setVisible(checked)
-        self.lock_changed.emit(self.func_name, checked)
-        self._refresh_button()
 
-    def _on_step_clicked(self):
-        print(f"[DEBUG test_item] step clicked: func={self.func_name}")
-        self.step_requested.emit(self.func_name)
 
-    def is_locked(self) -> bool:
-        return self._is_locked
 
     def _on_run_stop_clicked(self):
         if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
@@ -164,8 +147,6 @@ class TestItem(QWidget):
         active = self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING)
         self.btn_run_stop.setIcon(Icons.STOP() if active else Icons.RUN())
         self.btn_run_stop.setIconSize(Layout.ICON_SIZE_MD)
-        self.btn_lock.setIconSize(Layout.ICON_SIZE_MD)
-        self.btn_step.setIconSize(Layout.ICON_SIZE_MD)
 
     def _refresh_progress(self):
         if self.test_status == TestStatus.RUNNING:
@@ -196,15 +177,10 @@ class TestItem(QWidget):
         def _ico(name):
             p = os.path.join(icon_dir, name)
             return QIcon(p) if os.path.exists(p) else QIcon()
-        self.btn_lock.setIcon(_ico("lock.png"))
-        self.btn_step.setIcon(_ico("step.png"))
 
     def _setup_styles(self):
         self.setStyleSheet(self._bg_style(Colors.BG_CARD))
         self.btn_run_stop.setStyleSheet(Styles.BUTTON_ICON)
-        self.btn_lock.setStyleSheet(Styles.BUTTON_ICON)
-        self.btn_step.setStyleSheet(Styles.BUTTON_ICON)
-        self.btn_step.setVisible(False)  # hidden until lock engaged
         self.progress_bar.setStyleSheet(Styles.PROGRESS_BAR)
         self.status_icon.setStyleSheet("background-color: transparent;")
         self.lbl_test_name.setStyleSheet(

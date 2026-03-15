@@ -93,18 +93,7 @@ class Sensor:
     def param(self, name: str, default=None):
         return self.params.get(name, default)
 
-    def read_params_from_sdf(self, param_defs) -> dict:
-        """Read parameter values from the SDF file.
-
-        param_defs can be:
-          - list[str]  — legacy flat tag names, e.g. ["width", "height"]
-          - list[dict] — new format: {"name": "width", "path": "camera"}
-                         path/name means search for <name> inside <path>...</path>
-                         if path is absent/empty, searches the whole file.
-
-        Returns {param_name: value} where param_name is the "name" field
-        (or the plain string for legacy callers).
-        """
+    def read_params_from_sdf(self, param_names: list[str]) -> dict:
         if not self.sdf_path:
             return {}
         try:
@@ -113,43 +102,12 @@ class Sensor:
         except OSError as e:
             logger.error("read_params_from_sdf: cannot read %r: %s", self.sdf_path, e)
             return {}
-
         result = {}
-        for item in param_defs:
-            if isinstance(item, str):
-                name = item
-                path = ""
-            else:
-                name = item.get("name", "")
-                path = item.get("path", "")
-
-            if not name:
-                continue
-
-            search_in = content
-            if path:
-                # Walk down each segment of the path, scoping progressively deeper
-                segments = path.split("/")
-                for seg in segments:
-                    seg_m = re.search(
-                        rf"<{re.escape(seg)}>(.*?)</{re.escape(seg)}>",
-                        search_in, re.DOTALL
-                    )
-                    if seg_m:
-                        search_in = seg_m.group(1)
-                    else:
-                        search_in = None
-                        break
-                if search_in is None:
-                    continue
-
-            m = re.search(
-                rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
-                search_in, re.DOTALL
-            )
+        for name in param_names:
+            m = re.search(rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
+                          content, re.DOTALL)
             if m:
                 result[name] = m.group(1).strip()
-
         return result
 
     def write_params_to_sdf(self, params: dict) -> None:
@@ -206,7 +164,8 @@ class Sensor:
                 "topic":       t,
                 "count":       len(results),
             }
-            simulator.notify_capture(sensor_data, None)
+            obs_img = simulator.capture_observer_frame() if simulator.gazebo_is_running else None
+            simulator.notify_capture(sensor_data, obs_img)
             simulator.wait_for_step()
 
         return results
