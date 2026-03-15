@@ -7045,6 +7045,214 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
             pass
     
     return result
+# ── Camera debug / type-check ─────────────────────────────────────────────────
+
+def camera_check(simulator, sensor, progress_cb=None) -> dict:
+    """
+    Диагностическая проверка камеры: определяет тип (mono/depth/stereo),
+    подписывается на топики, получает кадр и преобразует в стандартный BGR.
+
+    Возвращает dict с информацией о типе камеры, разрешении,
+    полученных топиках и BGR-изображением (если удалось получить).
+    """
+    t0 = time.time()
+    result: Dict[str, Any] = {
+        "passed": False,
+        "camera_type": "unknown",
+        "topics_checked": [],
+        "topics_active": [],
+        "resolution": None,
+        "encoding": None,
+        "frame_bgr": None,       # numpy array, не сериализуется в JSON
+        "frame_shape": None,
+        "error": None,
+    }
+
+    # --- Определяем тип камеры по SDF ---
+    sdf_path = str(getattr(sensor, "sdf_path", "") or "")
+    camera_type = "unknown"
+    if sdf_path:
+        try:
+            camera_type = _camera_classify_sensor_profile(sdf_path)
+        except Exception as e:
+            logger.warning("camera_check: classify failed: %s", e)
+
+    result["camera_type"] = camera_type
+    logger.info("camera_check: type=%s sdf=%s", camera_type, sdf_path)
+
+    # --- Открываем сцену (используем простой world с кубом) ---
+    world_path = _world_from_db(sensor, "camera_check")
+    if not world_path:
+        worlds_root = _camera_worlds_root()
+        world_path = str(worlds_root / "camera_c1_single_cube.world")
+
+    if not os.path.exists(world_path):
+        result["error"] = f"World file not found: {world_path}"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    if not simulator.open_scene(world_path, sdf_path):
+        result["error"] = "Failed to open Gazebo scene"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    if progress_cb:
+        try:
+            progress_cb(30)
+        except Exception:
+            pass
+
+    time.sleep(3.0)  # ждём инициализации плагинов камеры
+
+    # --- Собираем активные топики ---
+    try:
+        published = rospy.get_published_topics()
+    except Exception:
+        published = []
+
+    all_topic_names = [t for t, _ in published]
+
+    # --- Строим список топиков для проверки в зависимости от типа ---
+    topics_to_check: List[str] = []
+
+    if camera_type == "stereo":
+        profile = _camera_load_sensor_profile(sdf_path) if sdf_path else {}
+        left_t = str(profile.get("left_topic", "") or getattr(sensor, "topic", ""))
+        right_t = str(profile.get("right_topic", ""))
+        if left_t:
+            topics_to_check.append(left_t)
+        if right_t:
+            topics_to_check.append(right_t)
+    elif camera_type == "depth":
+        profile = _camera_load_sensor_profile(sdf_path) if sdf_path else {}
+        image_t = str(profile.get("image_topic", "") or getattr(sensor, "topic", ""))
+        depth_t = str(profile.get("depth_topic", ""))
+        if image_t:
+            topics_to_check.append(image_t)
+        if depth_t:
+            topics_to_check.append(depth_t)
+    else:
+        # mono или unknown — берём основной топик сенсора
+        primary = str(getattr(sensor, "topic", ""))
+        if primary:
+            topics_to_check.append(primary)
+
+    result["topics_checked"] = list(topics_to_check)
+    result["topics_active"] = [t for t in topics_to_check if t in all_topic_names]
+
+    if progress_cb:
+        try:
+            progress_cb(50)
+        except Exception:
+            pass
+
+    # --- Получаем кадр с основного топика (первый из списка) ---
+    primary_topic = topics_to_check[0] if topics_to_check else ""
+    if not primary_topic:
+        result["error"] = "No topic configured for this sensor"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    if primary_topic not in all_topic_names:
+        result["error"] = f"Topic {primary_topic} not published"
+        result["available_topics"] = [t for t in all_topic_names if not t.startswith("/rosout")][:20]
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    try:
+        msg = rospy.wait_for_message(primary_topic, Image, timeout=10.0)
+    except Exception as e:
+        result["error"] = f"Timeout waiting for Image on {primary_topic}: {e}"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    if progress_cb:
+        try:
+            progress_cb(80)
+        except Exception:
+            pass
+
+    # --- Преобразуем в стандартный BGR numpy array ---
+    result["encoding"] = msg.encoding
+    result["resolution"] = f"{msg.width}x{msg.height}"
+
+    try:
+        bgr = _camera_check_to_bgr(msg)
+        result["frame_bgr"] = bgr
+        result["frame_shape"] = list(bgr.shape)
+        result["passed"] = True
+    except Exception as e:
+        result["error"] = f"Failed to convert frame to BGR: {e}"
+
+    # --- Сохраняем диагностический кадр ---
+    if result["frame_bgr"] is not None:
+        try:
+            save_dir = _get_save_dir(sensor, "camera_check")
+            _save_image(result["frame_bgr"], save_dir, f"camera_check_{camera_type}")
+        except Exception:
+            pass
+
+    if progress_cb:
+        try:
+            progress_cb(100)
+        except Exception:
+            pass
+
+    result["duration"] = round(time.time() - t0, 2)
+    logger.info(
+        "camera_check: type=%s passed=%s resolution=%s encoding=%s topics_active=%s",
+        result["camera_type"], result["passed"], result["resolution"],
+        result["encoding"], result["topics_active"],
+    )
+    return result
+
+
+def _camera_check_to_bgr(msg: Image) -> np.ndarray:
+    """Преобразует ROS Image в BGR numpy array, поддерживая основные кодировки."""
+    h, w = int(msg.height), int(msg.width)
+    enc = (msg.encoding or "").lower()
+
+    if enc in ("rgb8", "r8g8b8"):
+        rgb = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+    if enc == "bgr8":
+        return np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3).copy()
+
+    if enc in ("mono8", "8uc1"):
+        gray = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w)
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    if enc == "32fc1":
+        depth = np.frombuffer(msg.data, dtype=np.float32).reshape(h, w)
+        valid = depth[np.isfinite(depth)]
+        if valid.size > 0:
+            d_min, d_max = float(valid.min()), float(valid.max())
+            if d_max > d_min:
+                norm = ((depth - d_min) / (d_max - d_min) * 255).clip(0, 255).astype(np.uint8)
+            else:
+                norm = np.zeros((h, w), dtype=np.uint8)
+        else:
+            norm = np.zeros((h, w), dtype=np.uint8)
+        return cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+
+    if enc == "16uc1":
+        raw = np.frombuffer(msg.data, dtype=np.uint16).reshape(h, w)
+        depth_m = raw.astype(np.float32) / 1000.0
+        valid = depth_m[depth_m > 0]
+        if valid.size > 0:
+            d_min, d_max = float(valid.min()), float(valid.max())
+            if d_max > d_min:
+                norm = ((depth_m - d_min) / (d_max - d_min) * 255).clip(0, 255).astype(np.uint8)
+            else:
+                norm = np.zeros((h, w), dtype=np.uint8)
+        else:
+            norm = np.zeros((h, w), dtype=np.uint8)
+        return cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+
+    raise ValueError(f"Unsupported encoding for camera_check: {enc}")
+
+
 # ── TESTS registry ────────────────────────────────────────────────────────────
 
 TESTS: dict[str, callable] = {
@@ -7058,6 +7266,8 @@ TESTS: dict[str, callable] = {
     "rfid_angle_dependence":         rfid_angle_dependence,
     "rfid_move_tags":                rfid_move_tags,
     "rfid_antenna_rotation":         rfid_antenna_rotation,
+    # Camera debug
+    "camera_check":                  camera_check,
     # Camera (libgazebo_ros_camera.so)
     "camera_data_received":          camera_data_received,
     "camera_depth_accuracy":         camera_depth_accuracy,
