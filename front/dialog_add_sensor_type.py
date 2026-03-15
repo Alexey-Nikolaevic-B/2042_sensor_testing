@@ -1,13 +1,13 @@
 import logging
 import os
 
+from PyQt5.QtCore import pyqtSignal, Qt, QObject, QEvent, QRect
+from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QDialog, QWidget, QHBoxLayout, QVBoxLayout,
     QLabel, QLineEdit, QPushButton, QPlainTextEdit,
-    QSizePolicy, QListWidgetItem, QListWidget,
+    QSizePolicy, QListWidgetItem, QListWidget, QApplication,
 )
-from PyQt5.QtCore import pyqtSignal, Qt
-from PyQt5.QtGui import QFont
 from PyQt5 import uic
 
 from ._theme import Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
@@ -95,6 +95,130 @@ def _lay_remove(layout, widget):
     layout.removeWidget(widget)
 
 
+_EDGE = 6
+_CURSOR_MAP = {
+    "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
+    "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
+    "l":  Qt.SizeHorCursor,   "r":  Qt.SizeHorCursor,
+    "t":  Qt.SizeVerCursor,   "b":  Qt.SizeVerCursor,
+}
+
+
+def _edge_at(win, global_pos):
+    pos = win.mapFromGlobal(global_pos)
+    x, y, w, h = pos.x(), pos.y(), win.width(), win.height()
+    on_l = x <= _EDGE;  on_r = x >= w - _EDGE
+    on_t = y <= _EDGE;  on_b = y >= h - _EDGE
+    if on_t and on_l: return "tl"
+    if on_t and on_r: return "tr"
+    if on_b and on_l: return "bl"
+    if on_b and on_r: return "br"
+    if on_l: return "l"
+    if on_r: return "r"
+    if on_t: return "t"
+    if on_b: return "b"
+    return None
+
+
+class _WinFilter(QObject):
+    """App-level event filter: handles both title-bar drag and edge resize
+    for a single frameless window/dialog."""
+
+    def __init__(self, win, title_bar_attr="title_bar", resizable=True):
+        super().__init__(win)
+        self._win            = win
+        self._tb_attr        = title_bar_attr
+        self._resizable      = resizable
+        self._drag_pos       = None
+        self._resize_edge    = None
+        self._resize_start_p = None
+        self._resize_start_g = None
+
+    def eventFilter(self, obj, event):
+        win = self._win
+        try:
+            import sip
+            if sip.isdeleted(win):
+                QApplication.instance().removeEventFilter(self)
+                return False
+        except Exception:
+            pass
+
+        if not win.isVisible():
+            return False
+
+        t = event.type()
+
+        # ── guard: ignore events outside our window unless mid-drag/resize ──
+        if t in (QEvent.MouseMove, QEvent.MouseButtonPress,
+                 QEvent.MouseButtonRelease):
+            if self._drag_pos is None and self._resize_edge is None:
+                gp = event.globalPos()
+                if not QRect(win.mapToGlobal(win.rect().topLeft()),
+                             win.size()).contains(gp):
+                    return False
+
+        # ── cursor shape (no button) ─────────────────────────────────────────
+        if t == QEvent.MouseMove and not (event.buttons() & Qt.LeftButton):
+            if self._resizable:
+                edge = _edge_at(win, event.globalPos())
+                win.setCursor(_CURSOR_MAP.get(edge, Qt.ArrowCursor))
+            return False
+
+        # ── press ────────────────────────────────────────────────────────────
+        elif t == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            if self._resizable:
+                edge = _edge_at(win, event.globalPos())
+                if edge:
+                    self._resize_edge    = edge
+                    self._resize_start_p = event.globalPos()
+                    self._resize_start_g = win.geometry()
+                    return True
+            # title bar drag
+            tb = getattr(win, self._tb_attr, None)
+            if tb:
+                tb_rect = QRect(win.mapToGlobal(tb.pos()), tb.size())
+                if tb_rect.contains(event.globalPos()):
+                    self._drag_pos = (event.globalPos()
+                                      - win.frameGeometry().topLeft())
+
+        # ── move ─────────────────────────────────────────────────────────────
+        elif t == QEvent.MouseMove and (event.buttons() & Qt.LeftButton):
+            if self._resize_edge:
+                self._do_resize(event.globalPos())
+                return True
+            if self._drag_pos is not None:
+                win.move(event.globalPos() - self._drag_pos)
+                return True
+
+        # ── release ──────────────────────────────────────────────────────────
+        elif t == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            self._resize_edge    = None
+            self._resize_start_p = None
+            self._resize_start_g = None
+            self._drag_pos       = None
+            win.setCursor(Qt.ArrowCursor)
+
+        return False
+
+    def _do_resize(self, global_pos):
+        delta  = global_pos - self._resize_start_p
+        dx, dy = delta.x(), delta.y()
+        g      = self._resize_start_g
+        x, y, w, h = g.x(), g.y(), g.width(), g.height()
+        min_w  = self._win.minimumWidth()  or 400
+        min_h  = self._win.minimumHeight() or 300
+        edge   = self._resize_edge
+        if "r" in edge: w = max(min_w, w + dx)
+        if "b" in edge: h = max(min_h, h + dy)
+        if "l" in edge:
+            new_w = max(min_w, w - dx); x += w - new_w; w = new_w
+        if "t" in edge:
+            new_h = max(min_h, h - dy); y += h - new_h; h = new_h
+        self._win.move(x, y)
+        self._win.resize(w, h)
+
+
 class AddSensorTypeDialog(QDialog):
     type_saved = pyqtSignal(dict)
 
@@ -106,10 +230,11 @@ class AddSensorTypeDialog(QDialog):
         self._prefill        = prefill or {}
         self._param_rows: list[_ParamRow] = []
         self._test_rows:  list[_TestRow]  = []
-        self._drag_pos = None
 
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self.showMaximized()
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setMinimumSize(920, 680)
+        self.resize(960, 700)
 
         uic.loadUi(f"{QT_DIR}/dialog_add_sensor_type.ui", self)
 
@@ -118,19 +243,31 @@ class AddSensorTypeDialog(QDialog):
         self._populate_detectors()
         self._connect_signals()
 
-        # Anchor both scroll areas to top
         self.scroll_params_contents.layout().addStretch(1)
         self.scroll_tests_contents.layout().addStretch(1)
 
         if self._prefill:
             self._apply_prefill()
 
+        self._win_filter = _WinFilter(self, title_bar_attr="title_bar", resizable=True)
+        QApplication.instance().installEventFilter(self._win_filter)
+
+    def closeEvent(self, event):
+        QApplication.instance().removeEventFilter(self._win_filter)
+        super().closeEvent(event)
+
     # ── styles ────────────────────────────────────────────────────────────────
 
     def _setup_styles(self):
         self.setStyleSheet(f"""
-            QDialog {{ background: {LC.BG_PANEL}; }}
-            QWidget {{
+            QDialog#AddSensorTypeDialog {{
+                background: {LC.BG_PANEL};
+            }}
+
+            /* ── panels ── */
+            QWidget#panel_left,
+            QWidget#widget_simple,
+            QWidget#widget_custom {{
                 background: {LC.BG_PANEL};
                 color: {LC.TEXT};
                 font-size: 13px;
@@ -147,11 +284,73 @@ class AddSensorTypeDialog(QDialog):
                 background: {LC.BG};
                 border-top: 1px solid {LC.BORDER};
             }}
-            QFrame#sep_vertical, QFrame#line_1,
-            QFrame#line_2,       QFrame#line_3 {{
-                color: {LC.BORDER};
+
+            /* ── scroll areas & their viewports ── */
+            QScrollArea#scroll_params,
+            QScrollArea#scroll_tests {{
+                border: 1px solid {LC.BORDER};
+                border-radius: 4px;
+                background: {LC.BG};
             }}
-            QScrollArea {{ border: none; background: transparent; }}
+            QWidget#scroll_params_contents,
+            QWidget#scroll_tests_contents {{
+                background: {LC.BG};
+            }}
+
+            /* ── list widgets ── */
+            QListWidget#list_existing_tests,
+            QListWidget#list_existing_detectors {{
+                border: 1px solid {LC.BORDER};
+                background: {LC.BG};
+                color: {LC.TEXT};
+                outline: none;
+            }}
+            QListWidget#list_existing_tests::item,
+            QListWidget#list_existing_detectors::item {{
+                border-bottom: 1px solid {LC.BG_HOVER};
+                color: {LC.TEXT};
+                padding: 4px;
+            }}
+            QListWidget#list_existing_tests::item:hover,
+            QListWidget#list_existing_detectors::item:hover {{
+                background: {LC.BG_HOVER};
+            }}
+            QListWidget#list_existing_tests::item:selected,
+            QListWidget#list_existing_detectors::item:selected {{
+                background: {LC.ACCENT_DIM};
+                color: {LC.TEXT};
+            }}
+
+            /* ── divider lines ── */
+            QFrame#sep_vertical {{
+                background: {LC.BORDER};
+                border: none;
+                max-width: 1px;
+            }}
+            QFrame#line_2, QFrame#line_3 {{
+                background: {LC.BORDER};
+                border: none;
+                max-height: 1px;
+            }}
+
+            /* ── labels ── */
+            QLabel {{
+                background: transparent;
+                color: {LC.TEXT};
+                font-size: 13px;
+            }}
+
+            /* ── inputs ── */
+            QLineEdit {{
+                background: {LC.BG_INPUT};
+                border: 1px solid {LC.BORDER};
+                border-radius: 3px;
+                color: {LC.TEXT};
+                padding: 4px 8px;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{ border-color: {LC.ACCENT}; }}
+
             QTextEdit {{
                 background: {LC.BG};
                 border: 1px solid {LC.BORDER};
@@ -161,7 +360,20 @@ class AddSensorTypeDialog(QDialog):
                 font-size: 12px;
             }}
             QTextEdit:focus {{ border-color: {LC.ACCENT}; }}
-            {LS.SCROLLBAR}
+
+            /* ── scrollbars ── */
+            QScrollBar:vertical {{
+                background: {LC.BG_HOVER}; width: 5px; margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {LC.BORDER}; border-radius: 2px; min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{ background: #aaaaaa; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical
+                {{ height: 0; background: transparent; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical
+                {{ background: transparent; }}
+            QScrollBar:horizontal {{ height: 0; background: transparent; }}
         """)
 
         self.lbl_title.setStyleSheet(
@@ -224,6 +436,14 @@ class AddSensorTypeDialog(QDialog):
         lw_det = getattr(self, "list_existing_detectors", None)
         if lw_det:
             lw_det.setStyleSheet(LS.LIST_WIDGET)
+
+        _scroll_style = f"background: {LC.BG}; border: 1px solid {LC.BORDER}; border-radius: 4px;"
+        _vp_style     = f"background: {LC.BG};"
+        for sa_name in ("scroll_params", "scroll_tests"):
+            sa = getattr(self, sa_name, None)
+            if sa:
+                sa.setStyleSheet(_scroll_style)
+                sa.viewport().setStyleSheet(_vp_style)
 
         for btn_id in ("btn_mode_simple", "btn_mode_custom"):
             btn = getattr(self, btn_id)
@@ -343,33 +563,19 @@ class AddSensorTypeDialog(QDialog):
         if inp_det_search:
             inp_det_search.textChanged.connect(self._filter_detectors)
 
-    # ── keyboard / drag ───────────────────────────────────────────────────────
+    # ── keyboard ──────────────────────────────────────────────────────────────
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Re-apply after show so Qt resolves styles against this widget,
+        # not the parent chain. Without this, styles break when not maximized.
+        self._setup_styles()
 
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             self._on_save()
         else:
             super().keyPressEvent(event)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            child = self.childAt(event.pos())
-            if child and child.objectName() in ("title_bar", "lbl_title"):
-                self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
-                event.accept()
-                return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self._drag_pos)
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-        super().mouseReleaseEvent(event)
 
     # ── detection mode ────────────────────────────────────────────────────────
 

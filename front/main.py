@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QMainWindow, QSizePolicy
-from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtWidgets import QMainWindow, QSizePolicy, QApplication
+from PyQt5.QtCore import Qt, QPoint, QRect, QObject, QEvent
+from PyQt5.QtGui import QPixmap, QCursor
 from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
@@ -12,18 +12,157 @@ from .logic_sensor_repository import SensorRepository
 from .dialog_add_sensor import AddSensorDialog
 
 
+_EDGE = 6  # px from window edge that counts as resize zone
+
+_CURSOR_MAP = {
+    "tl": Qt.SizeFDiagCursor,  "br": Qt.SizeFDiagCursor,
+    "tr": Qt.SizeBDiagCursor,  "bl": Qt.SizeBDiagCursor,
+    "l":  Qt.SizeHorCursor,    "r":  Qt.SizeHorCursor,
+    "t":  Qt.SizeVerCursor,    "b":  Qt.SizeVerCursor,
+}
+
+
+def _edge_at(win, global_pos) -> str | None:
+    """Which edge/corner of *win* is *global_pos* in, or None."""
+    pos = win.mapFromGlobal(global_pos)
+    x, y, w, h = pos.x(), pos.y(), win.width(), win.height()
+    on_l = x <= _EDGE
+    on_r = x >= w - _EDGE
+    on_t = y <= _EDGE
+    on_b = y >= h - _EDGE
+    if on_t and on_l: return "tl"
+    if on_t and on_r: return "tr"
+    if on_b and on_l: return "bl"
+    if on_b and on_r: return "br"
+    if on_l:          return "l"
+    if on_r:          return "r"
+    if on_t:          return "t"
+    if on_b:          return "b"
+    return None
+
+
+class _ResizeEventFilter(QObject):
+    """Installed on QApplication so it receives mouse events from every widget,
+    including children that would otherwise swallow them."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self._win               = win
+        self._resize_edge       = None
+        self._resize_start_pos  = None
+        self._resize_start_geom = None
+        self._drag_pos          = None
+
+    def eventFilter(self, obj, event):
+        win = self._win
+
+        # Guard against the window having been deleted by Qt already
+        try:
+            import sip
+            if sip.isdeleted(win):
+                QApplication.instance().removeEventFilter(self)
+                return False
+        except Exception:
+            pass
+
+        # Only act on events that concern our window
+        if not win.isVisible():
+            return False
+
+        t = event.type()
+        if t in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
+            if self._resize_edge is None:
+                gp = event.globalPos()
+                if not QRect(win.mapToGlobal(win.rect().topLeft()), win.size()).contains(gp):
+                    return False
+
+        # ── mouse move (no button) → update cursor ────────────────────────────
+        if event.type() == QEvent.MouseMove and not (event.buttons() & Qt.LeftButton):
+            edge = _edge_at(win, event.globalPos())
+            win.setCursor(_CURSOR_MAP.get(edge, Qt.ArrowCursor))
+
+        # ── press ─────────────────────────────────────────────────────────────
+        elif event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            edge = _edge_at(win, event.globalPos())
+            if edge:
+                self._resize_edge       = edge
+                self._resize_start_pos  = event.globalPos()
+                self._resize_start_geom = win.geometry()
+                return True   # consume — prevent child widgets acting on it
+            # title bar drag
+            tb = win.wt_titlebar
+            tb_rect = QRect(win.mapToGlobal(tb.pos()), tb.size())
+            if tb_rect.contains(event.globalPos()):
+                self._drag_pos = event.globalPos() - win.frameGeometry().topLeft()
+
+        # ── move (button held) → drag or resize ───────────────────────────────
+        elif event.type() == QEvent.MouseMove and (event.buttons() & Qt.LeftButton):
+            if self._resize_edge:
+                self._do_resize(event.globalPos())
+                return True
+            if self._drag_pos is not None:
+                win.move(event.globalPos() - self._drag_pos)
+                return True
+
+        # ── release ───────────────────────────────────────────────────────────
+        elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            self._resize_edge       = None
+            self._resize_start_pos  = None
+            self._resize_start_geom = None
+            self._drag_pos          = None
+            win.setCursor(Qt.ArrowCursor)
+
+        return False  # never consume — buttons must still receive their events
+
+    def _do_resize(self, global_pos):
+        delta  = global_pos - self._resize_start_pos
+        dx, dy = delta.x(), delta.y()
+        g      = self._resize_start_geom
+        x, y, w, h = g.x(), g.y(), g.width(), g.height()
+        min_w  = self._win.minimumWidth()  or 400
+        min_h  = self._win.minimumHeight() or 300
+        edge   = self._resize_edge
+
+        if "r" in edge: w = max(min_w, w + dx)
+        if "b" in edge: h = max(min_h, h + dy)
+        if "l" in edge:
+            new_w = max(min_w, w - dx)
+            x    += w - new_w
+            w     = new_w
+        if "t" in edge:
+            new_h = max(min_h, h - dy)
+            y    += h - new_h
+            h     = new_h
+
+        self._win.move(x, y)
+        self._win.resize(w, h)
+
+
 class Main_UI(QMainWindow):
 
     def __init__(self):
         super().__init__()
         self._is_maximized  = False
         self._drag_pos      = None
+        self._resize_edge   = None   # active edge/corner being dragged
+        self._resize_start_geom = None  # window geometry at drag start
+        self._resize_start_pos  = None  # global cursor pos at drag start
+        self._EDGE           = 6    # px from edge that counts as resize zone
 
         self._init_ui()
         self._build_columns()
         self._setup_styles()
         self._connect_signals()
         self._load_all_sensors()
+
+        # Install on QApplication so mouse events are caught before any child
+        # widget consumes them — necessary for frameless window resize to work.
+        self._resize_filter = _ResizeEventFilter(self)
+        QApplication.instance().installEventFilter(self._resize_filter)
+
+    def closeEvent(self, event):
+        QApplication.instance().removeEventFilter(self._resize_filter)
+        super().closeEvent(event)
 
     def _init_ui(self):
         uic.loadUi(f"{QT_DIR}/main.ui", self)
@@ -83,11 +222,11 @@ class Main_UI(QMainWindow):
         self.col_1.sensor_selected.connect(self._on_sensor_selected)
         self.col_1.add_requested.connect(self._on_add_sensor)
         self.col_1.delete_requested.connect(self._on_delete_sensor)
-        self.col_2.sensor_updated.connect(self._on_sensor_edited)
-        self.col_3.test_result_ready.connect(self.col_4.load_test_result)
 
+        self.col_2.sensor_updated.connect(self._on_sensor_edited)
 
         self.col_3._runner_log_forward = self.col_4.append_log
+        self.col_3.test_result_ready.connect(self.col_4.load_test_result)
 
     def _load_all_sensors(self):
         repo = SensorRepository.instance()
@@ -145,8 +284,6 @@ class Main_UI(QMainWindow):
         try:
             updated = repo.update_sensor(sensor_id, sensor_dict)
             self.col_1.refresh_sensor(updated)
-            self.col_2.load_sensor(updated)
-            self.col_3.load_sensor(updated)
         except Exception as e:
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, 'Update failed', str(e))
@@ -173,21 +310,13 @@ class Main_UI(QMainWindow):
             from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Save failed", str(e))
 
+    # ── resize / drag ─────────────────────────────────────────────────────────
+    # Handled entirely by _ResizeEventFilter (installed on QApplication).
+    # These stubs exist only so the filter can call them cleanly.
+
     def _toggle_maximize(self):
         if self._is_maximized:
             self.showNormal()
         else:
             self.showMaximized()
         self._is_maximized = not self._is_maximized
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if self.wt_titlebar.geometry().contains(event.pos()):
-                self._drag_pos = event.globalPos() - self.frameGeometry().topLeft()
-
-    def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self._drag_pos)
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
