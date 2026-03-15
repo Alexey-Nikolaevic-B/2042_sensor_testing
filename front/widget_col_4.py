@@ -39,6 +39,7 @@ class ColCapture(QWidget):
         self._capture_arrived.connect(self._on_capture_main)
         # Give the result panel a sensible default split; user can resize freely
         self.splitter_result_log.setSizes([150, 300])
+        self.splitter_image_bottom.setSizes([220, 400])
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -180,7 +181,8 @@ class ColCapture(QWidget):
             img = QImage.fromData(data)
             if not img.isNull():
                 px = QPixmap.fromImage(img).scaled(
-                    self.lbl_capture_image.width(), Layout.IMAGE_H,
+                    self.lbl_capture_image.width(),
+                    self.lbl_capture_image.height(),
                     Qt.KeepAspectRatio, Qt.SmoothTransformation,
                 )
                 self.lbl_capture_image.setPixmap(px)
@@ -239,9 +241,8 @@ class ColCapture(QWidget):
     # ── setup ─────────────────────────────────────────────────────────────────
 
     def _setup_heights(self):
-        self.lbl_capture_image.setFixedHeight(Layout.IMAGE_H)
         self.lbl_capture_image.setTextFormat(Qt.RichText)
-        self.lbl_capture_image.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.lbl_capture_image.setAlignment(Qt.AlignCenter)
         self.lbl_capture_image.setWordWrap(True)
         self.wt_toolbar_capture.setFixedHeight(Layout.TOOLBAR_H)
         self.wt_toolbar_bottom.setFixedHeight(Layout.TOOLBAR_H)
@@ -259,9 +260,8 @@ class ColCapture(QWidget):
             QWidget {{ background-color: {Colors.BG_COLUMN}; }}
             QLabel#lbl_capture_image {{
                 background-color: {Colors.BG_IMAGE};
-                color: {Colors.TEXT_PRIMARY};
+                color: {Colors.TEXT_MUTED};
                 font-size: 12px;
-                padding: 10px;
             }}
             QWidget#wt_toolbar_capture {{
                 background-color: {Colors.BG_TOOLBAR};
@@ -284,6 +284,13 @@ class ColCapture(QWidget):
             QPushButton:checked {{
                 background-color: {Colors.ACCENT_DIM};
                 border: 1px solid {Colors.ACCENT};
+            }}
+            QSplitter#splitter_image_bottom::handle {{
+                background-color: {Colors.BORDER};
+                height: 3px;
+            }}
+            QSplitter#splitter_image_bottom::handle:hover {{
+                background-color: {Colors.ACCENT};
             }}
             QSplitter#splitter_result_log::handle {{
                 background-color: {Colors.BORDER};
@@ -313,3 +320,12 @@ class ColCapture(QWidget):
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)
             btn.setStyleSheet(Styles.BUTTON_ICON)
+
+        # Override lock button to show checked state
+        self.btn_lock.setStyleSheet(Styles.BUTTON_ICON + f"""
+            QPushButton:checked {{
+                background-color: {Colors.ACCENT_DIM};
+                border: 1px solid {Colors.ACCENT};
+                border-radius: 4px;
+            }}
+        """)
