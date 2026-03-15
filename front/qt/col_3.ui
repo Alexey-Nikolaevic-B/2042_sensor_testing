@@ -11,111 +11,201 @@
    </rect>
   </property>
   <layout class="QVBoxLayout" name="layout_root">
-   <property name="spacing"><number>0</number></property>
-   <property name="leftMargin"><number>0</number></property>
-   <property name="topMargin"><number>0</number></property>
-   <property name="rightMargin"><number>0</number></property>
-   <property name="bottomMargin"><number>0</number></property>
-
+   <property name="spacing">
+    <number>0</number>
+   </property>
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
    <item>
     <widget class="QLabel" name="lbl_test_image">
-     <property name="text"><string>no test image</string></property>
-     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="text">
+      <string>no test image</string>
+     </property>
+     <property name="alignment">
+      <set>Qt::AlignCenter</set>
+     </property>
     </widget>
    </item>
-
    <item>
     <widget class="QWidget" name="wt_toolbar" native="true">
      <layout class="QHBoxLayout" name="toolbar_layout">
-      <property name="spacing"><number>4</number></property>
-      <property name="leftMargin"><number>6</number></property>
-      <property name="topMargin"><number>4</number></property>
-      <property name="rightMargin"><number>6</number></property>
-      <property name="bottomMargin"><number>4</number></property>
+      <property name="spacing">
+       <number>4</number>
+      </property>
+      <property name="leftMargin">
+       <number>6</number>
+      </property>
+      <property name="topMargin">
+       <number>4</number>
+      </property>
+      <property name="rightMargin">
+       <number>6</number>
+      </property>
+      <property name="bottomMargin">
+       <number>4</number>
+      </property>
       <item>
        <widget class="QPushButton" name="btn_run_all">
-        <property name="toolTip"><string>Run all tests</string></property>
-        <property name="text"><string/></property>
+        <property name="toolTip">
+         <string>Run all tests</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="btn_add_test">
-        <property name="toolTip"><string>Add new test</string></property>
-        <property name="text"><string/></property>
+        <property name="toolTip">
+         <string>Add new test</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="btn_edit_tests">
-        <property name="toolTip"><string>Edit tests</string></property>
-        <property name="text"><string/></property>
+        <property name="toolTip">
+         <string>Edit tests</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
        </widget>
       </item>
       <item>
        <spacer>
-        <property name="orientation"><enum>Qt::Horizontal</enum></property>
-        <property name="sizeHint" stdset="0"><size><width>10</width><height>1</height></size></property>
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>10</width>
+          <height>1</height>
+         </size>
+        </property>
        </spacer>
       </item>
      </layout>
     </widget>
    </item>
-
    <item>
     <widget class="QLabel" name="lbl_selected_test_name">
-     <property name="text"><string/></property>
+     <property name="text">
+      <string/>
+     </property>
     </widget>
    </item>
-
    <item>
     <widget class="QScrollArea" name="scroll_description">
-     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
-     <property name="verticalScrollBarPolicy"><enum>Qt::ScrollBarAsNeeded</enum></property>
-     <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
-     <property name="widgetResizable"><bool>true</bool></property>
-     <property name="maximumHeight"><number>100</number></property>
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAsNeeded</enum>
+     </property>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
      <widget class="QWidget" name="scroll_description_contents">
       <property name="geometry">
-       <rect><x>0</x><y>0</y><width>220</width><height>177</height></rect>
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>220</width>
+        <height>177</height>
+       </rect>
       </property>
       <layout class="QVBoxLayout" name="desc_layout">
-       <property name="spacing"><number>0</number></property>
-       <property name="leftMargin"><number>12</number></property>
-       <property name="topMargin"><number>8</number></property>
-       <property name="rightMargin"><number>12</number></property>
-       <property name="bottomMargin"><number>8</number></property>
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>12</number>
+       </property>
+       <property name="topMargin">
+        <number>8</number>
+       </property>
+       <property name="rightMargin">
+        <number>12</number>
+       </property>
+       <property name="bottomMargin">
+        <number>8</number>
+       </property>
        <item>
         <widget class="QLabel" name="lbl_test_description">
-         <property name="text"><string/></property>
-         <property name="alignment"><set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set></property>
-         <property name="wordWrap"><bool>true</bool></property>
+         <property name="text">
+          <string/>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+         </property>
+         <property name="wordWrap">
+          <bool>true</bool>
+         </property>
         </widget>
        </item>
       </layout>
      </widget>
     </widget>
    </item>
-
    <item>
     <widget class="QScrollArea" name="scroll_tests">
-     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
-     <property name="verticalScrollBarPolicy"><enum>Qt::ScrollBarAsNeeded</enum></property>
-     <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
-     <property name="widgetResizable"><bool>true</bool></property>
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
+     <property name="verticalScrollBarPolicy">
+      <enum>Qt::ScrollBarAsNeeded</enum>
+     </property>
+     <property name="horizontalScrollBarPolicy">
+      <enum>Qt::ScrollBarAlwaysOff</enum>
+     </property>
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
      <widget class="QWidget" name="scroll_tests_contents">
       <property name="geometry">
-       <rect><x>0</x><y>0</y><width>220</width><height>176</height></rect>
+       <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>220</width>
+        <height>176</height>
+       </rect>
       </property>
       <layout class="QVBoxLayout" name="tests_list_layout">
-       <property name="spacing"><number>0</number></property>
-       <property name="leftMargin"><number>0</number></property>
-       <property name="topMargin"><number>0</number></property>
-       <property name="rightMargin"><number>0</number></property>
-       <property name="bottomMargin"><number>0</number></property>
+       <property name="spacing">
+        <number>0</number>
+       </property>
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
       </layout>
      </widget>
     </widget>
    </item>
-
   </layout>
  </widget>
  <resources/>

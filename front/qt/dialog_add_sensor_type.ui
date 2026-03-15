@@ -129,8 +129,30 @@
            <property name="topMargin"><number>4</number></property>
            <property name="rightMargin"><number>0</number></property>
            <property name="bottomMargin"><number>0</number></property>
-           <item><widget class="QLabel" name="lbl_plugin_hint"><property name="text"><string>Plugin .so filename from the SDF &lt;plugin&gt; tag:</string></property></widget></item>
-           <item><widget class="QLineEdit" name="inp_plugin"><property name="placeholderText"><string>e.g. libgazebo_ros_camera.so</string></property></widget></item>
+           <item><widget class="QLabel" name="lbl_plugin_hint"><property name="text"><string>All listed plugins must be present in the SDF &lt;plugin&gt; tags (ALL required for match):</string></property></widget></item>
+           <item>
+            <widget class="QPushButton" name="btn_add_plugin">
+             <property name="text"><string>+ Add plugin</string></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QScrollArea" name="scroll_plugins">
+             <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+             <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+             <property name="verticalScrollBarPolicy"><enum>Qt::ScrollBarAsNeeded</enum></property>
+             <property name="widgetResizable"><bool>true</bool></property>
+             <property name="maximumHeight"><number>120</number></property>
+             <widget class="QWidget" name="scroll_plugins_contents">
+              <layout class="QVBoxLayout" name="layout_plugins">
+               <property name="spacing"><number>2</number></property>
+               <property name="leftMargin"><number>0</number></property>
+               <property name="topMargin"><number>0</number></property>
+               <property name="rightMargin"><number>0</number></property>
+               <property name="bottomMargin"><number>0</number></property>
+              </layout>
+             </widget>
+            </widget>
+           </item>
           </layout>
          </widget>
         </item>

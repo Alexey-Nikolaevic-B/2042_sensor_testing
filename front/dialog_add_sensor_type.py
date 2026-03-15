@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 class _ParamRow(QWidget):
+    """One param entry. The single field accepts:
+      - "width"              → tag only
+      - "camera/width"       → parent/tag
+      - "camera/lens/width"  → grandparent/parent/tag (arbitrary depth)
+    """
     remove_requested = pyqtSignal(object)
 
     def __init__(self, value: str = "", parent=None):
@@ -26,7 +31,7 @@ class _ParamRow(QWidget):
         h.setSpacing(6)
 
         self.inp = QLineEdit()
-        self.inp.setPlaceholderText("xml tag name  e.g. rzero")
+        self.inp.setPlaceholderText("e.g. width  or  camera/width  or  camera/lens/width")
         self.inp.setStyleSheet(LS.INPUT)
         if value:
             self.inp.setText(value)
@@ -42,7 +47,12 @@ class _ParamRow(QWidget):
         h.addWidget(btn)
 
     def data(self) -> dict:
-        return {"name": self.inp.text().strip()}
+        """Returns {"path": "camera/lens", "name": "width"} or {"name": "width"}."""
+        text = self.inp.text().strip()
+        if "/" in text:
+            parts = text.rsplit("/", 1)
+            return {"path": parts[0], "name": parts[1]}
+        return {"name": text}
 
 
 class _TestRow(QWidget):
@@ -93,6 +103,37 @@ def _lay_insert(layout, widget):
 def _lay_remove(layout, widget):
     """Remove widget; keep trailing stretch intact."""
     layout.removeWidget(widget)
+
+
+class _PluginRow(QWidget):
+    """One plugin filename entry in the detection section."""
+    remove_requested = pyqtSignal(object)
+
+    def __init__(self, value: str = "", parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(34)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 2, 0, 2)
+        h.setSpacing(6)
+
+        self.inp = QLineEdit()
+        self.inp.setPlaceholderText("e.g. libgazebo_ros_camera.so")
+        self.inp.setStyleSheet(LS.INPUT)
+        if value:
+            self.inp.setText(value)
+
+        btn = QPushButton()
+        btn.setFixedSize(24, 24)
+        btn.setIcon(Icons.CLEAR())
+        btn.setIconSize(Layout.ICON_SIZE_SM)
+        btn.setStyleSheet(LS.BUTTON_ICON)
+        btn.clicked.connect(lambda: self.remove_requested.emit(self))
+
+        h.addWidget(self.inp)
+        h.addWidget(btn)
+
+    def value(self) -> str:
+        return self.inp.text().strip()
 
 
 _EDGE = 6
@@ -228,8 +269,9 @@ class AddSensorTypeDialog(QDialog):
         self._existing_tests = existing_tests or []
         self._mode           = mode
         self._prefill        = prefill or {}
-        self._param_rows: list[_ParamRow] = []
-        self._test_rows:  list[_TestRow]  = []
+        self._param_rows:  list[_ParamRow]  = []
+        self._plugin_rows: list[_PluginRow] = []
+        self._test_rows:   list[_TestRow]   = []
 
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -244,6 +286,7 @@ class AddSensorTypeDialog(QDialog):
         self._connect_signals()
 
         self.scroll_params_contents.layout().addStretch(1)
+        self.scroll_plugins_contents.layout().addStretch(1)
         self.scroll_tests_contents.layout().addStretch(1)
 
         if self._prefill:
@@ -287,13 +330,15 @@ class AddSensorTypeDialog(QDialog):
 
             /* ── scroll areas & their viewports ── */
             QScrollArea#scroll_params,
-            QScrollArea#scroll_tests {{
+            QScrollArea#scroll_tests,
+            QScrollArea#scroll_plugins {{
                 border: 1px solid {LC.BORDER};
                 border-radius: 4px;
                 background: {LC.BG};
             }}
             QWidget#scroll_params_contents,
-            QWidget#scroll_tests_contents {{
+            QWidget#scroll_tests_contents,
+            QWidget#scroll_plugins_contents {{
                 background: {LC.BG};
             }}
 
@@ -427,7 +472,7 @@ class AddSensorTypeDialog(QDialog):
                     f"color: {LC.TEXT_SEC}; font-size: 11px; background: transparent;"
                 )
 
-        for name in ("inp_name", "inp_plugin", "inp_test_search", "inp_detector_search"):
+        for name in ("inp_name", "inp_test_search", "inp_detector_search"):
             w = getattr(self, name, None)
             if w:
                 w.setStyleSheet(LS.INPUT)
@@ -439,7 +484,7 @@ class AddSensorTypeDialog(QDialog):
 
         _scroll_style = f"background: {LC.BG}; border: 1px solid {LC.BORDER}; border-radius: 4px;"
         _vp_style     = f"background: {LC.BG};"
-        for sa_name in ("scroll_params", "scroll_tests"):
+        for sa_name in ("scroll_params", "scroll_tests", "scroll_plugins"):
             sa = getattr(self, sa_name, None)
             if sa:
                 sa.setStyleSheet(_scroll_style)
@@ -482,6 +527,17 @@ class AddSensorTypeDialog(QDialog):
             QPushButton:hover {{ background: {LC.ACCENT_DIM}; border-color: {LC.ACCENT}; }}
         """)
 
+        self.btn_add_plugin.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {LC.ACCENT};
+                border: 1px dashed {LC.BORDER};
+                border-radius: 4px;
+                padding: 4px 12px; font-size: 12px; text-align: left;
+            }}
+            QPushButton:hover {{ background: {LC.ACCENT_DIM}; border-color: {LC.ACCENT}; }}
+        """)
+
         for btn in (self.btn_add_selected_tests,):
             btn.setStyleSheet(LS.BUTTON_DEFAULT)
 
@@ -516,18 +572,27 @@ class AddSensorTypeDialog(QDialog):
         if d.get("name"):
             self.inp_name.setText(d["name"])
         for p in d.get("params", []):
-            self._add_param_row(value=p.get("name", ""))
+            if isinstance(p, dict):
+                path = p.get("path", "")
+                name = p.get("name", "")
+                self._add_param_row(f"{path}/{name}" if path else name)
+            else:
+                self._add_param_row(str(p))
         det = d.get("detection", {})
         if det.get("mode") == "custom":
             self._set_mode("custom")
-            # show currently selected detector fn name
             fn = det.get("detector_fn", "")
             lbl = getattr(self, "lbl_selected_detector", None)
             if lbl and fn:
                 lbl.setText(fn)
         else:
             self._set_mode("simple")
-            self.inp_plugin.setText(det.get("plugin", ""))
+            # support both old single plugin and new list
+            plugins = det.get("plugins") or (
+                [det["plugin"]] if det.get("plugin") else []
+            )
+            for p in plugins:
+                self._add_plugin_row(p)
         for t in d.get("tests", []):
             self._add_test_row(t.get("func_name", ""))
 
@@ -542,6 +607,7 @@ class AddSensorTypeDialog(QDialog):
         self.btn_mode_custom.clicked.connect(lambda: self._set_mode("custom"))
 
         self.btn_add_param.clicked.connect(self._add_param_row)
+        self.btn_add_plugin.clicked.connect(self._add_plugin_row)
 
         self.inp_test_search.textChanged.connect(self._filter_tests)
         self.btn_add_selected_tests.clicked.connect(self._add_selected_tests)
@@ -625,6 +691,19 @@ class AddSensorTypeDialog(QDialog):
         _lay_remove(self.scroll_params_contents.layout(), row)
         row.deleteLater()
 
+    # ── plugin rows ───────────────────────────────────────────────────────────
+
+    def _add_plugin_row(self, value: str = ""):
+        row = _PluginRow(value=value, parent=self)
+        row.remove_requested.connect(self._remove_plugin_row)
+        self._plugin_rows.append(row)
+        _lay_insert(self.scroll_plugins_contents.layout(), row)
+
+    def _remove_plugin_row(self, row: _PluginRow):
+        self._plugin_rows.remove(row)
+        _lay_remove(self.scroll_plugins_contents.layout(), row)
+        row.deleteLater()
+
     # ── test rows ─────────────────────────────────────────────────────────────
 
     def _filter_tests(self, text: str):
@@ -660,7 +739,8 @@ class AddSensorTypeDialog(QDialog):
             return
 
         if self.btn_mode_simple.isChecked():
-            detection = {"mode": "simple", "plugin": self.inp_plugin.text().strip()}
+            plugins = [r.value() for r in self._plugin_rows if r.value()]
+            detection = {"mode": "simple", "plugins": plugins}
         else:
             fn_name = ""
             lbl = getattr(self, "lbl_selected_detector", None)

@@ -118,8 +118,11 @@ def _detect_from_db(content: str) -> Optional[str]:
         for t in db.get_all_sensor_types():
             det = t.get("detection", {})
             if det.get("mode") == "simple":
-                plugin = det.get("plugin", "")
-                if plugin and plugin in content:
+                # Support both old single-plugin and new multi-plugin formats
+                plugins = det.get("plugins") or (
+                    [det["plugin"]] if det.get("plugin") else []
+                )
+                if plugins and all(p in content for p in plugins):
                     return t["sensor_type"]
     except Exception as e:
         logger.error("_detect_from_db failed: %s", e)
