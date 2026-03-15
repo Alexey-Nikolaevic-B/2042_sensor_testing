@@ -1,5 +1,4 @@
 import os
-from datetime import datetime
 
 from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QFrame, QHBoxLayout, QSizePolicy
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot, pyqtSignal
@@ -39,7 +38,9 @@ class ColCapture(QWidget):
         self._capture_arrived.connect(self._on_capture_main)
         # Give the result panel a sensible default split; user can resize freely
         self.splitter_result_log.setSizes([150, 300])
-        self.splitter_image_bottom.setSizes([220, 400])
+        # Image pane = IMAGE_H minus the 3px splitter handle so its bottom
+        # aligns with the image labels in col_2 and col_3
+        self.splitter_image_bottom.setSizes([Layout.IMAGE_H - 3, 600])
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -223,8 +224,7 @@ class ColCapture(QWidget):
     @pyqtSlot(str, str, str)
     def _append_log_main(self, level: str, source: str, message: str) -> None:
         prefix, color = _LEVEL_FMT.get(level.lower(), ("[INFO]", "#9ca3af"))
-        ts   = datetime.now().strftime("%H:%M:%S")
-        line = f"[{ts}]  {prefix}  {source}: {message}"
+        line = f"{prefix}  {source}: {message}"
         self._append_colored(line, color)
 
     def _append_colored(self, text: str, hex_color: str) -> None:
