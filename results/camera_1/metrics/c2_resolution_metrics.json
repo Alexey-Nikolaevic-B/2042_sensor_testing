@@ -1,0 +1,23 @@
+{
+  "world_file": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/camera_c2_resolution.world",
+  "expected_topic": "/axis_wide_110deg/image_raw",
+  "resolved_topic": "/axis_wide_110deg/image_raw",
+  "expected_resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "actual_resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "encoding": "rgb8",
+  "scene_open_success": true,
+  "topic_mapping_changed": false,
+  "status": "PASS",
+  "error_reason": "",
+  "display_env": {},
+  "scene_reason": "",
+  "checks": {
+    "resolution_matches": true
+  }
+}

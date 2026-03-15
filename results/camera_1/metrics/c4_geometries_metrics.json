@@ -1,0 +1,22 @@
+{
+  "world_file": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/camera_c4_geometries.world",
+  "expected_topic": "/axis_wide_110deg/image_raw",
+  "resolved_topic": "/axis_wide_110deg/image_raw",
+  "scene_open_success": true,
+  "topic_mapping_changed": false,
+  "pixel_counts": {
+    "red": 7869,
+    "green": 15006,
+    "blue": 8752,
+    "yellow": 15127
+  },
+  "threshold": 1500,
+  "display_env": {},
+  "status": "PASS",
+  "error_reason": "",
+  "scene_reason": "",
+  "checks": {
+    "all_present": true,
+    "missing_or_low": {}
+  }
+}

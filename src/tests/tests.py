@@ -101,7 +101,6 @@ def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
         logger.error("get_tests_for_type failed: %s", e)
         return {}
 
-
 # ── How to add a new test ─────────────────────────────────────────────────────
 #
 # 1. Write a plain function:

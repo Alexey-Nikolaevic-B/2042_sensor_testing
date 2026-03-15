@@ -1,0 +1,59 @@
+{
+  "world_file": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/camera_c1_single_cube.world",
+  "expected_topic": "/axis_wide_110deg/image_raw",
+  "resolved_topic": "/axis_wide_110deg/image_raw",
+  "scene_open_success": true,
+  "topic_mapping_changed": false,
+  "display_env": {},
+  "positions": [
+    1.0,
+    3.0,
+    5.0
+  ],
+  "cube_pose": {
+    "y": 0.35,
+    "z": 0.25
+  },
+  "bbox_area_px": {
+    "x1": 216832,
+    "x3": 216832,
+    "x5": 5112
+  },
+  "bbox_px": {
+    "x1": {
+      "x": 422,
+      "y": 92,
+      "w": 484,
+      "h": 448
+    },
+    "x3": {
+      "x": 422,
+      "y": 92,
+      "w": 484,
+      "h": 448
+    },
+    "x5": {
+      "x": 875,
+      "y": 469,
+      "w": 72,
+      "h": 71
+    }
+  },
+  "red_pixels": {
+    "x1": 213682,
+    "x3": 213682,
+    "x5": 4622
+  },
+  "frame_stamp_s": {
+    "x1": 0.803,
+    "x3": 0.846,
+    "x5": 2.564
+  },
+  "min_margin_ratio": 1.1,
+  "status": "FAIL",
+  "error_reason": "size_order_failed: checks={'size_order': False, 'size_margin': False}, bbox_area_px={'x1': 216832, 'x3': 216832, 'x5': 5112}",
+  "checks": {
+    "size_order": false,
+    "size_margin": false
+  }
+}

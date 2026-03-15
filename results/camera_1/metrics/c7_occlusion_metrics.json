@@ -1,0 +1,24 @@
+{
+  "world_file": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/camera_c7_occlusion.world",
+  "expected_topic": "/axis_wide_110deg/image_raw",
+  "resolved_topic": "/axis_wide_110deg/image_raw",
+  "scene_open_success": true,
+  "topic_mapping_changed": false,
+  "display_env": {},
+  "cases": {
+    "occ_25": 0.2,
+    "occ_50": 0.1
+  },
+  "blue_pixels": {
+    "occ_25": 8281,
+    "occ_50": 3937
+  },
+  "threshold": 800,
+  "status": "PASS",
+  "error_reason": "",
+  "scene_reason": "",
+  "checks": {
+    "occlusion_relation": true,
+    "threshold_ok": true
+  }
+}

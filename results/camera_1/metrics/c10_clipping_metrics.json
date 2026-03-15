@@ -1,0 +1,60 @@
+{
+  "world_file": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/camera_c10_clipping.world",
+  "expected_topic": "/axis_wide_110deg/image_raw",
+  "resolved_topic": "/axis_wide_110deg/image_raw",
+  "scene_open_success": true,
+  "topic_mapping_changed": false,
+  "display_env": {},
+  "near_clip_target_m": 0.1,
+  "far_clip_target_m": 100.0,
+  "clip_source": {
+    "camera_model_path_abs": "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/front/../assets/sensors/camera_1/model.sdf",
+    "near_m": 0.1,
+    "far_m": 100.0,
+    "source": "sdf_clip",
+    "error": ""
+  },
+  "near_tolerance_m": 0.05,
+  "far_tolerance_m": 5.0,
+  "near_search": {
+    "start_x": 0.03,
+    "end_x": 2.0
+  },
+  "far_search": {
+    "coarse_step": 0.5,
+    "fine_step": 0.01
+  },
+  "min_red_pixels": 20,
+  "visibility_rule": "red_pixels>=20",
+  "status": "PASS",
+  "error_reason": "",
+  "scene_reason": "",
+  "x_near_m": 0.11,
+  "near_boundary": {
+    "before_x_m": 0.1,
+    "after_x_m": 0.11
+  },
+  "far_search_stop_m": 140.0,
+  "x_far_m": 100.0,
+  "x_far_first_not_visible_m": 100.01,
+  "far_boundary": {
+    "last_visible_x_m": 100.0,
+    "first_not_visible_x_m": 100.01
+  },
+  "checks": {
+    "near_abs_error_m": 0.009999999999999995,
+    "far_abs_error_m": 0.0,
+    "near_ok": true,
+    "far_ok": true
+  },
+  "visibility_debug": {
+    "near_before_red_pixels": 0,
+    "near_before_pixel_ratio": 0.0,
+    "near_after_red_pixels": 1009920,
+    "near_after_pixel_ratio": 0.48703703703703705,
+    "far_before_red_pixels": 42,
+    "far_before_pixel_ratio": 2.025462962962963e-05,
+    "far_after_red_pixels": 0,
+    "far_after_pixel_ratio": 0.0
+  }
+}
