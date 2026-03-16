@@ -1,0 +1,50 @@
+<?xml version="1.0" ?>
+<!--
+  Что это:
+  - Сцена C3 для проверки устойчивости восприятия при изменении ракурса.
+  - В центре сцены один куб `target_cube`.
+
+  Как используется:
+  - Тест двигает только камеру по окружности радиуса 2.0 вокруг объекта.
+  - Камера в world не добавляется, подключается существующим механизмом симулятора.
+
+  Model names:
+  - target_cube
+-->
+<sdf version="1.6">
+  <world name="camera_c3_view_angle">
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.5 0.5 0.5 1</background>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <model name="target_cube">
+      <pose>2.0 0.0 0.25 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.5 0.5 0.5</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.5 0.5 0.5</size></box>
+          </geometry>
+          <material>
+            <ambient>0.1 0.4 1.0 1</ambient>
+            <diffuse>0.1 0.4 1.0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

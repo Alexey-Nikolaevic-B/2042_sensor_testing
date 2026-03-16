@@ -1,0 +1,221 @@
+<?xml version="1.0" ?>
+<!--
+  Что это:
+  - Сцена C11 для замера FPS/Jitter в статичной нагрузке.
+  - Плотная неподвижная сцена: стена + набор объектов на разных дистанциях.
+
+  Как используется:
+  - Никакие объекты не двигаются; камера в world не добавляется.
+  - Камера подключается существующим механизмом симулятора.
+
+  Model names:
+  - heavy_wall_left, heavy_wall_right,
+    heavy_near_cube, heavy_near_sphere, heavy_far_cube, heavy_far_sphere,
+    heavy_cube_1..heavy_cube_6, heavy_sphere_1..heavy_sphere_6
+-->
+<sdf version="1.6">
+  <world name="camera_c11_fps_static_load">
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.5 0.5 0.5 1</background>
+    </scene>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <model name="heavy_wall_left">
+      <pose>5.0 -1.0 1.0 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.85 1</ambient>
+            <diffuse>0.85 0.85 0.85 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="heavy_wall_right">
+      <pose>5.0 1.0 1.0 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+        </collision>
+        <visual name="base">
+          <geometry>
+            <box><size>0.1 2.0 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.25 0.25 0.25 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
+          </material>
+        </visual>
+        <visual name="stripe_1">
+          <pose>0 -0.75 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+          </material>
+        </visual>
+        <visual name="stripe_2">
+          <pose>0 -0.25 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.6 0.6 0.6 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+        <visual name="stripe_3">
+          <pose>0 0.25 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+          </material>
+        </visual>
+        <visual name="stripe_4">
+          <pose>0 0.75 0 0 0 0</pose>
+          <geometry>
+            <box><size>0.101 0.3 2.0</size></box>
+          </geometry>
+          <material>
+            <ambient>0.6 0.6 0.6 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="heavy_near_cube">
+      <pose>2.0 -0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.2 0.2 0.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.2 0.2 0.2</size></box></geometry><material><ambient>1 0.2 0.2 1</ambient><diffuse>1 0.2 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="heavy_near_sphere">
+      <pose>2.0 0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><sphere><radius>0.1</radius></sphere></geometry></collision>
+        <visual name="visual"><geometry><sphere><radius>0.1</radius></sphere></geometry><material><ambient>0.2 1 0.2 1</ambient><diffuse>0.2 1 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="heavy_far_cube">
+      <pose>4.5 -0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.2 0.2 0.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.2 0.2 0.2</size></box></geometry><material><ambient>0.2 0.2 1 1</ambient><diffuse>0.2 0.2 1 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="heavy_far_sphere">
+      <pose>4.5 0.4 0.2 0 0 0</pose>
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><sphere><radius>0.1</radius></sphere></geometry></collision>
+        <visual name="visual"><geometry><sphere><radius>0.1</radius></sphere></geometry><material><ambient>1 1 0.2 1</ambient><diffuse>1 1 0.2 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="heavy_cube_1">
+      <pose>1.4 -1.2 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.9 0.3 0.3 1</ambient><diffuse>0.9 0.3 0.3 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_cube_2">
+      <pose>1.8 -0.9 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.9 0.5 0.3 1</ambient><diffuse>0.9 0.5 0.3 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_cube_3">
+      <pose>2.2 -1.1 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.9 0.7 0.3 1</ambient><diffuse>0.9 0.7 0.3 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_cube_4">
+      <pose>2.6 -0.8 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.7 0.9 0.3 1</ambient><diffuse>0.7 0.9 0.3 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_cube_5">
+      <pose>3.2 -1.15 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.3 0.9 0.5 1</ambient><diffuse>0.3 0.9 0.5 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_cube_6">
+      <pose>3.8 -0.85 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><box><size>0.15 0.15 0.15</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.15 0.15 0.15</size></box></geometry><material><ambient>0.3 0.8 0.9 1</ambient><diffuse>0.3 0.8 0.9 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_1">
+      <pose>1.5 1.2 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.9 0.3 0.5 1</ambient><diffuse>0.9 0.3 0.5 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_2">
+      <pose>1.9 0.9 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.9 0.3 0.7 1</ambient><diffuse>0.9 0.3 0.7 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_3">
+      <pose>2.3 1.1 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.7 0.3 0.9 1</ambient><diffuse>0.7 0.3 0.9 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_4">
+      <pose>2.9 0.8 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.5 0.3 0.9 1</ambient><diffuse>0.5 0.3 0.9 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_5">
+      <pose>3.4 1.15 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.3 0.5 0.9 1</ambient><diffuse>0.3 0.5 0.9 1</diffuse></material></visual></link>
+    </model>
+
+    <model name="heavy_sphere_6">
+      <pose>4.0 0.85 0.15 0 0 0</pose>
+      <static>true</static>
+      <link name="link"><collision name="collision"><geometry><sphere><radius>0.075</radius></sphere></geometry></collision><visual name="visual"><geometry><sphere><radius>0.075</radius></sphere></geometry><material><ambient>0.3 0.7 0.9 1</ambient><diffuse>0.3 0.7 0.9 1</diffuse></material></visual></link>
+    </model>
+  </world>
+</sdf>
