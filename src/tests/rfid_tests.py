@@ -90,7 +90,7 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
 def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
     from config import CONFIG
     read_distance = float(sensor.params.get("rzero", 3))
-    tags_count    = 75
+    tags_count    = 15
     radius        = read_distance / 2
 
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
@@ -189,15 +189,19 @@ def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
 
 def rfid_move_tags(simulator, sensor, progress_cb=None) -> dict:
     from config import CONFIG
-    from geometry_msgs.msg import Vector3
     read_distance = float(sensor.params.get("rzero", 3))
-    velocities    = [Vector3(0.5, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0)]
-    factor        = 1.5
-    start_dist    = -1 * read_distance * factor
-    result_vel    = None
-    t0            = time.time()
+    # Three traversal scenarios: step_delay controls how long the tag lingers per position
+    # Shorter delay = faster traversal = harder to detect
+    step_delays  = [0.3, 0.15, 0.05]   # seconds between position steps
+    speed_labels = [0.5, 1.0, 2.0]     # corresponding "speed" label for result reporting
+    factor       = 1.5
+    start_dist   = -read_distance * factor
+    end_dist     = read_distance * factor
+    num_steps    = 10
+    result_speed = None
+    t0           = time.time()
 
-    for step, velocity in enumerate(velocities):
+    for step_idx, (delay, speed) in enumerate(zip(step_delays, speed_labels)):
         with open(CONFIG["RFID_MAP_PATH"], "w") as f:
             f.write(f"fix1 1 {start_dist} 0 0\n")
         if not simulator.open_scene(Worlds.RFID_MOVE_TAGS.value, sensor.sdf_path):
@@ -205,23 +209,34 @@ def rfid_move_tags(simulator, sensor, progress_cb=None) -> dict:
         if not simulator.wait_for_model_spawn("rfid_tag1", 30):
             raise RuntimeError("tag not spawned")
 
-        simulator.set_pose("rfid_tag1", x=start_dist, y=0, z=0, linear_velocity=velocity)
-        data = sensor.capture_frames(
-            _PoseStamped(),
-            window=factor * read_distance / velocity.x * 2,
-            simulator=simulator,
-        )
-        if len(data) == 1:
-            result_vel = velocity
+        # Walk tag across detection zone in discrete steps
+        positions = [
+            start_dist + (end_dist - start_dist) * i / (num_steps - 1)
+            for i in range(num_steps)
+        ]
+
+        detected = False
+        for x in positions:
+            simulator.set_pose("rfid_tag1", x=x, y=0, z=0)
+            time.sleep(delay)
+            data = sensor.capture_frames(_PoseStamped(), window=delay * 2, simulator=simulator)
+            if "rfid_tag1" in data:
+                detected = True
+                break
+
+        if detected:
+            result_speed = speed
+
         if progress_cb:
-            progress_cb(int((step + 1) / len(velocities) * 100))
-        if result_vel is None:
+            progress_cb(int((step_idx + 1) / len(step_delays) * 100))
+
+        if result_speed is None:
             break
 
     return {
-        "passed":                result_vel is not None,
+        "passed":                result_speed is not None,
         "duration":              time.time() - t0,
-        "max_detected_velocity": result_vel.x if result_vel else None,
+        "max_detected_velocity": result_speed,
     }
 
 

@@ -449,7 +449,9 @@ from .scam_tests import (  # noqa: E402
 )
 from .tactile_tests import (  # noqa: E402
     tactile_min_force_threshold,
+    tactile_peak_load_response,
     tactile_response_uniformity,
+    tactile_time_stability,
 )
 
 
@@ -484,4 +486,6 @@ TESTS: dict[str, callable] = {
     "s2_texture_vs_smooth_stability_test": s2_texture_vs_smooth_stability_test,
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,
+    "tactile_time_stability": tactile_time_stability,
+    "tactile_peak_load_response": tactile_peak_load_response,
 }
