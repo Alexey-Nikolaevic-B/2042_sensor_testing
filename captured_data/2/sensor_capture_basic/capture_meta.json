@@ -1,6 +1,0 @@
-{
-  "type": "PoseStamped",
-  "hint": "pose_stamped",
-  "frame_id": "rfid_tag1",
-  "stamp": "8450000000"
-}
