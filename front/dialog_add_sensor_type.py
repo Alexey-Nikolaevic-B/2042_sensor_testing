@@ -440,7 +440,7 @@ class AddSensorTypeDialog(QDialog):
 
         # File path hints
         tests_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "src", "tests", "tests.py")
+            os.path.join(os.path.dirname(__file__), "..", "src", "tests", "_common.py")
         )
         lbl_f = getattr(self, "lbl_tests_file", None)
         if lbl_f:

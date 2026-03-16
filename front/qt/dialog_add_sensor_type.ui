@@ -286,7 +286,7 @@
         <!-- Tests file hint -->
         <item>
          <widget class="QLabel" name="lbl_tests_file">
-          <property name="text"><string>src/tests/tests.py</string></property>
+          <property name="text"><string>src/tests/_common.py</string></property>
           <property name="wordWrap"><bool>true</bool></property>
          </widget>
         </item>

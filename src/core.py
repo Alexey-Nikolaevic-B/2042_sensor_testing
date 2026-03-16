@@ -16,7 +16,7 @@ class Core:
 
     def get_tests(self, sensor) -> Dict[str, Any]:
         """Return {func_name: callable} for all tests registered for this sensor's type."""
-        from src.tests.tests import get_tests_for_type
+        from src.tests import get_tests_for_type
         sensor_type = getattr(sensor, "sensor_type", None)
         if not sensor_type:
             return {}
