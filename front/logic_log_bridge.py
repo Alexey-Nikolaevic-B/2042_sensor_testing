@@ -72,6 +72,9 @@ def get_logger(name: str) -> logging.Logger:
 
 def setup_logging(level: int = logging.DEBUG) -> None:
     """Call once at the top of __main__.py, before any src.* import."""
+    # Ensure src.* loggers pass DEBUG records through to our Qt handler
+    for name in ("src", "front", ""):
+        logging.getLogger(name).setLevel(level)
     _attach_all()
 
     # Console handler on root for terminal output

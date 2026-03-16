@@ -283,7 +283,7 @@ class Layout:
     IMAGE_H   = 200
     TOOLBAR_H = 44
     NAME_H    = 36
-    DESC_H    = 72
+    DESC_H    = 100
     SENSOR_CELL_HEIGHT = 52
     TEST_ITEM_HEIGHT   = 64
     TEST_LIST_MAX_H    = 9999

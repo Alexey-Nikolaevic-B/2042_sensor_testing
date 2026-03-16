@@ -72,8 +72,13 @@ class Simulator():
         self._kill_ros()
         try:
             env = os.environ.copy()
-            env['ROS_LOG_DIR'] = self.ROS_LOG_PATH
-            os.makedirs(self.ROS_LOG_PATH, exist_ok=True)
+            # Write ROS logs to a temp dir that gets cleared each run.
+            # Avoids accumulation in ~/.ros/log while keeping ROS happy.
+            import tempfile
+            _ros_log_tmp = os.path.join(tempfile.gettempdir(), "ros_logs")
+            os.makedirs(_ros_log_tmp, exist_ok=True)
+            env['ROS_LOG_DIR'] = _ros_log_tmp
+            env['ROSCONSOLE_STDOUT_LINE_BUFFERED'] = '1'
 
             roscore_cmd = f"source {self.CATKIN_SETUP_DIR} && roscore"
 
@@ -161,12 +166,19 @@ class Simulator():
         logger.info(f'open_scene: roslaunch_cmd={roslaunch_cmd}')
 
         try:
+            launch_env = os.environ.copy()
+            import tempfile
+            _ros_log_tmp = os.path.join(tempfile.gettempdir(), "ros_logs")
+            os.makedirs(_ros_log_tmp, exist_ok=True)
+            launch_env['ROS_LOG_DIR'] = _ros_log_tmp
+            launch_env['ROSCONSOLE_STDOUT_LINE_BUFFERED'] = '1'
             self.gazebo_process = subprocess.Popen(
                 ["bash", "-c", roslaunch_cmd],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1
+                bufsize=1,
+                env=launch_env,
             )
             logger.info(f'open_scene: gazebo process pid={self.gazebo_process.pid}')
 
@@ -194,14 +206,6 @@ class Simulator():
             if self.is_gazebo_running():
                 logger.info('open_scene: Gazebo started successfully')
                 # Debug: list all active ROS topics
-                try:
-                    import subprocess as _sp
-                    result = _sp.run(["rostopic", "list"], capture_output=True, text=True, timeout=5)
-                    topics = result.stdout.strip()
-                    obs_present = self._observer_topic in topics
-                    logger.info("open_scene: observer topic present=%s", obs_present)
-                except Exception as te:
-                    logger.debug("open_scene: rostopic list failed: %s", te)
                 return True
             else:
                 logger.error('open_scene: is_gazebo_running() returned False after startup')
@@ -232,22 +236,29 @@ class Simulator():
             pass
 
     def _process_output_line(self, line, stream_type):
-        line_lower = line.lower()
-        # Always print lines related to observer or camera plugin
+        # Strip ANSI escape codes (colour codes from ROS/Gazebo output)
+        import re as _re
+        line = _re.sub(r'\x1b\[[0-9;]*[mKHJ]|\[0m', '', line).strip()
+        if not line:
+            return
+
+        # Strip the ROS timestamp prefix: "[INFO] [1234567890.123]: message"
+        ros_msg = _re.sub(r'^\[(?:INFO|WARN|ERROR|DEBUG)\]\s*\[\d+\.\d+\]:\s*', '', line)
+
+        line_lower = ros_msg.lower()
+
+        # Classify and forward only meaningful lines — skip pure ROS chatter
         if line.startswith('bash:') or 'command not found' in line_lower:
-            level = 'warning'
-            logger.warning(f"[Gazebo/bash] {line}")
-        elif any(word in line_lower for word in ['error', 'exception', 'fail', 'cannot', 'invalid']):
-            level = 'error'
-            logger.error(f"[Gazebo] {line}")
-            # Also print plugin errors to stdout for visibility
+            if self.on_log:
+                self.on_log('warning', ros_msg)
+        elif any(w in line_lower for w in ['error', 'exception', 'fail', 'cannot', 'invalid']):
+            if self.on_log:
+                self.on_log('error', ros_msg)
         elif 'warning' in line_lower:
-            level = 'warning'
-            logger.warning(f"[Gazebo] {line}")
-        else:
-            level = 'info'
-        if self.on_log:
-            self.on_log(level, line)
+            if self.on_log:
+                self.on_log('warning', ros_msg)
+        # All other Gazebo stdout lines are discarded — they are captured
+        # by logger.* calls inside the simulator methods instead.
 
 
     def _generate_world(self, world_path, camera_model_path):

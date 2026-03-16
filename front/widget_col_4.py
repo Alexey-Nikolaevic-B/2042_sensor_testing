@@ -22,6 +22,8 @@ _fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) els
 class ColCapture(QWidget):
 
     _capture_arrived = pyqtSignal(dict, bytes)
+    _log_arrived     = pyqtSignal(str, str, str)   # level, source, message
+    _sep_arrived     = pyqtSignal(str)              # separator label
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +39,8 @@ class ColCapture(QWidget):
         self._setup_styles()
         self._connect_signals()
         self._capture_arrived.connect(self._on_capture_main)
+        self._log_arrived.connect(self._append_log_main)
+        self._sep_arrived.connect(self._append_separator_main)
         # Give the result panel a sensible default split; user can resize freely
         self.splitter_result_log.setSizes([150, 300])
         # Image pane = IMAGE_H minus the 3px splitter handle so its bottom
@@ -106,6 +110,7 @@ class ColCapture(QWidget):
         # When the simulator blocks on wait_for_step, it calls this to enable btn_step
         simulator.on_waiting_for_step = self._on_sim_waiting_for_step
 
+
     # ── lock / step ───────────────────────────────────────────────────────────
 
     def _on_lock_toggled(self, checked: bool) -> None:
@@ -128,17 +133,7 @@ class ColCapture(QWidget):
         self.btn_step.setEnabled(True)
 
     def append_log(self, level: str, source: str, message: str) -> None:
-        from PyQt5.QtCore import QThread
-        if QThread.currentThread() is not self.thread():
-            QMetaObject.invokeMethod(
-                self, "_append_log_main",
-                Qt.QueuedConnection,
-                Q_ARG(str, level),
-                Q_ARG(str, source),
-                Q_ARG(str, message),
-            )
-            return
-        self._append_log_main(level, source, message)
+        self._log_arrived.emit(level, source, message)
 
     # ── capture callbacks ─────────────────────────────────────────────────────
 
@@ -317,6 +312,40 @@ class ColCapture(QWidget):
     # ── log ───────────────────────────────────────────────────────────────────
 
     @pyqtSlot(str, str, str)
+    def append_separator(self, label: str = "") -> None:
+        """Insert a visual divider into the log, e.g. at the start of each test."""
+        self._sep_arrived.emit(label)
+
+    @pyqtSlot(str)
+    def _append_separator_main(self, label: str) -> None:
+        cursor = self.log_view.textCursor()
+        cursor.movePosition(QTextCursor.End)
+
+        # Blank line before
+        if self.log_view.toPlainText():
+            plain_fmt = QTextCharFormat()
+            plain_fmt.setForeground(QColor("#1e293b"))
+            cursor.insertText("\n", plain_fmt)
+
+        # Top rule
+        rule_fmt = QTextCharFormat()
+        rule_fmt.setForeground(QColor("#475569"))
+        cursor.insertText("\n" + "━" * 48, rule_fmt)
+
+        # Label line
+        lbl_fmt = QTextCharFormat()
+        lbl_fmt.setForeground(QColor("#e2e8f0"))
+        lbl_fmt.setFontWeight(700)
+        text = f"  ▶  {label}" if label else "  ▶  test"
+        cursor.insertText("\n" + text, lbl_fmt)
+
+        # Bottom rule
+        cursor.insertText("\n" + "━" * 48, rule_fmt)
+        cursor.insertText("\n", plain_fmt)
+
+        self.log_view.setTextCursor(cursor)
+        self.log_view.ensureCursorVisible()
+
     def _append_log_main(self, level: str, source: str, message: str) -> None:
         prefix, color = _LEVEL_FMT.get(level.lower(), ("[INFO]", "#9ca3af"))
         line = f"{prefix}  {source}: {message}"

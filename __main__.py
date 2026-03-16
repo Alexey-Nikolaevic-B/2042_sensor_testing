@@ -42,10 +42,36 @@ if __name__ == "__main__":
             window.col_4.append_log("error", "simulator", "ROS node failed to initialise.")
 
     core.simulator.on_log = on_sim_log
+
+    # Connect log_bridge BEFORE start_async so logger.* calls during
+    # ROS/Gazebo startup are captured from the very first line.
+    from front.logic_log_bridge import log_bridge as _log_bridge
+    import logging as _logging
+
+    _LEVEL_MAP = {
+        _logging.DEBUG:    "debug",
+        _logging.INFO:     "info",
+        _logging.WARNING:  "warning",
+        _logging.ERROR:    "error",
+        _logging.CRITICAL: "critical",
+    }
+
+    def _on_log_record(record: _logging.LogRecord):
+        level  = _LEVEL_MAP.get(record.levelno, "info")
+        source = record.name.split(".")[-1]
+        window.col_4.append_log(level, source, record.getMessage())
+
+    _log_bridge.new_record.connect(_on_log_record)
+
     core.simulator.start_async(
         on_ready = on_sim_ready,
         on_log   = on_sim_log,
         on_error = on_sim_error,
+    )
+
+    # Separator in log at the start of each test
+    runner.test_started.connect(
+        lambda func_name: window.col_4.append_separator(func_name)
     )
 
     try:
