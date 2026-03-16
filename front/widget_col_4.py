@@ -49,6 +49,13 @@ class ColCapture(QWidget):
 
     # ── public API ────────────────────────────────────────────────────────────
 
+    def clear_capture(self) -> None:
+        """Called when a new test starts — reset the image area."""
+        self._last_sensor_data = {}
+        self._last_obs_img     = None
+        self._last_sensor_img  = None
+        self._clear_display()
+
     def load_test_result(self, func_name: str, result: dict) -> None:
         """Replace the result panel contents with the latest test result."""
         self._clear_result_panel()
@@ -445,11 +452,16 @@ class ColCapture(QWidget):
             btn.setIconSize(Layout.ICON_SIZE_MD)
             btn.setStyleSheet(Styles.BUTTON_ICON)
 
-        # Override lock button to show checked state
-        self.btn_lock.setStyleSheet(Styles.BUTTON_ICON + f"""
+        _checked_style = (
+            Styles.BUTTON_ICON
+            + f"""
             QPushButton:checked {{
                 background-color: {Colors.ACCENT_DIM};
                 border: 1px solid {Colors.ACCENT};
                 border-radius: 4px;
             }}
-        """)
+        """
+        )
+        # Lock and view-toggle buttons all need the checked highlight
+        for btn in (self.btn_lock, self.btn_view_sensor, self.btn_view_observer):
+            btn.setStyleSheet(_checked_style)

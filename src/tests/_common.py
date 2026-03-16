@@ -409,52 +409,24 @@ def _camera_classify_sensor_profile(sensor_sdf_path: str) -> str:
     return str(_camera_load_sensor_profile(sensor_sdf_path).get("family", "mono"))
 
 
-from .dcam_tests import (  # noqa: E402
-    c3_view_angle_stability_test,
-    c5_working_range_test,
-    c6_small_displacement_sensitivity_test,
-    depth_perception_test,
-)
-from .generic_tests import (  # noqa: E402
-    camera_check,
-    camera_data_received,
-    camera_depth_accuracy,
-    camera_resolution,
-    sensor_capture_basic,
-)
-from .mcam_tests import (  # noqa: E402
-    c10_clipping_test,
-    c11_fps_stability_test,
-    c1_size_order_test,
-    c2_resolution_test,
-    c4_geometries_presence_test,
-    c7_occlusion_test,
-    c9_fov_test,
-)
-from .rfid_tests import (  # noqa: E402
-    rfid_angle_dependence,
-    rfid_antenna_rotation,
-    rfid_mass_read,
-    rfid_max_stable_read_distance,
-    rfid_min_stable_read_distance,
-    rfid_move_tags,
-    rfid_overlap_tags,
-)
-from .scam_tests import (  # noqa: E402
-    s1_stereo_accuracy_test,
-    s2_texture_vs_smooth_stability_test,
-    stereo_disparity_test,
-    stereo_occlusion_test,
-    stereo_topics_presence_test,
-)
-from .tactile_tests import (  # noqa: E402
-    tactile_min_force_threshold,
-    tactile_response_uniformity,
-)
+from .dcam_tests import *
+
+from .generic_tests import *
+
+from .mcam_tests import *
+
+from .rfid_tests import *
+
+from .scam_tests import *
+
+from .tactile_tests import *
 
 
 TESTS: dict[str, callable] = {
-    "sensor_capture_basic": sensor_capture_basic,
+    # Basic sensor test
+    "__basic__": sensor_capture_basic,
+    
+    # RFID tests
     "rfid_max_stable_read_distance": rfid_max_stable_read_distance,
     "rfid_min_stable_read_distance": rfid_min_stable_read_distance,
     "rfid_mass_read": rfid_mass_read,
@@ -462,26 +434,31 @@ TESTS: dict[str, callable] = {
     "rfid_angle_dependence": rfid_angle_dependence,
     "rfid_move_tags": rfid_move_tags,
     "rfid_antenna_rotation": rfid_antenna_rotation,
-    "camera_check": camera_check,
-    "camera_data_received": camera_data_received,
-    "camera_depth_accuracy": camera_depth_accuracy,
-    "camera_resolution": camera_resolution,
-    "c1_size_order_test": c1_size_order_test,
-    "c2_resolution_test": c2_resolution_test,
-    "c3_view_angle_stability_test": c3_view_angle_stability_test,
-    "c4_geometries_presence_test": c4_geometries_presence_test,
-    "c5_working_range_test": c5_working_range_test,
-    "c6_small_displacement_sensitivity_test": c6_small_displacement_sensitivity_test,
-    "c7_occlusion_test": c7_occlusion_test,
-    "c9_fov_test": c9_fov_test,
-    "c10_clipping_test": c10_clipping_test,
-    "c11_fps_stability_test": c11_fps_stability_test,
-    "depth_perception_test": depth_perception_test,
-    "stereo_topics_presence_test": stereo_topics_presence_test,
-    "stereo_disparity_test": stereo_disparity_test,
-    "stereo_occlusion_test": stereo_occlusion_test,
-    "s1_stereo_accuracy_test": s1_stereo_accuracy_test,
-    "s2_texture_vs_smooth_stability_test": s2_texture_vs_smooth_stability_test,
+    
+    # Mono camera tests (mcam_ prefix, no numbers)
+    "mcam_check": camera_check,
+    "mcam_size_order_test": c1_size_order_test,
+    "mcam_resolution_test": c2_resolution_test,
+    "mcam_view_angle_stability_test": c3_view_angle_stability_test,
+    "mcam_geometries_presence_test": c4_geometries_presence_test,
+    "mcam_working_range_test": c5_working_range_test,
+    "mcam_small_displacement_sensitivity_test": c6_small_displacement_sensitivity_test,
+    "mcam_occlusion_test": c7_occlusion_test,
+    "mcam_fov_test": c9_fov_test,
+    "mcam_clipping_test": c10_clipping_test,
+    "mcam_fps_stability_test": c11_fps_stability_test,
+    
+    # Depth camera tests (dcam_ prefix)
+    "dcam_depth_perception_test": depth_perception_test,
+    
+    # Stereo camera tests (scam_ prefix)
+    "scam_stereo_topics_presence_test": stereo_topics_presence_test,
+    "scam_stereo_disparity_test": stereo_disparity_test,
+    "scam_stereo_occlusion_test": stereo_occlusion_test,
+    "scam_1_stereo_accuracy_test": s1_stereo_accuracy_test,
+    "scam_2_texture_vs_smooth_stability_test": s2_texture_vs_smooth_stability_test,
+    
+    # Tactile tests
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,
 }

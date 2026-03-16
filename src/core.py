@@ -15,12 +15,40 @@ class Core:
         return sorted(REGISTRY.keys())
 
     def get_tests(self, sensor) -> Dict[str, Any]:
-        """Return {func_name: callable} for all tests registered for this sensor's type."""
-        from src.tests import get_tests_for_type
+        """Return {func_name: callable} for all tests registered for this sensor's type.
+
+        Imports are deferred and wrapped so that a missing function in the test
+        modules (e.g. deleted from code but still in DB) logs a warning instead
+        of crashing the whole application at startup.
+        """
+        import logging as _log
+        _logger = _log.getLogger(__name__)
+
         sensor_type = getattr(sensor, "sensor_type", None)
         if not sensor_type:
             return {}
-        return get_tests_for_type(sensor_type)
+
+        # Try every known location for get_tests_for_type
+        get_tests_for_type = None
+        for mod_path in ("src.tests.tests", "src.tests"):
+            try:
+                import importlib
+                mod = importlib.import_module(mod_path)
+                get_tests_for_type = getattr(mod, "get_tests_for_type", None)
+                if get_tests_for_type:
+                    break
+            except Exception as e:
+                _logger.warning("get_tests: import %s failed: %s", mod_path, e)
+
+        if get_tests_for_type is None:
+            _logger.error("get_tests: get_tests_for_type not found — tests unavailable")
+            return {}
+
+        try:
+            return get_tests_for_type(sensor_type)
+        except Exception as e:
+            _logger.error("get_tests_for_type(%r) failed: %s", sensor_type, e)
+            return {}
 
     def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
         return _detect(sdf_path)

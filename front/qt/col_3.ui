@@ -41,12 +41,6 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="btn_add_test">
-        <property name="toolTip"><string>Add new test</string></property>
-        <property name="text"><string/></property>
-       </widget>
-      </item>
-      <item>
        <widget class="QPushButton" name="btn_edit_tests">
         <property name="toolTip"><string>Edit tests</string></property>
         <property name="text"><string/></property>

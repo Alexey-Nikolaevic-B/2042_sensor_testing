@@ -69,7 +69,8 @@ if __name__ == "__main__":
         on_error = on_sim_error,
     )
 
-    # Separator in log at the start of each test
+    # Clear image and add separator in log at the start of each test
+    runner.test_started.connect(window.col_4.clear_capture)
     runner.test_started.connect(
         lambda func_name: window.col_4.append_separator(func_name)
     )

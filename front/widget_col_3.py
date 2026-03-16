@@ -344,7 +344,6 @@ class ColTests(QWidget):
 
         for btn, icon in [
             (self.btn_run_all,    Icons.RUN_ALL()),
-            (self.btn_add_test,   Icons.ADD()),
             (self.btn_edit_tests, Icons.EDIT()),
         ]:
             btn.setIcon(icon)
