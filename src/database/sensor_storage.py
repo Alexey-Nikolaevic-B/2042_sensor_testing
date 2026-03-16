@@ -508,6 +508,43 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
         )
 
 
+def delete_type_test(sensor_type: str, func_name: str) -> None:
+    """Remove a test from a sensor type and from all sensors of that type."""
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM SensorTypeTests WHERE sensor_type = ? AND func_name = ?",
+            (sensor_type, func_name),
+        )
+        # Also remove from individual sensor test results/meta
+        conn.execute(
+            """
+            DELETE FROM SensorTests
+            WHERE func_name = ?
+              AND sensor_id IN (SELECT id FROM Sensors WHERE sensor_type = ?)
+            """,
+            (func_name, sensor_type),
+        )
+
+
+def rename_sensor_type(old_name: str, new_name: str) -> None:
+    """Rename a sensor type key everywhere it appears in the DB."""
+    if old_name == new_name:
+        return
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE SensorTypes SET sensor_type = ? WHERE sensor_type = ?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE SensorTypeTests SET sensor_type = ? WHERE sensor_type = ?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE Sensors SET sensor_type = ? WHERE sensor_type = ?",
+            (new_name, old_name),
+        )
+
+
 def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
     """Copy SensorTests entries for sensor_type into SensorTests for sensor_id.
     Only inserts rows that don't already exist — never overwrites existing meta."""
@@ -520,6 +557,27 @@ def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
                 VALUES (?, ?, ?, ?, ?)
                 """,
                 (int(sensor_id), t["func_name"], t["display_name"], t["description"], t["image_path"]),
+            )
+
+
+def sync_type_tests_to_sensor_by_type(sensor_type: str, func_name: str) -> None:
+    """Push a single type-level test to all sensors of that type.
+    Uses INSERT OR IGNORE so existing sensor test rows are never overwritten."""
+    type_tests = {t["func_name"]: t for t in get_type_tests(sensor_type)}
+    t = type_tests.get(func_name)
+    if not t:
+        return
+    sensors = get_sensors_by_type(sensor_type)
+    with _connect() as conn:
+        for s in sensors:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO SensorTests
+                    (sensor_id, func_name, display_name, description, image_path)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(s["id"]), t["func_name"], t["display_name"],
+                 t["description"], t["image_path"]),
             )
 
 
@@ -644,3 +702,58 @@ def _sensor_type_row(row) -> dict:
         "params":      _j(row["params"], []),
         "detection":   _j(row["detection"], {}),
     }
+
+# ── AppConfig table ───────────────────────────────────────────────────────────
+# Generic key-value store for application settings.
+
+_SCHEMA_APP_CONFIG = """
+CREATE TABLE IF NOT EXISTS AppConfig (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+"""
+
+
+def _ensure_app_config(conn) -> None:
+    conn.executescript(_SCHEMA_APP_CONFIG)
+
+
+def get_config(key: str, default: str = "") -> str:
+    """Return a config value by key, or default if not set."""
+    init_db()
+    with _connect() as conn:
+        _ensure_app_config(conn)
+        row = conn.execute(
+            "SELECT value FROM AppConfig WHERE key = ?", (key,)
+        ).fetchone()
+    return row["value"] if row else default
+
+
+def set_config(key: str, value: str) -> None:
+    """Upsert a config value."""
+    init_db()
+    with _connect() as conn:
+        _ensure_app_config(conn)
+        conn.execute(
+            """
+            INSERT INTO AppConfig (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+
+def get_config_json(key: str, default=None):
+    """Return a config value parsed as JSON."""
+    raw = get_config(key, "")
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def set_config_json(key: str, value) -> None:
+    """Store a value as JSON."""
+    set_config(key, json.dumps(value))

@@ -222,6 +222,7 @@ class Main_UI(QMainWindow):
         self.col_1.sensor_selected.connect(self._on_sensor_selected)
         self.col_1.add_requested.connect(self._on_add_sensor)
         self.col_1.delete_requested.connect(self._on_delete_sensor)
+        self.col_1.type_updated.connect(self._on_type_updated)
 
         self.col_2.sensor_updated.connect(self._on_sensor_edited)
 
@@ -239,6 +240,20 @@ class Main_UI(QMainWindow):
         repo.sensor_updated.connect(lambda _: self._reload_sensors())
         repo.test_updated.connect(self._on_test_updated)
 
+
+    def _on_type_updated(self, sensor_type: str) -> None:
+        """Refresh col_3 when a type's tests change.
+        Must reload from DB first — repo holds stale in-memory data."""
+        from .logic_sensor_repository import SensorRepository
+        repo = SensorRepository.instance()
+        sensor_id = self.col_1.selected_sensor_id()
+        if not sensor_id:
+            return
+        # Force repo to re-read this sensor's tests from DB
+        repo._reload_sensor_from_db(sensor_id)
+        sensor = repo.get_sensor(sensor_id)
+        if sensor and sensor.get("type") == sensor_type:
+            self.col_3.load_sensor(sensor)
 
     def _on_sensor_selected(self, sensor_id: str):
         repo = SensorRepository.instance()

@@ -75,6 +75,22 @@ class AddSensorDialog(QDialog):
         if os.path.abspath(self._sdf_source) != os.path.abspath(sdf_dest):
             shutil.copy2(self._sdf_source, sdf_dest)
 
+        # Write any edited params back into the SDF file
+        if self._params:
+            try:
+                from src.sensors.sensor import Sensor as _SensorModel
+                _inst = _SensorModel(
+                    sensor_type = self._detected_type or "",
+                    sensor_name = name,
+                    sdf_path    = sdf_dest,
+                )
+                _inst.write_params_to_sdf(self._params)
+            except Exception as _e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "dialog_add_sensor: could not write params to SDF: %s", _e
+                )
+
         image_dest = self._sensor_data.get("image_path", "")
         if self._image_source:
             ext = os.path.splitext(self._image_source)[1].lower() or ".png"

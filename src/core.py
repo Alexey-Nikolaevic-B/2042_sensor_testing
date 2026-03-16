@@ -38,7 +38,12 @@ class Core:
         if not type_def:
             return {}
 
-        param_defs = [p for p in type_def.get("params", []) if p.get("name")]
+        param_defs = []
+        for p in type_def.get("params", []):
+            if isinstance(p, dict) and p.get("name"):
+                param_defs.append(p)
+            elif isinstance(p, str) and p:
+                param_defs.append(p)
         if not param_defs:
             return {}
 

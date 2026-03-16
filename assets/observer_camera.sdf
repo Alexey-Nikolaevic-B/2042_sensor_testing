@@ -6,7 +6,7 @@
     <link name="observer_link">
       <sensor name="observer_cam" type="camera">
         <always_on>1</always_on>
-        <update_rate>10</update_rate>
+        <update_rate>31</update_rate>
         <camera>
           <horizontal_fov>1.3962634</horizontal_fov>
           <image>
@@ -24,7 +24,7 @@
           <cameraName>observer</cameraName>
           <ros>
             <namespace>/observer</namespace>
-            <argument>image_raw:=image_raw</argument>
+            <argument>camera_info:=camera_info</argument>
             <argument>camera_info:=camera_info</argument>
           </ros>
           <frame_name>observer_frame</frame_name>

@@ -2,47 +2,11 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
     QSizePolicy, QMenu, QAction, QPushButton,
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QObject, QEvent
+from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR, LightColors as LC, LightStyles as LS
-
-
-def _install_drag_hint(toolbar: QWidget, side: str = "right", thickness: int = 2) -> None:
-    from PyQt5.QtWidgets import QFrame as _QFrame
-
-    normal_color = Colors.SPLITTER
-    hover_color  = Colors.ACCENT
-
-    class _Strip(_QFrame):
-        def _reposition(self):
-            h = self.parent().height()
-            if side == "right":
-                self.setGeometry(self.parent().width() - thickness, 0, thickness, h)
-            else:
-                self.setGeometry(0, 0, thickness, h)
-
-        def enterEvent(self, _event):
-            self.setStyleSheet(f"background: {hover_color}; border: none;")
-
-        def leaveEvent(self, _event):
-            self.setStyleSheet(f"background: {normal_color}; border: none;")
-
-    strip = _Strip(toolbar)
-    strip.setStyleSheet(f"background: {normal_color}; border: none;")
-    strip.setCursor(Qt.SizeHorCursor)
-    strip.raise_()
-    strip._reposition()
-
-    class _ResizeFilter(QObject):
-        def eventFilter(self, obj, event):
-            if event.type() == QEvent.Resize:
-                strip._reposition()
-            return False
-
-    _f = _ResizeFilter(toolbar)
-    toolbar.installEventFilter(_f)
 
 
 # ── Sensor type cell ──────────────────────────────────────────────────────────
@@ -238,6 +202,7 @@ class ColSensors(QWidget):
     add_type_requested    = pyqtSignal()
     edit_type_requested   = pyqtSignal(str)
     delete_type_requested = pyqtSignal(str)
+    type_updated          = pyqtSignal(str)   # sensor_type name after save
 
     BUILTIN_TYPES: set = set()
 
@@ -257,7 +222,6 @@ class ColSensors(QWidget):
         self._setup_heights()
         self._setup_styles()
         self._connect_signals()
-        _install_drag_hint(self.wt_toolbar)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -354,10 +318,14 @@ class ColSensors(QWidget):
         dlg.type_saved.connect(self._on_type_saved)
         dlg.exec_()
 
+    def selected_sensor_id(self) -> str | None:
+        return self._selected_id
+
     def _on_type_saved(self, definition: dict):
         try:
             import src.database.sensor_storage as db
             self.load_types(db.get_sensor_type_names())
+            self.type_updated.emit(definition.get("name", ""))
         except Exception as exc:
             import traceback
             print(f"[ColSensors] _on_type_saved error: {exc}\n{traceback.format_exc()}")

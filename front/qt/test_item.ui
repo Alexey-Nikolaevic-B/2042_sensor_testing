@@ -2,8 +2,8 @@
 <ui version="4.0">
  <class>TestItem</class>
  <widget class="QWidget" name="TestItem">
-  <property name="minimumHeight"><number>64</number></property>
-  <property name="maximumHeight"><number>64</number></property>
+  <property name="minimumHeight"><number>50</number></property>
+  <property name="maximumHeight"><number>50</number></property>
   <layout class="QHBoxLayout" name="item_layout">
    <property name="spacing"><number>6</number></property>
    <property name="leftMargin"><number>0</number></property>

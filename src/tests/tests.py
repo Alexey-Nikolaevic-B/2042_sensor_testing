@@ -1060,7 +1060,7 @@ def _save_raw(msg, hint: str, save_dir: str) -> str:
     return path
 
 
-def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
+def _basic_(simulator, sensor, progress_cb=None) -> dict:
     import os
     import time
     import rospy
@@ -1301,7 +1301,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
 TESTS: dict[str, callable] = {
     # Generic (assign to any sensor type)
-    "sensor_capture_basic":          sensor_capture_basic,
+    "_basic_":                       _basic_,
     # RFID
     "rfid_max_stable_read_distance": rfid_max_stable_read_distance,
     "rfid_min_stable_read_distance": rfid_min_stable_read_distance,

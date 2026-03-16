@@ -247,7 +247,7 @@ class Simulator():
         else:
             level = 'info'
         if self.on_log:
-            self.on_log(level, f"[Gazebo] {line}")
+            self.on_log(level, line)
 
 
     def _generate_world(self, world_path, camera_model_path):

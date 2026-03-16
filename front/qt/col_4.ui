@@ -2,7 +2,7 @@
 <ui version="4.0">
  <class>ColCapture</class>
  <widget class="QWidget" name="ColCapture">
-  <property name="minimumWidth"><number>197</number></property>
+  <property name="minimumWidth"><number>220</number></property>
   <layout class="QVBoxLayout" name="layout_root">
    <property name="spacing"><number>0</number></property>
    <property name="leftMargin"><number>0</number></property>
@@ -21,7 +21,7 @@
       <property name="alignment"><set>Qt::AlignCenter</set></property>
       <property name="text"><string>no capture data</string></property>
       <property name="wordWrap"><bool>true</bool></property>
-      <property name="minimumHeight"><number>197</number></property>
+      <property name="minimumHeight"><number>80</number></property>
      </widget>
 
      <!-- Lower pane: toolbar + results/log splitter -->
@@ -110,7 +110,7 @@
           <property name="widgetResizable"><bool>true</bool></property>
           <widget class="QWidget" name="scroll_test_result_contents">
            <property name="geometry">
-            <rect><x>0</x><y>0</y><width>200</width><height>150</height></rect>
+            <rect><x>0</x><y>0</y><width>220</width><height>150</height></rect>
            </property>
            <layout class="QVBoxLayout" name="test_result_layout">
             <property name="spacing"><number>0</number></property>

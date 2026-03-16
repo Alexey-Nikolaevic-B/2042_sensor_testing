@@ -16,11 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class _ParamRow(QWidget):
-    """One param entry. The single field accepts:
-      - "width"              → tag only
-      - "camera/width"       → parent/tag
-      - "camera/lens/width"  → grandparent/parent/tag (arbitrary depth)
-    """
+    """Single field: accepts "width", "camera/width", or "camera/lens/width"."""
     remove_requested = pyqtSignal(object)
 
     def __init__(self, value: str = "", parent=None):
@@ -47,7 +43,6 @@ class _ParamRow(QWidget):
         h.addWidget(btn)
 
     def data(self) -> dict:
-        """Returns {"path": "camera/lens", "name": "width"} or {"name": "width"}."""
         text = self.inp.text().strip()
         if "/" in text:
             parts = text.rsplit("/", 1)
@@ -472,7 +467,7 @@ class AddSensorTypeDialog(QDialog):
                     f"color: {LC.TEXT_SEC}; font-size: 11px; background: transparent;"
                 )
 
-        for name in ("inp_name", "inp_test_search", "inp_detector_search"):
+        for name in ("inp_name", "inp_plugin", "inp_test_search", "inp_detector_search"):
             w = getattr(self, name, None)
             if w:
                 w.setStyleSheet(LS.INPUT)
@@ -516,7 +511,7 @@ class AddSensorTypeDialog(QDialog):
         self.btn_save.setStyleSheet(LS.BUTTON_PRIMARY)
         self.btn_cancel.setStyleSheet(LS.BUTTON_CANCEL)
 
-        self.btn_add_param.setStyleSheet(f"""
+        _dashed_btn_style = f"""
             QPushButton {{
                 background: transparent;
                 color: {LC.ACCENT};
@@ -525,18 +520,9 @@ class AddSensorTypeDialog(QDialog):
                 padding: 5px 12px; font-size: 12px; text-align: left;
             }}
             QPushButton:hover {{ background: {LC.ACCENT_DIM}; border-color: {LC.ACCENT}; }}
-        """)
-
-        self.btn_add_plugin.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {LC.ACCENT};
-                border: 1px dashed {LC.BORDER};
-                border-radius: 4px;
-                padding: 4px 12px; font-size: 12px; text-align: left;
-            }}
-            QPushButton:hover {{ background: {LC.ACCENT_DIM}; border-color: {LC.ACCENT}; }}
-        """)
+        """
+        self.btn_add_param.setStyleSheet(_dashed_btn_style)
+        self.btn_add_plugin.setStyleSheet(_dashed_btn_style)
 
         for btn in (self.btn_add_selected_tests,):
             btn.setStyleSheet(LS.BUTTON_DEFAULT)
@@ -573,9 +559,9 @@ class AddSensorTypeDialog(QDialog):
             self.inp_name.setText(d["name"])
         for p in d.get("params", []):
             if isinstance(p, dict):
-                path = p.get("path", "")
-                name = p.get("name", "")
-                self._add_param_row(f"{path}/{name}" if path else name)
+                path_str = p.get("path", "")
+                name_str = p.get("name", "")
+                self._add_param_row(f"{path_str}/{name_str}" if path_str else name_str)
             else:
                 self._add_param_row(str(p))
         det = d.get("detection", {})
@@ -587,7 +573,6 @@ class AddSensorTypeDialog(QDialog):
                 lbl.setText(fn)
         else:
             self._set_mode("simple")
-            # support both old single plugin and new list
             plugins = det.get("plugins") or (
                 [det["plugin"]] if det.get("plugin") else []
             )
@@ -770,18 +755,38 @@ class AddSensorTypeDialog(QDialog):
 
     def _persist(self, d: dict):
         import src.database.sensor_storage as db
-        sensor_type = d["name"]
+
+        new_name = d["name"]
+        old_name = self._prefill.get("name", new_name) if self._prefill else new_name
+
+        # Rename if type name changed
+        if old_name and old_name != new_name:
+            db.rename_sensor_type(old_name, new_name)
+
+        # Upsert type definition
         db.upsert_sensor_type(
-            sensor_type = sensor_type,
-            description = "",  # Empty string since we removed description
+            sensor_type = new_name,
+            description = "",
             params      = d["params"],
             detection   = d["detection"],
         )
+
+        # Delete tests removed from the dialog, upsert kept/new ones
+        new_func_names = {t["func_name"] for t in d["tests"]}
+        existing = {t["func_name"] for t in db.get_type_tests(new_name)}
+
+        for removed in existing - new_func_names:
+            db.delete_type_test(new_name, removed)
+
+        added = new_func_names - existing
         for t in d["tests"]:
             db.upsert_type_test(
-                sensor_type  = sensor_type,
+                sensor_type  = new_name,
                 func_name    = t["func_name"],
                 display_name = t["func_name"],
                 description  = "",
                 world_path   = "",
             )
+            # Push newly added tests down to all existing sensors of this type
+            if t["func_name"] in added:
+                db.sync_type_tests_to_sensor_by_type(new_name, t["func_name"])
