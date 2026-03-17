@@ -80,20 +80,16 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
             result["duration"] = round(time.time() - t0, 2)
             return result
 
-    logger.debug("Waiting 3 seconds for plugins to initialize...")
-    time.sleep(3)
-
-    logger.debug("Getting published topics...")
-    topics = rospy.get_published_topics()
-    logger.debug("Found %d topics total", len(topics))
-
-    logger.debug("Available topics:")
-    for t, t_type in topics[:15]:
-        if not t.startswith('/rosout'):
-            logger.debug("        %s -> %s", t, t_type)
-
-    topic_exists = any(t == sensor.topic for t, _ in topics)
-    logger.debug("Topic '%s' exists: %s", sensor.topic, topic_exists)
+    logger.debug("Waiting for topic %s (up to 15s)...", sensor.topic)
+    topic_deadline = time.time() + 15.0
+    topic_exists = False
+    topics = []
+    while time.time() < topic_deadline:
+        topics = rospy.get_published_topics()
+        if any(t == sensor.topic for t, _ in topics):
+            topic_exists = True
+            break
+        time.sleep(1.0)
 
     if not topic_exists:
         result["error"] = f"Topic {sensor.topic} not found"
@@ -170,44 +166,53 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
             result["duration"] = round(time.time() - t0, 2)
             return result
 
-    logger.info("Capturing from %s ...", sensor.topic)
+    logger.info("Waiting for message on %s (timeout=10s)...", sensor.topic)
     try:
-        msgs = sensor.capture_data(msg_class, topic=sensor.topic,
-                                   window=3.0, timeout=1.0, simulator=simulator)
-        if not msgs:
-            result["error"] = "No messages received within capture window"
-            logger.error("No messages received on %s", sensor.topic)
-        else:
-            msg = msgs[-1]
-            logger.info("Captured %d message(s), type=%s", len(msgs), type(msg).__name__)
-            result["data_received"] = True
-            result["passed"] = True
-            result["frames_received"] = len(msgs)
+        msg = rospy.wait_for_message(sensor.topic, msg_class, timeout=10.0)
+        logger.info("Message received! Type: %s", type(msg).__name__)
+        result["data_received"] = True
+        result["passed"] = True
 
-            if hasattr(msg, "header"):
-                result["frame_id"] = msg.header.frame_id
-            if hasattr(msg, "states"):
-                result["contact_count"] = len(msg.states)
-                if msg.states:
-                    result["first_contact"] = {
-                        "collision1": msg.states[0].collision1_name,
-                        "collision2": msg.states[0].collision2_name,
-                    }
-            elif hasattr(msg, "height") and hasattr(msg, "data"):
-                result["width"]    = msg.width
-                result["height"]   = msg.height
-                result["encoding"] = msg.encoding
-            elif hasattr(msg, "ranges"):
-                result["num_ranges"] = len(msg.ranges)
-                result["angle_min"]  = msg.angle_min
-                result["angle_max"]  = msg.angle_max
-            elif hasattr(msg, "angular_velocity"):
-                result["angular_velocity"]    = [msg.angular_velocity.x,    msg.angular_velocity.y,    msg.angular_velocity.z]
-                result["linear_acceleration"] = [msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z]
+        if hasattr(msg, 'header'):
+            result["timestamp"] = msg.header.stamp.to_sec() if msg.header.stamp else None
+            result["frame_id"] = msg.header.frame_id
+            logger.debug("Header: frame=%s, stamp=%s", msg.header.frame_id, msg.header.stamp)
 
+        if hasattr(msg, 'states'):
+            result["contact_count"] = len(msg.states)
+            logger.debug("Contact count: %d", len(msg.states))
+            if msg.states:
+                result["first_contact"] = {
+                    "collision1": msg.states[0].collision1_name,
+                    "collision2": msg.states[0].collision2_name
+                }
+                logger.debug("First contact: %s -> %s", 
+                           msg.states[0].collision1_name, 
+                           msg.states[0].collision2_name)
+        elif hasattr(msg, 'data') and hasattr(msg, 'height'):
+            result["width"] = msg.width
+            result["height"] = msg.height
+            result["encoding"] = msg.encoding
+            logger.debug("Image: %dx%d, encoding=%s", msg.width, msg.height, msg.encoding)
+            logger.debug("Data length: %d bytes", len(msg.data))
+        elif hasattr(msg, 'ranges'):
+            result["num_ranges"] = len(msg.ranges)
+            result["angle_min"] = msg.angle_min
+            result["angle_max"] = msg.angle_max
+            logger.debug("Laser scan: %d ranges", len(msg.ranges))
+        elif hasattr(msg, 'angular_velocity'):
+            result["angular_velocity"] = [msg.angular_velocity.x, msg.angular_velocity.y, msg.angular_velocity.z]
+            result["linear_acceleration"] = [msg.linear_acceleration.x, msg.linear_acceleration.y, msg.linear_acceleration.z]
+            logger.debug("IMU data received")
+
+    except rospy.ROSException as e:
+        result["error"] = "Timeout: No message received within 10s"
+        logger.error("Timeout: No message received on %s", sensor.topic)
     except Exception as e:
         result["error"] = str(e)
-        logger.error("Capture error on %s: %s", sensor.topic, e)
+        logger.error("Exception: %s", e)
+        import traceback
+        traceback.print_exc()
 
     if progress_cb:
         try:
@@ -223,6 +228,17 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
         logger.debug("Error: %s", result['error'])
     logger.info("=" * 60)
     logger.info("")  # Empty line for spacing
+
+    if simulator:
+        try:
+            simulator.notify_capture({
+                "sensor_type": result["sensor_type"],
+                "sensor_name": result["sensor_name"],
+                "topic": sensor.topic,
+                "success": result["passed"]
+            }, None)
+        except:
+            pass
 
     return result
 
@@ -352,17 +368,15 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
         logger.error("Topic %s not published", primary_topic)
         return result
 
-    logger.info("Capturing image from %s ...", primary_topic)
-    msgs = sensor.capture_data(Image, topic=primary_topic,
-                               window=5.0, timeout=1.0, warmup=0.0,
-                               simulator=simulator)
-    if not msgs:
-        result["error"] = f"No image received on {primary_topic}"
+    logger.info("Waiting for image on %s (timeout=10s)...", primary_topic)
+    try:
+        msg = rospy.wait_for_message(primary_topic, Image, timeout=10.0)
+        logger.info("Image received! %dx%d, encoding=%s", msg.width, msg.height, msg.encoding)
+    except Exception as e:
+        result["error"] = f"Timeout waiting for Image on {primary_topic}: {e}"
         result["duration"] = round(time.time() - t0, 2)
-        logger.error("No image received on %s", primary_topic)
+        logger.error("Failed to receive image: %s", e)
         return result
-    msg = msgs[-1]
-    logger.info("Image captured: %dx%d, encoding=%s", msg.width, msg.height, msg.encoding)
 
     if progress_cb:
         try:

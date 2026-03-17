@@ -61,6 +61,23 @@ class ColTests(QWidget):
 
         self._reset_detail_panel()
         self._populate_tests(fresh.get("tests", []))
+        self._restore_queue_state()
+
+    def _restore_queue_state(self):
+        """Re-apply running/queued status to widgets after a sensor reload."""
+        if not self._qm or not self._sensor_id:
+            return
+        running = self._qm.get_running()
+        if running:
+            r_sid, r_func = running
+            if r_sid == self._sensor_id:
+                w = self._widgets.get(r_func)
+                if w:
+                    w.set_status(TestStatus.RUNNING)
+        for func_name, status in self._qm.get_queued_for_sensor(self._sensor_id).items():
+            w = self._widgets.get(func_name)
+            if w:
+                w.set_status(status)
 
     def clear(self):
         self._sensor_data = None

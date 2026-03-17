@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class _ParamRow(QWidget):
-    """Single field: accepts "width", "camera/width", or "camera/lens/width"."""
     remove_requested = pyqtSignal(object)
 
     def __init__(self, value: str = "", parent=None):
@@ -27,7 +26,7 @@ class _ParamRow(QWidget):
         h.setSpacing(6)
 
         self.inp = QLineEdit()
-        self.inp.setPlaceholderText("e.g. width  or  camera/width  or  camera/lens/width")
+        self.inp.setPlaceholderText("xml tag name  e.g. rzero")
         self.inp.setStyleSheet(LS.INPUT)
         if value:
             self.inp.setText(value)
@@ -43,11 +42,7 @@ class _ParamRow(QWidget):
         h.addWidget(btn)
 
     def data(self) -> dict:
-        text = self.inp.text().strip()
-        if "/" in text:
-            parts = text.rsplit("/", 1)
-            return {"path": parts[0], "name": parts[1]}
-        return {"name": text}
+        return {"name": self.inp.text().strip()}
 
 
 class _TestRow(QWidget):
@@ -98,37 +93,6 @@ def _lay_insert(layout, widget):
 def _lay_remove(layout, widget):
     """Remove widget; keep trailing stretch intact."""
     layout.removeWidget(widget)
-
-
-class _PluginRow(QWidget):
-    """One plugin filename entry in the detection section."""
-    remove_requested = pyqtSignal(object)
-
-    def __init__(self, value: str = "", parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(34)
-        h = QHBoxLayout(self)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(6)
-
-        self.inp = QLineEdit()
-        self.inp.setPlaceholderText("e.g. libgazebo_ros_camera.so")
-        self.inp.setStyleSheet(LS.INPUT)
-        if value:
-            self.inp.setText(value)
-
-        btn = QPushButton()
-        btn.setFixedSize(24, 24)
-        btn.setIcon(Icons.CLEAR())
-        btn.setIconSize(Layout.ICON_SIZE_SM)
-        btn.setStyleSheet(LS.BUTTON_ICON)
-        btn.clicked.connect(lambda: self.remove_requested.emit(self))
-
-        h.addWidget(self.inp)
-        h.addWidget(btn)
-
-    def value(self) -> str:
-        return self.inp.text().strip()
 
 
 _EDGE = 6
@@ -255,6 +219,34 @@ class _WinFilter(QObject):
         self._win.resize(w, h)
 
 
+
+class _PluginRow(QWidget):
+    """One plugin .so filename entry."""
+    remove_requested = pyqtSignal(object)
+
+    def __init__(self, value: str = "", parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(34)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 2, 0, 2)
+        h.setSpacing(6)
+        self.inp = QLineEdit()
+        self.inp.setPlaceholderText("e.g. libgazebo_ros_camera.so")
+        self.inp.setStyleSheet(LS.INPUT)
+        if value:
+            self.inp.setText(value)
+        btn = QPushButton()
+        btn.setFixedSize(24, 24)
+        btn.setIcon(Icons.CLEAR())
+        btn.setIconSize(Layout.ICON_SIZE_SM)
+        btn.setStyleSheet(LS.BUTTON_ICON)
+        btn.clicked.connect(lambda: self.remove_requested.emit(self))
+        h.addWidget(self.inp)
+        h.addWidget(btn)
+
+    def value(self) -> str:
+        return self.inp.text().strip()
+
 class AddSensorTypeDialog(QDialog):
     type_saved = pyqtSignal(dict)
 
@@ -325,15 +317,13 @@ class AddSensorTypeDialog(QDialog):
 
             /* ── scroll areas & their viewports ── */
             QScrollArea#scroll_params,
-            QScrollArea#scroll_tests,
-            QScrollArea#scroll_plugins {{
+            QScrollArea#scroll_tests {{
                 border: 1px solid {LC.BORDER};
                 border-radius: 4px;
                 background: {LC.BG};
             }}
             QWidget#scroll_params_contents,
-            QWidget#scroll_tests_contents,
-            QWidget#scroll_plugins_contents {{
+            QWidget#scroll_tests_contents {{
                 background: {LC.BG};
             }}
 
@@ -440,7 +430,7 @@ class AddSensorTypeDialog(QDialog):
 
         # File path hints
         tests_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "src", "tests", "_common.py")
+            os.path.join(os.path.dirname(__file__), "..", "src", "tests", "tests.py")
         )
         lbl_f = getattr(self, "lbl_tests_file", None)
         if lbl_f:
@@ -467,7 +457,7 @@ class AddSensorTypeDialog(QDialog):
                     f"color: {LC.TEXT_SEC}; font-size: 11px; background: transparent;"
                 )
 
-        for name in ("inp_name", "inp_plugin", "inp_test_search", "inp_detector_search"):
+        for name in ("inp_name", "inp_test_search", "inp_detector_search"):
             w = getattr(self, name, None)
             if w:
                 w.setStyleSheet(LS.INPUT)
@@ -511,7 +501,7 @@ class AddSensorTypeDialog(QDialog):
         self.btn_save.setStyleSheet(LS.BUTTON_PRIMARY)
         self.btn_cancel.setStyleSheet(LS.BUTTON_CANCEL)
 
-        _dashed_btn_style = f"""
+        _dashed = f"""
             QPushButton {{
                 background: transparent;
                 color: {LC.ACCENT};
@@ -521,8 +511,8 @@ class AddSensorTypeDialog(QDialog):
             }}
             QPushButton:hover {{ background: {LC.ACCENT_DIM}; border-color: {LC.ACCENT}; }}
         """
-        self.btn_add_param.setStyleSheet(_dashed_btn_style)
-        self.btn_add_plugin.setStyleSheet(_dashed_btn_style)
+        self.btn_add_param.setStyleSheet(_dashed)
+        self.btn_add_plugin.setStyleSheet(_dashed)
 
         for btn in (self.btn_add_selected_tests,):
             btn.setStyleSheet(LS.BUTTON_DEFAULT)
@@ -547,7 +537,7 @@ class AddSensorTypeDialog(QDialog):
             return
         lw.clear()
         try:
-            from detector import get_custom_detector_names
+            from src.sensors.detector import get_custom_detector_names
             for name in get_custom_detector_names():
                 lw.addItem(QListWidgetItem(name))
         except Exception as e:
@@ -558,24 +548,18 @@ class AddSensorTypeDialog(QDialog):
         if d.get("name"):
             self.inp_name.setText(d["name"])
         for p in d.get("params", []):
-            if isinstance(p, dict):
-                path_str = p.get("path", "")
-                name_str = p.get("name", "")
-                self._add_param_row(f"{path_str}/{name_str}" if path_str else name_str)
-            else:
-                self._add_param_row(str(p))
+            self._add_param_row(value=p.get("name", ""))
         det = d.get("detection", {})
         if det.get("mode") == "custom":
             self._set_mode("custom")
+            # show currently selected detector fn name
             fn = det.get("detector_fn", "")
             lbl = getattr(self, "lbl_selected_detector", None)
             if lbl and fn:
                 lbl.setText(fn)
         else:
             self._set_mode("simple")
-            plugins = det.get("plugins") or (
-                [det["plugin"]] if det.get("plugin") else []
-            )
+            plugins = det.get("plugins") or ([det["plugin"]] if det.get("plugin") else [])
             for p in plugins:
                 self._add_plugin_row(p)
         for t in d.get("tests", []):
@@ -676,8 +660,6 @@ class AddSensorTypeDialog(QDialog):
         _lay_remove(self.scroll_params_contents.layout(), row)
         row.deleteLater()
 
-    # ── plugin rows ───────────────────────────────────────────────────────────
-
     def _add_plugin_row(self, value: str = ""):
         row = _PluginRow(value=value, parent=self)
         row.remove_requested.connect(self._remove_plugin_row)
@@ -755,38 +737,18 @@ class AddSensorTypeDialog(QDialog):
 
     def _persist(self, d: dict):
         import src.sensor_storage as db
-
-        new_name = d["name"]
-        old_name = self._prefill.get("name", new_name) if self._prefill else new_name
-
-        # Rename if type name changed
-        if old_name and old_name != new_name:
-            db.rename_sensor_type(old_name, new_name)
-
-        # Upsert type definition
+        sensor_type = d["name"]
         db.upsert_sensor_type(
-            sensor_type = new_name,
-            description = "",
+            sensor_type = sensor_type,
+            description = "",  # Empty string since we removed description
             params      = d["params"],
             detection   = d["detection"],
         )
-
-        # Delete tests removed from the dialog, upsert kept/new ones
-        new_func_names = {t["func_name"] for t in d["tests"]}
-        existing = {t["func_name"] for t in db.get_type_tests(new_name)}
-
-        for removed in existing - new_func_names:
-            db.delete_type_test(new_name, removed)
-
-        added = new_func_names - existing
         for t in d["tests"]:
             db.upsert_type_test(
-                sensor_type  = new_name,
+                sensor_type  = sensor_type,
                 func_name    = t["func_name"],
                 display_name = t["func_name"],
                 description  = "",
                 world_path   = "",
             )
-            # Push newly added tests down to all existing sensors of this type
-            if t["func_name"] in added:
-                db.sync_type_tests_to_sensor_by_type(new_name, t["func_name"])
