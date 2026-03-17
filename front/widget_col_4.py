@@ -171,45 +171,80 @@ class ColCapture(QWidget):
                 self._clear_display()
 
     def _render_sensor_image(self, data: dict) -> bytes | None:
-        """Convert raw ROS messages to JPEG bytes for display.
-        - Camera messages  → decode image directly
-        - Tactile messages → build force heatmap
-        - Others           → None (fall back to static image_path)
-        """
+        """Convert raw ROS messages to JPEG bytes for display."""
+        import logging as _log
+        _dbg = _log.getLogger(__name__)
+
         msgs = data.get("messages", [])
+        _dbg.warning("[col4] render: sensor_type=%s msgs=%d image_path=%r",
+                   data.get("sensor_type"), len(msgs), data.get("image_path"))
         if not msgs:
+            _dbg.warning("[col4] render: no messages — returning None")
             return None
-        msg = msgs[-1]  # use most recent
+        msg = msgs[-1]
+
+        _dbg.warning("[col4] render: msg type=%s attrs=%s",
+                   type(msg).__name__,
+                   [a for a in ("encoding","height","width","data","states")
+                    if hasattr(msg, a)])
 
         try:
             # ── Camera: sensor_msgs/Image ─────────────────────────────────
             if hasattr(msg, "encoding") and hasattr(msg, "height"):
                 import numpy as np, cv2
-                dtype = np.float32 if "32FC" in msg.encoding else np.uint8
-                arr   = np.frombuffer(msg.data, dtype=dtype).reshape(
-                    msg.height, msg.width, -1)
-                if arr.dtype != np.uint8:
-                    ch = arr[:, :, 0]
-                    fin = ch[np.isfinite(ch)]
-                    if len(fin) and fin.max() > fin.min():
-                        norm = ((ch - fin.min()) / (fin.max() - fin.min()) * 255
-                                ).clip(0, 255).astype(np.uint8)
+                enc = msg.encoding.upper()
+                _dbg.warning("[col4] render: camera enc=%s h=%s w=%s data_len=%s",
+                           enc, getattr(msg,"height","?"), getattr(msg,"width","?"),
+                           len(msg.data) if hasattr(msg,"data") else "?")
+                if "32FC" in enc:
+                    # Depth float32 — normalise to 0-255 and apply colormap
+                    arr = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
+                    fin = arr[np.isfinite(arr)]
+                    if fin.size and fin.max() > fin.min():
+                        norm = ((arr - fin.min()) / (fin.max() - fin.min()) * 255).clip(0, 255).astype(np.uint8)
                     else:
-                        norm = np.zeros_like(ch, dtype=np.uint8)
+                        norm = np.zeros((msg.height, msg.width), dtype=np.uint8)
                     bgr = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+                elif "16UC" in enc:
+                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+                    norm = (arr / 65535.0 * 255).astype(np.uint8)
+                    bgr = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
+                elif enc in ("MONO8", "8UC1"):
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
+                    bgr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
+                elif enc in ("MONO16",):
+                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+                    bgr = cv2.cvtColor((arr >> 8).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+                elif enc in ("RGB8",):
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+                    bgr = arr[:, :, ::-1].copy()
+                elif enc in ("BGR8",):
+                    bgr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+                elif enc in ("RGBA8",):
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+                    bgr = arr[:, :, 2::-1].copy()
+                elif enc in ("BGRA8",):
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+                    bgr = arr[:, :, :3].copy()
                 else:
-                    bgr = arr[:, :, ::-1].copy() if arr.shape[2] >= 3 else \
-                          cv2.cvtColor(arr[:, :, 0], cv2.COLOR_GRAY2BGR)
+                    # Unknown encoding — try generic reshape
+                    total = len(msg.data)
+                    channels = total // (msg.height * msg.width)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, channels)
+                    bgr = arr[:, :, :3][:, :, ::-1].copy() if channels >= 3 else                           cv2.cvtColor(arr[:, :, 0], cv2.COLOR_GRAY2BGR)
                 ok, buf = cv2.imencode(".jpg", bgr)
+                _dbg.warning("[col4] render: imencode ok=%s buf_len=%s", ok, len(buf) if ok else 0)
                 return bytes(buf) if ok else None
 
             # ── Tactile: gazebo_msgs/ContactsState → force heatmap ────────
+            _dbg.warning("[col4] render: not a camera msg — checking tactile")
             if hasattr(msg, "states"):
                 return self._render_tactile_heatmap(msgs)
 
         except Exception as e:
             import traceback
-            print(f"[col4] render_sensor_image failed: {e}\n{traceback.format_exc()}")
+            _dbg.error("[col4] render_sensor_image EXCEPTION: %s\n%s", e, traceback.format_exc())
+        _dbg.warning("[col4] render: fell through — returning None")
         return None
 
     def _render_tactile_heatmap(self, msgs: list) -> bytes | None:
