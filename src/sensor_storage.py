@@ -15,12 +15,19 @@ from datetime import datetime
 from typing import Optional
 
 def _get_db_path() -> str:
-    """DB path from CONFIG if available, otherwise fallback to local file."""
+    """DB path resolved relative to project root via CONFIG ROOT_PATH."""
     try:
         from config import CONFIG
-        return CONFIG.get("DB_PATH", "sensor_storage.db")
+        custom = CONFIG.get("DB_PATH", "")
+        if custom:
+            return custom
+        root = CONFIG.get("ROOT_PATH", "")
+        if root:
+            import os
+            return os.path.join(root, "sensor_storage.db")
     except Exception:
-        return "sensor_storage.db"
+        pass
+    return "sensor_storage.db"
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -62,7 +69,10 @@ def _connect() -> sqlite3.Connection:
 def _row_to_sensor_dict(row: sqlite3.Row) -> dict:
     params = {}
     try:
-        params = json.loads(row["params"] or "{}")
+        loaded = json.loads(row["params"] or "{}")
+        # Guard: if params were accidentally overwritten with a type-def list,
+        # reset to empty — col_2 and others expect {key: value}
+        params = loaded if isinstance(loaded, dict) else {}
     except (json.JSONDecodeError, TypeError):
         pass
 
@@ -128,9 +138,25 @@ def init_db() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
         _migrate(conn)
+        _ensure_sensor_types_table(conn)
 
 
 def _migrate(conn) -> None:
+    # Reset any params column that was accidentally set to a JSON list
+    try:
+        rows = conn.execute("SELECT id, params FROM Sensors").fetchall()
+        for row in rows:
+            try:
+                val = json.loads(row[1] or '{}')
+                if not isinstance(val, dict):
+                    conn.execute("UPDATE Sensors SET params = '{}' WHERE id = ?",
+                                 (row[0],))
+            except Exception:
+                conn.execute("UPDATE Sensors SET params = '{}' WHERE id = ?",
+                             (row[0],))
+    except Exception:
+        pass
+
     row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='SensorTests'"
     ).fetchone()
@@ -515,17 +541,25 @@ def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
 
 
 def delete_type_test(sensor_type: str, func_name: str) -> None:
-    """Remove a test from a sensor type and from all sensors of that type."""
+    """Remove a test from a sensor type and from all sensors of that type,
+    including all historical test results."""
     with _connect() as conn:
         conn.execute(
             "DELETE FROM SensorTypeTests WHERE sensor_type = ? AND func_name = ?",
             (sensor_type, func_name),
         )
-        # Also remove from individual sensor test results/meta
         conn.execute(
             """
             DELETE FROM SensorTests
             WHERE func_name = ?
+              AND sensor_id IN (SELECT id FROM Sensors WHERE sensor_type = ?)
+            """,
+            (func_name, sensor_type),
+        )
+        conn.execute(
+            """
+            DELETE FROM TestResults
+            WHERE test_name = ?
               AND sensor_id IN (SELECT id FROM Sensors WHERE sensor_type = ?)
             """,
             (func_name, sensor_type),

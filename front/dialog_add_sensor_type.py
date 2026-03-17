@@ -737,18 +737,36 @@ class AddSensorTypeDialog(QDialog):
 
     def _persist(self, d: dict):
         import src.sensor_storage as db
-        sensor_type = d["name"]
+
+        new_name = d["name"]
+        old_name = self._prefill.get("name", new_name) if self._prefill else new_name
+
+        # Rename if type name changed
+        if old_name and old_name != new_name:
+            db.rename_sensor_type(old_name, new_name)
+
         db.upsert_sensor_type(
-            sensor_type = sensor_type,
-            description = "",  # Empty string since we removed description
+            sensor_type = new_name,
+            description = "",
             params      = d["params"],
             detection   = d["detection"],
         )
+
+        # Sync tests: delete removed ones, upsert kept/new ones
+        new_func_names = {t["func_name"] for t in d["tests"]}
+        existing       = {t["func_name"] for t in db.get_type_tests(new_name)}
+
+        for removed in existing - new_func_names:
+            db.delete_type_test(new_name, removed)
+
+        added = new_func_names - existing
         for t in d["tests"]:
             db.upsert_type_test(
-                sensor_type  = sensor_type,
+                sensor_type  = new_name,
                 func_name    = t["func_name"],
                 display_name = t["func_name"],
                 description  = "",
                 world_path   = "",
             )
+            if t["func_name"] in added:
+                db.sync_type_tests_to_sensor_by_type(new_name, t["func_name"])
