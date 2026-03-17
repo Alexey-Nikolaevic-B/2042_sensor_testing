@@ -52,7 +52,7 @@ def _load_detector_modules() -> None:
     pkg_dir = os.path.dirname(__file__)
     for fname in os.listdir(pkg_dir):
         if fname.endswith('_detector.py'):
-            mod_name = f'src.sensors.{fname[:-3]}'
+            mod_name = f'src.{fname[:-3]}'
             try:
                 importlib.import_module(mod_name)
             except Exception as e:
@@ -69,7 +69,7 @@ def _load_sensor_modules() -> None:
     skip = {'__init__.py', 'sensor.py', 'detector.py'}
     for fname in os.listdir(pkg_dir):
         if fname.endswith('.py') and fname not in skip and not fname.endswith('_detector.py'):
-            mod_name = f'src.sensors.{fname[:-3]}'
+            mod_name = f'src.{fname[:-3]}'
             try:
                 importlib.import_module(mod_name)
             except Exception as e:
@@ -114,7 +114,7 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
 
 def _detect_from_db(content: str) -> Optional[str]:
     try:
-        import sensor_storage as db
+        import src.sensor_storage as db
         for t in db.get_all_sensor_types():
             det = t.get("detection", {})
             if det.get("mode") == "simple":

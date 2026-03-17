@@ -49,17 +49,15 @@ class _RoscoreWatcher(QThread):
 
 class Simulator():
     def __init__(self, CONFIG: dict = None):
-        self.ros_is_running    = False
-        self.node_is_running   = False
-        self.gazebo_is_running = False
         self.ros_process       = None
         self.gazebo_process    = None
-        self.on_log                = None   # set by __main__: col_4.append_log
-        self.on_capture            = None   # callback(sensor_data, obs_img) fired after each capture
-        self.on_waiting_for_step   = None   # callback() fired when blocked on wait_for_step
+        self.on_log                = None
+        self.on_capture            = None
+        self.on_waiting_for_step   = None
         self._step_mode            = False
-        self._step_gate            = None   # threading.Event
-        self._observer_topic   = "/observer/image_raw"
+        self._step_gate            = None
+        self._observer_topic       = "/observer/image_raw"
+        self._node_initialized     = False
 
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
@@ -67,6 +65,49 @@ class Simulator():
         self.TIMEOUT = CONFIG['MESSAGE_TIMEOUT']
         self.BASE_WORLD_PATH = CONFIG['BASE_WORLD_PATH']
         self.ROS_LOG_PATH = CONFIG['ROS_LOG_PATH']
+
+    # ── derived state properties ──────────────────────────────────────────────
+
+    @property
+    def ros_is_running(self) -> bool:
+        """True while roscore is accepting connections on its port.
+        Checking the process is unreliable because bash forks roscore
+        as a child, so the parent bash process exits immediately."""
+        import socket as _socket
+        try:
+            with _socket.create_connection(("localhost", 11311), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    @property
+    def node_is_running(self) -> bool:
+        """True after rospy.init_node has succeeded."""
+        return self._node_initialized
+
+    @property
+    def gazebo_is_running(self) -> bool:
+        """True while a gzserver process is running on this machine.
+        roslaunch forks gzserver as a child, so the roslaunch process
+        exiting does not mean Gazebo stopped."""
+        import subprocess as _sp
+        try:
+            r = _sp.run(["pgrep", "-x", "gzserver"],
+                        capture_output=True, timeout=1)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    # ── setters kept for kill() / compat — they are no-ops now ───────────────
+
+    @ros_is_running.setter
+    def ros_is_running(self, _): pass
+
+    @node_is_running.setter
+    def node_is_running(self, _): pass
+
+    @gazebo_is_running.setter
+    def gazebo_is_running(self, _): pass
 
     def launch_ros(self):
         self._kill_ros()
@@ -89,7 +130,6 @@ class Simulator():
                 stderr=subprocess.DEVNULL,
                 text=True
             )
-            self.ros_is_running = True
             logger.info('ROS core started')
         except Exception as e:
             logger.error(f'Failed to start ROS core: {str(e)}')
@@ -120,7 +160,7 @@ class Simulator():
             globals()["ModelStates"]        = ModelStates
 
             rospy.init_node('sensor_data_receiver', anonymous=True)
-            self.node_is_running = True
+            self._node_initialized = True
             logger.info('ROS node initialized successfully')
         except Exception as e:
             logger.error(f'Failed to initialize ROS node: {str(e)}')
@@ -200,8 +240,6 @@ class Simulator():
             if not self.wait_gazebo_quiet(30.0):
                 logger.error('open_scene: wait_gazebo_quiet timed out')
                 return False
-
-            self.gazebo_is_running = True
 
             if self.is_gazebo_running():
                 logger.info('open_scene: Gazebo started successfully')
@@ -307,7 +345,6 @@ class Simulator():
                     self.ros_process.kill()
                     self.ros_process.wait()
             self.ros_process = None
-            self.ros_is_running = False
             logger.info('ROS core stopped')
         except Exception as e:
             logger.error(f'Failed to stop ROS core: {str(e)}')
@@ -317,7 +354,7 @@ class Simulator():
             return
         try:
             rospy.signal_shutdown("Simulator shutdown")
-            self.node_is_running = False
+            self._node_initialized = False
             logger.info('ROS node shut down')
         except Exception as e:
             logger.error(f'Failed to shut down ROS node: {str(e)}')
@@ -431,7 +468,8 @@ class Simulator():
         try:
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
-            self.gazebo_is_running = False
+            if self.gazebo_process:
+                self.gazebo_process = None
             logger.info('Gazebo processes killed')
         except Exception as e:
             logger.error(f'Failed to kill Gazebo processes: {str(e)}')
@@ -442,9 +480,7 @@ class Simulator():
         self._kill_node()
         self._kill_ros()
 
-        self.ros_is_running = False
-        self.node_is_running = False
-        self.gazebo_is_running = False
+        self._node_initialized = False
 
 
     def wait_gazebo_quiet(self, timeout=30.0):

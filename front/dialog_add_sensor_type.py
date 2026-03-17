@@ -754,7 +754,7 @@ class AddSensorTypeDialog(QDialog):
         self.accept()
 
     def _persist(self, d: dict):
-        import sensor_storage as db
+        import src.sensor_storage as db
 
         new_name = d["name"]
         old_name = self._prefill.get("name", new_name) if self._prefill else new_name
