@@ -14,7 +14,13 @@ import json
 from datetime import datetime
 from typing import Optional
 
-DATABASE = "sensor_storage.db"
+def _get_db_path() -> str:
+    """DB path from CONFIG if available, otherwise fallback to local file."""
+    try:
+        from config import CONFIG
+        return CONFIG.get("DB_PATH", "sensor_storage.db")
+    except Exception:
+        return "sensor_storage.db"
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -47,7 +53,7 @@ CREATE TABLE IF NOT EXISTS TestResults (
 # ── Internal helpers (defined first so all functions below can use them) ──────
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(_get_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

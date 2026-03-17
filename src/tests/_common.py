@@ -33,7 +33,7 @@ class Worlds(str, Enum):
     path = f"{CONFIG['ROOT_PATH']}/assets/worlds"
 
     #BASIC
-    BASIC                 = f"{path}/basik.world"
+    BASIC                 = f"{path}/_basic_.world"
 
     # RFID
     RFID_CHANGE_DISTANCE  = f"{path}/rfid_change_distance.world"

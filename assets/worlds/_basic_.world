@@ -1,326 +1,67 @@
-<?xml version="1.0" ?>
+<?xml version="1.0" encoding="utf-8"?>
 <sdf version="1.6">
-  <world name="colorful_shapes">
-    
-    <!-- Global settings -->
+  <world name="basic_test">
+
+    <!-- Physics -->
     <physics type="ode">
-      <gravity>0 0 -9.81</gravity>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+      <real_time_update_rate>1000</real_time_update_rate>
     </physics>
-    
-    <!-- Ground plane with grid texture -->
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
-    
-    <!-- Sun light -->
-    <include>
-      <uri>model://sun</uri>
-    </include>
-    
-    <!-- Ambient light for better color visibility -->
-    <light type="directional" name="ambient_light">
+
+    <!-- Lighting -->
+    <light name="sun" type="directional">
+      <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
-      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <diffuse>1 1 1 1</diffuse>
       <specular>0.2 0.2 0.2 1</specular>
-      <direction>0 0 -1</direction>
-      <cast_shadows>false</cast_shadows>
+      <direction>-0.5 0.1 -0.9</direction>
     </light>
-    
-    <!-- Red Cube -->
-    <model name="red_cube">
-      <pose>0 0 0.5 0 0 0</pose>
+
+    <!-- Ground plane -->
+    <model name="ground_plane">
+      <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
           </geometry>
           <material>
-            <ambient>1 0 0 1</ambient>
-            <diffuse>1 0.2 0.2 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-            <emissive>0 0 0 0</emissive>
+            <ambient>0.4 0.4 0.4 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
           </material>
         </visual>
       </link>
     </model>
-    
-    <!-- Blue Cube -->
-    <model name="blue_cube">
-      <pose>2 0 0.5 0 0 0</pose>
+
+    <!-- A simple reference cube 1 m in front of sensor origin -->
+    <model name="reference_cube">
+      <static>true</static>
+      <pose>1 0 0.5 0 0 0</pose>
       <link name="link">
         <collision name="collision">
-          <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
-          </geometry>
+          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
           <material>
-            <ambient>0 0 1 1</ambient>
-            <diffuse>0.2 0.2 1 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
+            <ambient>0.8 0.2 0.2 1</ambient>
+            <diffuse>0.8 0.2 0.2 1</diffuse>
           </material>
         </visual>
       </link>
     </model>
-    
-    <!-- Green Cube -->
-    <model name="green_cube">
-      <pose>4 0 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>1 1 1</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0 1 0 1</ambient>
-            <diffuse>0.2 1 0.2 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Yellow Pyramid (using cone as pyramid approximation) -->
-    <model name="yellow_pyramid">
-      <pose>-2 1 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <cone>
-              <radius>0.5</radius>
-              <length>1</length>
-            </cone>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <cone>
-              <radius>0.5</radius>
-              <length>1</length>
-            </cone>
-          </geometry>
-          <material>
-            <ambient>1 1 0 1</ambient>
-            <diffuse>1 1 0.2 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Purple Pyramid -->
-    <model name="purple_pyramid">
-      <pose>-2 -1 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <cone>
-              <radius>0.5</radius>
-              <length>1</length>
-            </cone>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <cone>
-              <radius>0.5</radius>
-              <length>1</length>
-            </cone>
-          </geometry>
-          <material>
-            <ambient>0.5 0 0.5 1</ambient>
-            <diffuse>0.8 0.2 0.8 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Orange Sphere -->
-    <model name="orange_sphere">
-      <pose>0 2 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>1 0.5 0 1</ambient>
-            <diffuse>1 0.6 0.2 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Cyan Sphere -->
-    <model name="cyan_sphere">
-      <pose>0 4 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0 1 1 1</ambient>
-            <diffuse>0.2 1 1 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Pink Sphere -->
-    <model name="pink_sphere">
-      <pose>2 2 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.5</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>1 0.7 0.8 1</ambient>
-            <diffuse>1 0.8 0.9 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- White Pyramid (using mesh for proper pyramid shape) -->
-    <model name="white_pyramid">
-      <pose>4 -2 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <mesh>
-              <uri>file://media/models/unit_box.dae</uri>
-              <scale>1 1 1</scale>
-            </mesh>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <mesh>
-              <uri>file://media/models/unit_box.dae</uri>
-              <scale>1 1 1</scale>
-            </mesh>
-          </geometry>
-          <material>
-            <ambient>1 1 1 1</ambient>
-            <diffuse>0.9 0.9 0.9 1</diffuse>
-            <specular>0.5 0.5 0.5 1</specular>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <!-- Add some floating spheres for visual interest -->
-    <model name="floating_sphere_1">
-      <pose>1 1 2 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.3</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>1 0 0 0.7</ambient>
-            <diffuse>1 0.2 0.2 0.7</diffuse>
-            <transparency>0.3</transparency>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <model name="floating_sphere_2">
-      <pose>3 2 2.5 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.3</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0 0 1 0.7</ambient>
-            <diffuse>0.2 0.2 1 0.7</diffuse>
-            <transparency>0.3</transparency>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
-    <model name="floating_sphere_3">
-      <pose>-1 3 3 0 0 0</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.3</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0 1 0 0.7</ambient>
-            <diffuse>0.2 1 0.2 0.7</diffuse>
-            <transparency>0.3</transparency>
-          </material>
-        </visual>
-      </link>
-    </model>
-    
+
   </world>
 </sdf>

@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Optional
 
 from .gazebo_simulator import Simulator
-from .sensor import REGISTRY, Sensor
+from .sensor import Sensor
 from .detector import detect_sensor_type as _detect
 
 from config import CONFIG
@@ -12,7 +12,8 @@ class Core:
         self.simulator = Simulator(CONFIG)
 
     def get_sensor_types(self) -> List[str]:
-        return sorted(REGISTRY.keys())
+        import src.sensor_storage as db
+        return db.get_sensor_type_names()
 
     def get_tests(self, sensor) -> Dict[str, Any]:
         """Return {func_name: callable} for all tests registered for this sensor's type."""
@@ -68,15 +69,17 @@ class Core:
         if sensor_data is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
 
-        sensor_type = sensor_data.get("type")
-        sdf_path    = sensor_data.get("sdf_path")
+        sdf_path = sensor_data.get("sdf_path", "")
+        if not sdf_path:
+            raise ValueError(f"Sensor {sensor_id!r} has no sdf_path")
 
-        SensorClass = REGISTRY.get(sensor_type)
-        if SensorClass is None:
-            raise ValueError(f"No sensor class registered for type {sensor_type!r}")
-
-        instance = SensorClass(sdf_path)
-        instance.save_params_to_sdf(sdf_path, params)
+        # Use Sensor directly — REGISTRY is mostly empty since types come from DB
+        instance = Sensor(
+            sensor_type = sensor_data.get("type", ""),
+            sensor_name = sensor_data.get("name", ""),
+            sdf_path    = sdf_path,
+        )
+        instance.write_params_to_sdf(params)
         repo.update_sensor(sensor_id, {"params": params})
 
     def kill(self) -> None:

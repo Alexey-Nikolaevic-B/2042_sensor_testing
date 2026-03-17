@@ -58,6 +58,18 @@ class Simulator():
         self._step_gate            = None
         self._observer_topic       = "/observer/image_raw"
         self._node_initialized     = False
+        self._last_observer_frame: bytes | None = None  # cached last good frame
+        # ROS module references — populated by launch_node()
+        self._rospy              = None
+        self._SetModelState      = None
+        self._GetWorldProperties = None
+        self._Pose               = None
+        self._Point              = None
+        self._Quaternion         = None
+        self._Vector3            = None
+        self._Twist              = None
+        self._ModelState         = None
+        self._ModelStates        = None
 
         self.CATKIN_SETUP_DIR = CONFIG['CATKIN_SETUP_DIR']
         self.SENSOR_PKG = CONFIG['SENSOR_PKG']
@@ -87,16 +99,32 @@ class Simulator():
 
     @property
     def gazebo_is_running(self) -> bool:
-        """True while a gzserver process is running on this machine.
-        roslaunch forks gzserver as a child, so the roslaunch process
+        """True while Gazebo is running. Tries multiple detection strategies
+        because roslaunch forks gzserver as a child so the parent process
         exiting does not mean Gazebo stopped."""
+        # Strategy 1: subprocess handle still alive
+        if self.gazebo_process is not None and self.gazebo_process.poll() is None:
+            return True
+        # Strategy 2: pgrep for any gazebo server variant
         import subprocess as _sp
         try:
-            r = _sp.run(["pgrep", "-x", "gzserver"],
-                        capture_output=True, timeout=1)
-            return r.returncode == 0
+            r = _sp.run(
+                ["pgrep", "-f", "gzserver"],
+                capture_output=True, timeout=1
+            )
+            if r.returncode == 0:
+                return True
         except Exception:
-            return False
+            pass
+        # Strategy 3: ROS service alive (most reliable but slowest — last resort)
+        if self._rospy is not None and self._GetWorldProperties is not None:
+            try:
+                self._rospy.wait_for_service(
+                    '/gazebo/get_world_properties', timeout=0.5)
+                return True
+            except Exception:
+                pass
+        return False
 
     # ── setters kept for kill() / compat — they are no-ops now ───────────────
 
@@ -139,27 +167,23 @@ class Simulator():
             logger.warning("launch_node called from non-main thread — signal handlers may fail")
         try:
             import rospy
-            import rospy as _rospy
             from gazebo_msgs.srv import SetModelState, GetWorldProperties
             from geometry_msgs.msg import Pose, Point, Quaternion, Vector3, Twist
             from gazebo_msgs.msg import ModelState, ModelStates
 
-            import sys
-            sys.modules[__name__]  # ensure module exists
+            # Store as instance attributes — no global namespace pollution
+            self._rospy             = rospy
+            self._SetModelState     = SetModelState
+            self._GetWorldProperties = GetWorldProperties
+            self._Pose              = Pose
+            self._Point             = Point
+            self._Quaternion        = Quaternion
+            self._Vector3           = Vector3
+            self._Twist             = Twist
+            self._ModelState        = ModelState
+            self._ModelStates       = ModelStates
 
-            # Make imports available to all methods via module-level injection
-            globals()["rospy"]              = rospy
-            globals()["SetModelState"]      = SetModelState
-            globals()["GetWorldProperties"] = GetWorldProperties
-            globals()["Pose"]               = Pose
-            globals()["Point"]              = Point
-            globals()["Quaternion"]         = Quaternion
-            globals()["Vector3"]            = Vector3
-            globals()["Twist"]              = Twist
-            globals()["ModelState"]         = ModelState
-            globals()["ModelStates"]        = ModelStates
-
-            rospy.init_node('sensor_data_receiver', anonymous=True)
+            self._rospy.init_node('sensor_data_receiver', anonymous=True)
             self._node_initialized = True
             logger.info('ROS node initialized successfully')
         except Exception as e:
@@ -175,9 +199,11 @@ class Simulator():
 
     def is_gazebo_running(self):
         try:
-            from gazebo_msgs.srv import GetWorldProperties
-            rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
-            rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)()
+            GWP = getattr(self, '_GetWorldProperties', None)
+            if GWP is None:
+                from gazebo_msgs.srv import GetWorldProperties as GWP
+            self._rospy.wait_for_service('/gazebo/get_world_properties', timeout=2)
+            self._rospy.ServiceProxy('/gazebo/get_world_properties', GWP)()
             return True
         except Exception as exc:
             logger.debug(f'is_gazebo_running: {exc}')
@@ -201,6 +227,7 @@ class Simulator():
             return False
 
         logger.info('open_scene: generating world file')
+        self._last_observer_frame = None  # reset cache for new scene
         self._generate_world(world_path, camera_model_path)
         roslaunch_cmd = f"source {self.CATKIN_SETUP_DIR} && roslaunch {self.SENSOR_PKG} {self.LAUNCH_FILE}"
         logger.info(f'open_scene: roslaunch_cmd={roslaunch_cmd}')
@@ -243,7 +270,7 @@ class Simulator():
 
             if self.is_gazebo_running():
                 logger.info('open_scene: Gazebo started successfully')
-                # Debug: list all active ROS topics
+                self._wait_for_observer_topic(timeout=10.0)
                 return True
             else:
                 logger.error('open_scene: is_gazebo_running() returned False after startup')
@@ -353,7 +380,7 @@ class Simulator():
         if not self.node_is_running:
             return
         try:
-            rospy.signal_shutdown("Simulator shutdown")
+            self._rospy.signal_shutdown("Simulator shutdown")
             self._node_initialized = False
             logger.info('ROS node shut down')
         except Exception as e:
@@ -365,10 +392,10 @@ class Simulator():
         start_time = time.time()
         while (time.time() - start_time < timeout):
             try:
-                msg = rospy.wait_for_message('/gazebo/model_states', ModelStates, timeout=1.0)
+                msg = self._rospy.wait_for_message('/gazebo/model_states', self._ModelStates, timeout=1.0)
                 if model_name in msg.name:
                     return True
-            except rospy.ROSException:
+            except self._rospy.ROSException:
                 continue
         return False
 
@@ -381,16 +408,16 @@ class Simulator():
         angular_velocity : Vector3 = None,
     ):
         """Метод для перемещения моделей в симуляции"""
-        set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
-        state = ModelState()
+        set_state = self._rospy.ServiceProxy("/gazebo/set_model_state", self._SetModelState)
+        state = self._ModelState()
         state.model_name = model
         state.reference_frame = "world"
-        quaternion = quaternion if quaternion else Quaternion(0, 0, 0, 1)
-        state.pose = Pose(Point(x, y, z), quaternion)
+        quaternion = quaternion if quaternion else self._Quaternion(0, 0, 0, 1)
+        state.pose = self._Pose(self._Point(x, y, z), quaternion)
         if linear_velocity or angular_velocity:
-            state.twist = Twist(
-                linear=linear_velocity if linear_velocity else Vector3(0, 0, 0),
-                angular=angular_velocity if angular_velocity else Vector3(0, 0, 0),
+            state.twist = self._Twist(
+                linear=linear_velocity if linear_velocity else self._Vector3(0, 0, 0),
+                angular=angular_velocity if angular_velocity else self._Vector3(0, 0, 0),
             )
         response = set_state(state)
         if not response.success:
@@ -436,21 +463,28 @@ class Simulator():
             self._step_gate.set()
 
     def capture_observer_frame(self) -> bytes | None:
-        """Grab one JPEG frame from the observer camera ROS topic."""
+        """Grab one JPEG frame from the observer camera ROS topic.
+        Returns the last successfully captured frame if the fresh grab fails."""
         if not self.gazebo_is_running:
-            return None
+            return self._last_observer_frame
+        if self._rospy is None:
+            return self._last_observer_frame
         try:
             from sensor_msgs.msg import Image
-            msg = rospy.wait_for_message(self._observer_topic, Image, timeout=2.0)
+            msg = self._rospy.wait_for_message(self._observer_topic, Image, timeout=2.0)
             import numpy as np
             arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, -1)
             import cv2
             arr_bgr = arr[:, :, ::-1].copy()
             ok, buf = cv2.imencode(".jpg", arr_bgr)
-            return bytes(buf) if ok else None
+            if ok:
+                self._last_observer_frame = bytes(buf)
+                return self._last_observer_frame
+            return self._last_observer_frame
         except Exception as e:
-            logger.debug("capture_observer_frame failed: %s", e)
-            return None
+            logger.warning("capture_observer_frame failed (topic=%s): %s",
+                           self._observer_topic, e)
+            return self._last_observer_frame
     def notify_capture(self, sensor_data: dict, observer_img: bytes | None = None) -> None:
         """Fire on_capture callback after each sensor capture.
         Always grabs a fresh observer frame so the UI stays current."""
@@ -483,13 +517,46 @@ class Simulator():
         self._node_initialized = False
 
 
-    def wait_gazebo_quiet(self, timeout=30.0):
+    def _wait_for_observer_topic(self, timeout: float = 10.0) -> bool:
+        """Wait until the observer camera publishes its first frame.
+        Camera plugins take a few seconds to register after Gazebo starts."""
+        if self._rospy is None:
+            return False
+        logger.info("open_scene: waiting for observer topic %s (%.0fs)",
+                    self._observer_topic, timeout)
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                proxy = rospy.ServiceProxy('/gazebo/get_world_properties', GetWorldProperties)
-                proxy()
+                from sensor_msgs.msg import Image
+                self._rospy.wait_for_message(
+                    self._observer_topic, Image, timeout=1.0)
+                logger.info("open_scene: observer topic ready")
                 return True
             except Exception:
                 time.sleep(0.2)
+        logger.warning("open_scene: observer topic not ready after %.0fs — "
+                       "captures will use cached frame", timeout)
+        return False
+
+    def wait_gazebo_quiet(self, timeout=30.0):
+        if self._rospy is None:
+            logger.error("wait_gazebo_quiet: ROS node not initialized")
+            return False
+        try:
+            from gazebo_msgs.srv import GetWorldProperties
+        except ImportError:
+            GWP = self._GetWorldProperties
+        else:
+            GWP = GetWorldProperties
+        deadline = time.time() + timeout
+        last_exc = None
+        while time.time() < deadline:
+            try:
+                self._rospy.wait_for_service('/gazebo/get_world_properties', timeout=1)
+                self._rospy.ServiceProxy('/gazebo/get_world_properties', GWP)()
+                return True
+            except Exception as e:
+                last_exc = e
+                time.sleep(0.5)
+        logger.error("wait_gazebo_quiet timed out after %.0fs — last error: %s", timeout, last_exc)
         return False

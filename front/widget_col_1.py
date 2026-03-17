@@ -202,7 +202,7 @@ class ColSensors(QWidget):
     add_type_requested    = pyqtSignal()
     edit_type_requested   = pyqtSignal(str)
     delete_type_requested = pyqtSignal(str)
-    type_updated          = pyqtSignal(str)   # sensor_type name after save
+    type_updated          = pyqtSignal(str)   # emitted after type is saved
 
     BUILTIN_TYPES: set = set()
 
@@ -442,7 +442,7 @@ class ColSensors(QWidget):
             btn.setIconSize(Layout.ICON_SIZE_SM)
             btn.setFixedSize(28, 28)  # Consistent size for all toolbar buttons
             btn.setStyleSheet(Styles.BUTTON_ICON)
-
+        
         # Placeholder texts
         self.input_search.setPlaceholderText("Search sensors...")
         self.input_types_search.setPlaceholderText("Search types...")
@@ -460,7 +460,7 @@ class ColSensors(QWidget):
 
     def _on_delete_type(self, sensor_type: str):
         try:
-            import sensor_storage as db
+            import src.sensor_storage as db
             
             sensors = db.get_sensors_by_type(sensor_type)
             if sensors:
@@ -514,8 +514,9 @@ class ColSensors(QWidget):
                 self._selected_type = None
                 
         except Exception as exc:
-            import traceback
-            print(f"[ColSensors] _on_delete_type error: {exc}\n{traceback.format_exc()}")
+            import traceback, logging
+            logging.getLogger(__name__).error(
+                "_on_delete_type failed: %s\n%s", exc, traceback.format_exc())
 
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()
