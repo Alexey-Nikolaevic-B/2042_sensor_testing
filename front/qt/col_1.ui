@@ -110,16 +110,6 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="btn_filter">
-        <property name="text"><string/></property>
-        <property name="toolTip"><string>Filter by type</string></property>
-        <property name="minimumWidth"><number>32</number></property>
-        <property name="maximumWidth"><number>32</number></property>
-        <property name="minimumHeight"><number>32</number></property>
-        <property name="maximumHeight"><number>32</number></property>
-       </widget>
-      </item>
-      <item>
        <widget class="QPushButton" name="btn_add">
         <property name="text"><string/></property>
         <property name="toolTip"><string>Add new sensor</string></property>

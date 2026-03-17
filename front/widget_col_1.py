@@ -429,7 +429,6 @@ class ColSensors(QWidget):
 
         # Button styles - all toolbar buttons get consistent sizing
         button_configs = [
-            (self.btn_filter, Icons.FILTER()),
             (self.btn_add, Icons.ADD()),
             (self.btn_delete, Icons.CLEAR()),
             (self.btn_clear_filter, Icons.CLOSE()),
@@ -443,10 +442,6 @@ class ColSensors(QWidget):
             btn.setIconSize(Layout.ICON_SIZE_SM)
             btn.setFixedSize(28, 28)  # Consistent size for all toolbar buttons
             btn.setStyleSheet(Styles.BUTTON_ICON)
-        
-        # Remove menu indicator from filter button (no small black arrow)
-        self.btn_filter.setMenu(None)
-        self.btn_filter.setStyleSheet(Styles.BUTTON_ICON)
 
         # Placeholder texts
         self.input_search.setPlaceholderText("Search sensors...")
