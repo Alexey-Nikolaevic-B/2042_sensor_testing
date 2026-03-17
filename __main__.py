@@ -79,6 +79,15 @@ if __name__ == "__main__":
     except Exception:
         print("\nUnexpected error:")
         traceback.print_exc()
+
     finally:
-        runner.stop()
-        core.kill()
+
+        try:
+            runner.shutdown()
+        except Exception as e:
+            print("Runner shutdown error:", e)
+
+        try:
+            core.kill()
+        except Exception as e:
+            print("Core kill error:", e)

@@ -1,0 +1,5 @@
+PyQt5>=5.15
+PyQt5-sip>=12.11
+opencv-python>=4.5
+numpy>=1.21
+PyYAML>=6.0
