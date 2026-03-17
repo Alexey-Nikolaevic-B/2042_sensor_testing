@@ -154,7 +154,7 @@ class ColTests(QWidget):
 
     def _make_backend(self, sensor_data):
         try:
-            from src.sensors.sensor import Sensor as SensorModel
+            from src.sensor import Sensor as SensorModel
 
             return SensorModel(
                 sensor_type = sensor_data.get("type", ""),

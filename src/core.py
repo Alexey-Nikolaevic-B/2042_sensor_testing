@@ -1,8 +1,8 @@
 from typing import List, Dict, Any, Optional
 
 from .gazebo_simulator import Simulator
-from .sensors import REGISTRY, Sensor
-from .sensors.detector import detect_sensor_type as _detect
+from .sensor import REGISTRY, Sensor
+from .detector import detect_sensor_type as _detect
 
 from config import CONFIG
 
@@ -30,7 +30,7 @@ class Core:
 
         # Try every known location for get_tests_for_type
         get_tests_for_type = None
-        for mod_path in ("src.tests.tests", "src.tests"):
+        for mod_path in ("src.tests._common", "src.tests"):
             try:
                 import importlib
                 mod = importlib.import_module(mod_path)
@@ -55,7 +55,7 @@ class Core:
 
     def read_sensor_params(self, sensor) -> dict:
         """Read param values from SDF using the path/name defs stored in the sensor type DB."""
-        import src.database.sensor_storage as db
+        import src.sensor_storage as db
 
         sensor_type = getattr(sensor, "sensor_type", None)
         sdf_path    = getattr(sensor, "sdf_path", None)

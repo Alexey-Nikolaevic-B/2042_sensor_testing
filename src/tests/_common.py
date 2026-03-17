@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 class Worlds(str, Enum):
     path = f"{CONFIG['ROOT_PATH']}/assets/worlds"
 
+    #BASIC
+    BASIC                 = f"{path}/basik.world"
+
     # RFID
     RFID_CHANGE_DISTANCE  = f"{path}/rfid_change_distance.world"
     RFID_MASS_READ        = f"{path}/rfid_mass_read.world"
@@ -39,11 +42,15 @@ class Worlds(str, Enum):
     RFID_ANGLE_DEPENDENCE = f"{path}/rfid_angle_dependence.world"
     RFID_MOVE_TAGS        = f"{path}/rfid_move_tags.world"
     RFID_ANTENNA_ROTATION = f"{path}/rfid_antenna_rotation.world"
+
     # Camera
-    CAMERA_SMOKE = f"{path}/camera_c1_single_cube.world"
+    CAMERA_SMOKE          = f"{path}/camera_c1_single_cube.world"
     CAMERA_DEPTH_ACCURACY = f"{path}/camera_depth_perception.world"
-    CAMERA_RESOLUTION = f"{path}/camera_c2_resolution.world"
-    c1 = f"{path}/camera_c1_single_cube.world"
+    CAMERA_RESOLUTION     = f"{path}/camera_c2_resolution.world"
+    c1                    = f"{path}/camera_c1_single_cube.world"
+
+    # TACTILE
+    TACTILE_UNIFORMITY    = f"{path}/tactile_uniformity.world"
 
 
 def _PoseStamped():
@@ -56,7 +63,7 @@ def _world_from_db(sensor, func_name: str) -> str:
     Primary world lookup: reads world_path from the DB entry for this test.
     Falls back to the Worlds enum value whose name matches func_name (upper-cased).
     """
-    import src.database.sensor_storage as db
+    import src.sensor_storage as db
     tests = {t["func_name"]: t for t in db.get_type_tests(sensor.sensor_type)}
     path  = tests.get(func_name, {}).get("world_path", "")
     if path:
@@ -77,7 +84,7 @@ def get_test(func_name: str):
 
 def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
     try:
-        import src.database.sensor_storage as db
+        import src.sensor_storage as db
 
         result = {}
         for test in db.get_type_tests(sensor_type):

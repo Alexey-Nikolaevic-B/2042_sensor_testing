@@ -42,7 +42,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
     t0 = time.time()
 
-    world_path = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/resources/worlds/rfid/overlap_tags.world"
+    world_path = Worlds.BASIC
     logger.debug("World path: %s", world_path)
     logger.debug("World exists: %s", os.path.exists(world_path))
     logger.debug("Sensor SDF path: %s", sensor.sdf_path)

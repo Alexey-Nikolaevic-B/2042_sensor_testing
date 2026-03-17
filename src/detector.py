@@ -100,7 +100,7 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
         try:
             if fn(content):
                 # look up which sensor_type uses this detector fn
-                import src.database.sensor_storage as db
+                import src.sensor_storage as db
                 for t in db.get_all_sensor_types():
                     det = t.get("detection", {})
                     if det.get("mode") == "custom" and det.get("detector_fn") == name:
@@ -114,7 +114,7 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
 
 def _detect_from_db(content: str) -> Optional[str]:
     try:
-        import src.database.sensor_storage as db
+        import sensor_storage as db
         for t in db.get_all_sensor_types():
             det = t.get("detection", {})
             if det.get("mode") == "simple":

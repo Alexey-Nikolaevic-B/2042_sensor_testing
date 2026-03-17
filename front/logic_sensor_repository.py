@@ -3,7 +3,7 @@ from datetime import datetime
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
-import src.database.sensor_storage as db
+import src.sensor_storage as db
 
 
 class Sensor:

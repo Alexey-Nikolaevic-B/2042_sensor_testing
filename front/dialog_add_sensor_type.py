@@ -547,7 +547,7 @@ class AddSensorTypeDialog(QDialog):
             return
         lw.clear()
         try:
-            from src.sensors.detector import get_custom_detector_names
+            from detector import get_custom_detector_names
             for name in get_custom_detector_names():
                 lw.addItem(QListWidgetItem(name))
         except Exception as e:
@@ -754,7 +754,7 @@ class AddSensorTypeDialog(QDialog):
         self.accept()
 
     def _persist(self, d: dict):
-        import src.database.sensor_storage as db
+        import sensor_storage as db
 
         new_name = d["name"]
         old_name = self._prefill.get("name", new_name) if self._prefill else new_name

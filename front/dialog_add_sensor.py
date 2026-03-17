@@ -78,7 +78,7 @@ class AddSensorDialog(QDialog):
         # Write any edited params back into the SDF file
         if self._params:
             try:
-                from src.sensors.sensor import Sensor as _SensorModel
+                from src.sensor import Sensor as _SensorModel
                 _inst = _SensorModel(
                     sensor_type = self._detected_type or "",
                     sensor_name = name,
@@ -220,7 +220,7 @@ class AddSensorDialog(QDialog):
 
         self._set_detected_type(sensor_type)
         try:
-            from src.sensors.sensor import Sensor as SensorModel
+            from src.sensor import Sensor as SensorModel
             instance = SensorModel(sensor_type=sensor_type, sensor_name="", sdf_path=path)
             self._populate_params(self._core.read_sensor_params(instance))
         except Exception:
@@ -229,7 +229,7 @@ class AddSensorDialog(QDialog):
         for row in list(self._topic_rows):
             self._remove_topic_row(row)
         try:
-            from src.sensors.sensor import detect_topics_from_sdf
+            from src.sensor import detect_topics_from_sdf
         except ImportError:
             detect_topics_from_sdf = None
         if detect_topics_from_sdf:

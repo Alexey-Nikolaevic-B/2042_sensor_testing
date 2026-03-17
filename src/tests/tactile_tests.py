@@ -7,6 +7,8 @@ import rospy
 from gazebo_msgs.msg import ContactsState
 
 
+from ._common import Worlds
+
 def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     """
     Method T1 — minimum detectable force
@@ -32,7 +34,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
 
     t0 = time.time()
 
-    world_path = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/tactile_force.world"
+    world_path = WORDL
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
         result["error"] = "Failed to open Gazebo scene"
@@ -138,7 +140,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
     }
 
     t0 = time.time()
-    world_path = "/home/alexey/Documents/projects/2042/github/2042_sensor_testing/assets/worlds/tactile_uniformity.world"
+    world_path = Worlds.TACTILE_UNIFORMITY
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
         result["error"] = "Failed to open Gazebo scene"

@@ -229,7 +229,7 @@ class ColSensors(QWidget):
         self._all_sensors = sensors
         self._rebuild_cells(sensors)
         try:
-            import src.database.sensor_storage as db
+            import src.sensor_storage as db
             self.load_types(db.get_sensor_type_names())
         except Exception as exc:
             import traceback
@@ -295,7 +295,7 @@ class ColSensors(QWidget):
         except Exception:
             existing_tests = []
         try:
-            import src.database.sensor_storage as db
+            import src.sensor_storage as db
             type_def = db.get_sensor_type(self._selected_type) or {}
             tests    = db.get_type_tests(self._selected_type)
         except Exception:
@@ -323,7 +323,7 @@ class ColSensors(QWidget):
 
     def _on_type_saved(self, definition: dict):
         try:
-            import src.database.sensor_storage as db
+            import src.sensor_storage as db
             self.load_types(db.get_sensor_type_names())
             self.type_updated.emit(definition.get("name", ""))
         except Exception as exc:
@@ -465,7 +465,7 @@ class ColSensors(QWidget):
 
     def _on_delete_type(self, sensor_type: str):
         try:
-            import src.database.sensor_storage as db
+            import sensor_storage as db
             
             sensors = db.get_sensors_by_type(sensor_type)
             if sensors:

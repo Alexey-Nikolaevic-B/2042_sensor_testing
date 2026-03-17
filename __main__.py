@@ -43,8 +43,6 @@ if __name__ == "__main__":
 
     core.simulator.on_log = on_sim_log
 
-    # Connect log_bridge BEFORE start_async so logger.* calls during
-    # ROS/Gazebo startup are captured from the very first line.
     from front.logic_log_bridge import log_bridge as _log_bridge
     import logging as _logging
 
@@ -69,7 +67,6 @@ if __name__ == "__main__":
         on_error = on_sim_error,
     )
 
-    # Clear image and add separator in log at the start of each test
     runner.test_started.connect(window.col_4.clear_capture)
     runner.test_started.connect(
         lambda func_name: window.col_4.append_separator(func_name)
