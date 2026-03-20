@@ -97,11 +97,14 @@ class Sensor:
         """Read parameter values from the SDF file.
 
         param_defs can be:
-          - list[str]  — legacy flat tag names, e.g. ["width", "height"]
-          - list[dict] — {"name": "width"} or {"name": "width", "path": "camera"}
-                         path supports arbitrary depth: "camera/lens"
+        - list[str]  — legacy flat tag names, e.g. ["width", "height"]
+        - list[dict] — {"name": "width"} or {"name": "width", "path": "camera"}
+                        path supports arbitrary depth: "camera/lens"
 
-        Returns {param_name: value}.
+        Returns {param_name: value}. Values are automatically converted to:
+        - float if the string is a single number
+        - list of floats if the string contains space-separated numbers
+        - string otherwise
         """
         if not self.sdf_path:
             return {}
@@ -145,7 +148,25 @@ class Sensor:
                 search_in, re.DOTALL
             )
             if m:
-                result[name] = m.group(1).strip()
+                value_str = m.group(1).strip()
+                
+                # Auto-detect and convert numeric values
+                if value_str:
+                    parts = value_str.split()
+                    if len(parts) == 1:
+                        # Single value - try to convert to float
+                        try:
+                            result[name] = float(parts[0])
+                        except ValueError:
+                            result[name] = value_str
+                    else:
+                        # Multiple values - try to convert to list of floats
+                        try:
+                            result[name] = [float(p) for p in parts]
+                        except ValueError:
+                            result[name] = value_str
+                else:
+                    result[name] = value_str
 
         return result
 
@@ -157,14 +178,23 @@ class Sensor:
                 content = f.read()
         except OSError as e:
             raise OSError(f"Cannot read SDF: {e}") from e
+        
         for name, value in params.items():
+            if isinstance(value, list):
+                value_str = ' '.join(str(v) for v in value)
+            elif isinstance(value, (int, float)):
+                value_str = str(value)
+            else:
+                value_str = str(value)
+            
             content, n = re.subn(
                 rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)",
-                rf"\g<1>{value}\g<2>",
+                rf"\g<1>{value_str}\g<2>",
                 content, count=1, flags=re.DOTALL,
             )
             if n == 0:
                 logger.warning("write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path)
+        
         with open(self.sdf_path, "w", encoding="utf-8") as f:
             f.write(content)
         self.params.update(params)
