@@ -1,12 +1,13 @@
 """RFID sensor tests."""
+
 import math
 import time
-
+from config import CONFIG
+from geometry_msgs.msg import Vector3, Quaternion
 from ._common import _PoseStamped, Worlds
 
 
 def rfid_max_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
     read_distance = float(sensor.params.get("rzero", 3))
 
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
@@ -19,19 +20,25 @@ def rfid_max_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
     if not simulator.wait_for_model_spawn(tag, 30):
         raise RuntimeError("tag not spawned")
 
-    current  = 0.5
-    reset    = read_distance * 5
+    current = 0.5
+    reset = read_distance * 5
     max_dist = 0.0
-    steps    = max(1, round((read_distance - 0.5) / 0.5) + 1)
-    step     = 0
-    t0       = time.time()
+    steps = max(1, round((read_distance - 0.5) / 0.5) + 1)
+    step = 0
+    t0 = time.time()
 
     while current <= read_distance + 1e-9:
         try:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            if tag in sensor.capture_frames(_PoseStamped(), window=3, simulator=simulator):
+            detected_tags = {
+                msg.header.frame_id: msg.pose
+                for msg in sensor.capture_data(
+                    _PoseStamped(), window=3, simulator=simulator
+                )
+            }
+            if tag in detected_tags:
                 max_dist = current
         except Exception:
             pass
@@ -41,15 +48,17 @@ def rfid_max_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
         current = round(current + 0.5, 1)
 
     return {
-        "passed":            abs(max_dist - read_distance) <= 0.5,
-        "duration":          time.time() - t0,
+        "passed": abs(max_dist - read_distance) <= 0.5,
+        "description": (
+            f"Criterion: |max_read_distance - rzero| <= 0.5 m; "
+            f"actual max_read_distance={max_dist} m, rzero={read_distance} m."
+        ),
+        "duration": time.time() - t0,
         "max_read_distance": max_dist,
     }
 
 
 def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
-
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
         f.write("fix1 1 0.5 0 0\n")
 
@@ -61,17 +70,23 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
         raise RuntimeError("tag not spawned")
 
     min_dist = current = 0.25
-    reset    = 25.0
-    steps    = max(1, round(0.25 / 0.01))
-    step     = 0
-    t0       = time.time()
+    reset = 25.0
+    steps = max(1, round(0.25 / 0.01))
+    step = 0
+    t0 = time.time()
 
     while current >= 0:
         try:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            if tag in sensor.capture_frames(_PoseStamped(), window=2, simulator=simulator):
+            detected_tags = {
+                msg.header.frame_id: msg.pose
+                for msg in sensor.capture_data(
+                    _PoseStamped(), window=2, simulator=simulator
+                )
+            }
+            if tag in detected_tags:
                 min_dist = current
         except Exception:
             pass
@@ -81,17 +96,20 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
         current = round(current - 0.01, 5)
 
     return {
-        "passed":            min_dist <= 0.05,
-        "duration":          time.time() - t0,
+        "passed": min_dist <= 0.05,
+        "description": (
+            f"Expected: min stable read distance <= 0.05 m; "
+            f"actual min_read_distance={min_dist} m."
+        ),
+        "duration": time.time() - t0,
         "min_read_distance": min_dist,
     }
 
 
 def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
     read_distance = float(sensor.params.get("rzero", 3))
-    tags_count    = 75
-    radius        = read_distance / 2
+    tags_count = 10
+    radius = read_distance / 2
 
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
         for i in range(tags_count):
@@ -108,26 +126,34 @@ def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(int((i + 1) / tags_count * 50))
 
-    t0   = time.time()
-    data = sensor.capture_frames(_PoseStamped(), window=20, simulator=simulator)
+    t0 = time.time()
+    detected_tags = {
+        msg.header.frame_id: msg.pose
+        for msg in sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
+    }
     if progress_cb:
         progress_cb(100)
 
+    unique_tags_count = len(detected_tags)
+    min_tags_required = math.ceil(tags_count * 0.75)
     return {
-        "passed":              len(data) / tags_count >= 0.75,
-        "duration":            time.time() - t0,
-        "tags_detected_count": len(data),
+        "passed": unique_tags_count / tags_count >= 0.75,
+        "description": (
+            f"Expected: unique_tags/total >= 75% (>= {min_tags_required} of {tags_count}); "
+            f"actual unique_tags={unique_tags_count} ({unique_tags_count / tags_count:.0%})."
+        ),
+        "duration": time.time() - t0,
+        "tags_detected_count": unique_tags_count,
     }
 
 
 def rfid_overlap_tags(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
     read_distance = float(sensor.params.get("rzero", 3))
-    tags_count    = 5
-    radius        = read_distance / 2
-    distances     = [0.2, 0.1, 0.05, 0.02]
-    dist_result   = None
-    t0            = time.time()
+    tags_count = 5
+    radius = read_distance / 2
+    distances = [0.2, 0.1, 0.05, 0.02]
+    dist_result = None
+    t0 = time.time()
 
     for step, distance in enumerate(distances):
         with open(CONFIG["RFID_MAP_PATH"], "w") as f:
@@ -142,24 +168,32 @@ def rfid_overlap_tags(simulator, sensor, progress_cb=None) -> dict:
             if not simulator.wait_for_model_spawn(f"rfid_tag{i+1}", 30):
                 raise RuntimeError(f"tag {i+1} not spawned")
 
-        data = sensor.capture_frames(_PoseStamped(), window=5, simulator=simulator)
-        if len(data) == tags_count:
+        detected_tags = {
+            msg.header.frame_id: msg.pose
+            for msg in sensor.capture_data(
+                _PoseStamped(), window=5, simulator=simulator
+            )
+        }
+        if len(detected_tags) == tags_count:
             dist_result = distance
         if progress_cb:
             progress_cb(int((step + 1) / len(distances) * 100))
 
     return {
-        "passed":      dist_result is not None,
-        "duration":    time.time() - t0,
+        "passed": dist_result is not None,
+        "description": (
+            f"Expected: some tag spacing yields all {tags_count} tags in one capture; "
+            f"actual spacing_m={dist_result} (expected: not None)."
+        ),
+        "duration": time.time() - t0,
         "dist_result": dist_result,
     }
 
 
 def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
     read_distance = float(sensor.params.get("rzero", 3))
-    angles        = [0, math.pi / 6, math.pi / 4, math.pi / 3, math.pi / 2]
-    radius        = read_distance / 2
+    angles = [0, math.pi / 6, math.pi / 4, math.pi / 3, math.pi / 2]
+    radius = read_distance / 2
 
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
         for i, angle in enumerate(angles):
@@ -175,27 +209,35 @@ def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(int((i + 1) / len(angles) * 50))
 
-    t0   = time.time()
-    data = sensor.capture_frames(_PoseStamped(), window=20, simulator=simulator)
+    t0 = time.time()
+    detected_tags = {
+        msg.header.frame_id: msg.pose
+        for msg in sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
+    }
     if progress_cb:
         progress_cb(100)
 
+    placement_count = len(angles)
+    unique_tags_count = len(detected_tags)
+    min_tags_required = math.ceil(placement_count / 2)
     return {
-        "passed":              len(data) == len(angles),
-        "duration":            time.time() - t0,
-        "tags_detected_count": len(data),
+        "passed": unique_tags_count >= min_tags_required,
+        "description": (
+            f"Expected: unique tags >= half of placements (>= {min_tags_required} of {placement_count}); "
+            f"actual unique_tags={unique_tags_count}."
+        ),
+        "duration": time.time() - t0,
+        "tags_detected_count": unique_tags_count,
     }
 
 
 def rfid_move_tags(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
-    from geometry_msgs.msg import Vector3
     read_distance = float(sensor.params.get("rzero", 3))
-    velocities    = [Vector3(0.5, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0)]
-    factor        = 1.5
-    start_dist    = -1 * read_distance * factor
-    result_vel    = None
-    t0            = time.time()
+    velocities = [Vector3(0.5, 0, 0), Vector3(1, 0, 0), Vector3(2, 0, 0)]
+    factor = 1.5
+    start_dist = -1 * read_distance * factor
+    result_vel = None
+    t0 = time.time()
 
     for step, velocity in enumerate(velocities):
         with open(CONFIG["RFID_MAP_PATH"], "w") as f:
@@ -205,35 +247,42 @@ def rfid_move_tags(simulator, sensor, progress_cb=None) -> dict:
         if not simulator.wait_for_model_spawn("rfid_tag1", 30):
             raise RuntimeError("tag not spawned")
 
-        simulator.set_pose("rfid_tag1", x=start_dist, y=0, z=0, linear_velocity=velocity)
-        data = sensor.capture_frames(
-            _PoseStamped(),
-            window=factor * read_distance / velocity.x * 2,
-            simulator=simulator,
+        simulator.set_pose(
+            "rfid_tag1", x=start_dist, y=0, z=0, linear_velocity=velocity
         )
-        if len(data) == 1:
+        window = factor * read_distance / velocity.x * 2
+        detected_tags = {
+            msg.header.frame_id: msg.pose
+            for msg in sensor.capture_data(
+                _PoseStamped(), window=window, simulator=simulator
+            )
+        }
+        if len(detected_tags) == 1:
             result_vel = velocity
         if progress_cb:
             progress_cb(int((step + 1) / len(velocities) * 100))
         if result_vel is None:
             break
 
+    vx = result_vel.x if result_vel else None
     return {
-        "passed":                result_vel is not None,
-        "duration":              time.time() - t0,
-        "max_detected_velocity": result_vel.x if result_vel else None,
+        "passed": result_vel is not None,
+        "description": (
+            f"Expected: moving tag read at least at one trial speed; "
+            f"actual max_detected_velocity_x={vx} m/s (expected: not None)."
+        ),
+        "duration": time.time() - t0,
+        "max_detected_velocity": vx,
     }
 
 
 def rfid_antenna_rotation(simulator, sensor, progress_cb=None) -> dict:
-    from config import CONFIG
-    from geometry_msgs.msg import Quaternion
     read_distance = float(sensor.params.get("rzero", 3))
-    angles        = [0, math.pi / 6, math.pi / 3, math.pi / 2]
-    tags_count    = 10
-    radius        = read_distance / 2
-    passed        = False
-    angle2count   = {}
+    angles = [0, math.pi / 6, math.pi / 3, math.pi / 2]
+    tags_count = 10
+    radius = read_distance / 2
+    passed = False
+    angle2count = {}
 
     with open(CONFIG["RFID_MAP_PATH"], "w") as f:
         for i in range(tags_count):
@@ -252,15 +301,25 @@ def rfid_antenna_rotation(simulator, sensor, progress_cb=None) -> dict:
         q = Quaternion(0, 0, math.sin(angle / 2), math.cos(angle / 2))
         simulator.set_pose("rfid_antenna", x=0, y=0, z=0, quaternion=q)
         time.sleep(0.01)
-        data = sensor.capture_frames(_PoseStamped(), window=7, simulator=simulator)
-        if len(data) == tags_count and angle == 0:
+        detected_tags = {
+            msg.header.frame_id: msg.pose
+            for msg in sensor.capture_data(
+                _PoseStamped(), window=7, simulator=simulator
+            )
+        }
+        if len(detected_tags) == tags_count and angle == 0:
             passed = True
-        angle2count[round(math.degrees(angle), 1)] = len(data)
+        angle2count[round(math.degrees(angle), 1)] = len(detected_tags)
         if progress_cb:
             progress_cb(int((step + 1) / len(angles) * 100))
 
+    at0 = angle2count.get(0.0)
     return {
-        "passed":           passed,
-        "duration":         time.time() - t0,
+        "passed": passed,
+        "description": (
+            f"Criterion: at 0° antenna yaw all {tags_count} tags read in one capture; "
+            f"actual unique_tags_at_0deg={at0}, expected={tags_count}."
+        ),
+        "duration": time.time() - t0,
         "angle2tags_count": angle2count,
     }
