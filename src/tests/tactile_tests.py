@@ -23,6 +23,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     result = {
         "passed": False,
         "test_name": "T1 - Minimum Force Threshold",
+        "sensor_size_m": None,
         "threshold_norm": 2.0,
         "force_step": 0.5,
         "forces_tested": [],
@@ -34,6 +35,16 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
 
     t0 = time.time()
 
+    # ── Read sensor dimensions from SDF params ────────────────────────────────
+    raw_size = sensor.params.get("size")
+    if not raw_size:
+        result["error"] = "no sensor size"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    size_x = float(raw_size[0])
+    size_y = float(raw_size[1])
+    result["sensor_size_m"] = [round(size_x, 4), round(size_y, 4)]
+
     world_path = Worlds.TACTILE_FORCE
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
@@ -44,8 +55,8 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     time.sleep(3)
 
     probe_model = "force_probe"
-    start_pos = [0.02, 0, 0.12]
-    contact_pos = [0.02, 0, 0.095]
+    start_pos   = [0.0, 0.0, 0.12]
+    contact_pos = [0.0, 0.0, 0.095]
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Force probe '{probe_model}' not spawned"
@@ -312,6 +323,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     result = {
         "passed": False,
         "test_name": "T3 - Temporal Stability",
+        "sensor_size_m": None,
         "applied_force_n": 4.9,
         "measurement_duration_s": 30,
         "drift_threshold_percent": 5.0,
@@ -326,6 +338,17 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     }
 
     t0 = time.time()
+
+    # ── Read sensor dimensions from SDF params ────────────────────────────────
+    raw_size = sensor.params.get("size")
+    if not raw_size:
+        result["error"] = "no sensor size"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    size_x = float(raw_size[0])
+    size_y = float(raw_size[1])
+    result["sensor_size_m"] = [round(size_x, 4), round(size_y, 4)]
+
     world_path = Worlds.TACTILE_STABILITY
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
@@ -336,7 +359,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     time.sleep(3)
 
     probe_model = "force_probe"
-    center_x, center_y = 0.02, 0.0
+    center_x, center_y = 0.0, 0.0
     rest_z = 0.12
     applied_force = result["applied_force_n"]
     penetration = applied_force * 0.001
@@ -466,6 +489,7 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     result = {
         "passed": False,
         "test_name": "T4 - Peak Load Response",
+        "sensor_size_m": None,
         "drop_height_m": 0.5,
         "impact_time_series": [],
         "peak_force": None,
@@ -478,6 +502,17 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     }
 
     t0 = time.time()
+
+    # ── Read sensor dimensions from SDF params ────────────────────────────────
+    raw_size = sensor.params.get("size")
+    if not raw_size:
+        result["error"] = "no sensor size"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    size_x = float(raw_size[0])
+    size_y = float(raw_size[1])
+    result["sensor_size_m"] = [round(size_x, 4), round(size_y, 4)]
+
     world_path = Worlds.TACTILE_PEAK
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
@@ -488,7 +523,7 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     time.sleep(3)
 
     probe_model  = "force_probe"
-    center_x, center_y  = 0.02, 0.0
+    center_x, center_y  = 0.0, 0.0
     sensor_surface_z     = 0.095
     rest_z   = sensor_surface_z + result["drop_height_m"]  # ~0.595
     impact_z = sensor_surface_z - 0.005                    # 5 mm penetration
