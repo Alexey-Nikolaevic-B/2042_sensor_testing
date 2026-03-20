@@ -50,7 +50,10 @@ class Worlds(str, Enum):
     c1                    = f"{path}/camera_c1_single_cube.world"
 
     # TACTILE
+    TACTILE_FORCE         = f"{path}/tactile_force.world"
     TACTILE_UNIFORMITY    = f"{path}/tactile_uniformity.world"
+    TACTILE_STABILITY     = f"{path}/tactile_force.world"
+    TACTILE_PEAK          = f"{path}/tactile_force.world"
 
 
 def _PoseStamped():
@@ -468,4 +471,6 @@ TESTS: dict[str, callable] = {
     # Tactile tests
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,
+    "tactile_temporal_stability": tactile_temporal_stability,
+    "tactile_peak_load_response": tactile_peak_load_response,
 }

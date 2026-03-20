@@ -34,7 +34,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
 
     t0 = time.time()
 
-    world_path = WORDL
+    world_path = Worlds.TACTILE_FORCE
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
         result["error"] = "Failed to open Gazebo scene"
@@ -79,7 +79,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
             for msg in contacts:
                 if msg.states:
                     for state in msg.states:
-                        if state.total_wrench.force:
+                        if state.total_wrench.force is not None:
                             f = state.total_wrench.force
                             mag = (f.x**2 + f.y**2 + f.z**2)**0.5
                             force_magnitude = max(force_magnitude, mag)
@@ -204,7 +204,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
                 for msg in contacts:
                     if msg.states:
                         for state in msg.states:
-                            if state.total_wrench.force:
+                            if state.total_wrench.force is not None:
                                 f = state.total_wrench.force
                                 mag = (f.x**2 + f.y**2 + f.z**2)**0.5
                                 max_force = max(max_force, mag)
@@ -230,7 +230,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         result["std_deviation"] = round(float(np.std(valid_responses)), 4)
         result["response_map"] = response_grid.tolist()
 
-        deviations = np.abs(response_grid - result["mean_response"])
+        deviations = np.abs(valid_responses - result["mean_response"])
         result["max_deviation"] = round(float(np.max(deviations)), 4)
 
         if result["mean_response"] > 0:
@@ -252,4 +252,316 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
     result["duration"] = round(time.time() - t0, 2)
 
+    return result
+
+
+def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
+    """
+    Method T3 — temporal stability under constant load
+    Scene: T3 (tactile_force.world)
+    Purpose: Evaluate signal stability over time under constant load
+
+    Conditions:
+    - Constant force ~4.9 N applied at sensor center
+    - Measurement duration: 30 seconds
+
+    Steps:
+    1. Apply constant load at center of sensor
+    2. Record signal each second for 30 seconds
+    3. Compare mean of first and last 20% of samples (drift)
+    4. Compute jitter (coefficient of variation)
+    5. Check signal recovery after load removal
+    Pass criteria: Drift ≤ 5%
+    """
+    result = {
+        "passed": False,
+        "test_name": "T3 - Temporal Stability",
+        "applied_force_n": 4.9,
+        "measurement_duration_s": 30,
+        "drift_threshold_percent": 5.0,
+        "time_series": [],
+        "start_mean": None,
+        "end_mean": None,
+        "drift_percent": None,
+        "std_deviation": None,
+        "jitter_percent": None,
+        "recovery_ok": None,
+        "error": None,
+    }
+
+    t0 = time.time()
+    world_path = Worlds.TACTILE_STABILITY
+
+    if not simulator.open_scene(world_path, sensor.sdf_path):
+        result["error"] = "Failed to open Gazebo scene"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    time.sleep(3)
+
+    probe_model = "force_probe"
+    center_x, center_y = 0.02, 0.0
+    rest_z = 0.12
+    applied_force = result["applied_force_n"]
+    penetration = applied_force * 0.001
+    contact_z = 0.095 - penetration
+
+    if not simulator.wait_for_model_spawn(probe_model, 30):
+        result["error"] = f"Force probe '{probe_model}' not spawned"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    simulator.set_pose(probe_model, center_x, center_y, rest_z)
+    time.sleep(1)
+
+    # Apply constant load
+    simulator.set_pose(probe_model, center_x, center_y, contact_z)
+    time.sleep(1)
+
+    # Record signal for 30 seconds, 1 sample/sec
+    measurement_duration = result["measurement_duration_s"]
+    sample_interval = 1.0
+    total_samples = int(measurement_duration / sample_interval)
+    force_values = []
+    measure_start = time.time()
+
+    for idx in range(total_samples):
+        if progress_cb:
+            progress_cb(int((idx / total_samples) * 85))
+
+        try:
+            contacts = sensor.capture_data(
+                ContactsState, window=0.5, timeout=0.2, simulator=simulator
+            )
+
+            max_force = 0.0
+            for msg in contacts:
+                if msg.states:
+                    for state in msg.states:
+                        if state.total_wrench.force is not None:
+                            f = state.total_wrench.force
+                            mag = (f.x**2 + f.y**2 + f.z**2)**0.5
+                            max_force = max(max_force, mag)
+
+            elapsed = time.time() - measure_start
+            force_values.append(max_force)
+            result["time_series"].append({
+                "t": round(elapsed, 2),
+                "force": round(max_force, 4),
+            })
+
+        except Exception:
+            force_values.append(0.0)
+
+        time.sleep(sample_interval)
+
+    # Remove load and check recovery
+    simulator.set_pose(probe_model, center_x, center_y, rest_z)
+    time.sleep(2)
+
+    if progress_cb:
+        progress_cb(90)
+
+    try:
+        recovery_data = sensor.capture_data(
+            ContactsState, window=1.0, timeout=0.2, simulator=simulator
+        )
+        recovery_force = 0.0
+        for msg in recovery_data:
+            if msg.states:
+                for state in msg.states:
+                    if state.total_wrench.force is not None:
+                        f = state.total_wrench.force
+                        mag = (f.x**2 + f.y**2 + f.z**2)**0.5
+                        recovery_force = max(recovery_force, mag)
+        result["recovery_ok"] = recovery_force < 0.1
+    except Exception:
+        result["recovery_ok"] = None
+
+    # Analyse drift and jitter
+    valid = [v for v in force_values if v > 0]
+
+    if len(valid) >= 4:
+        window = max(1, len(valid) // 5)       # first / last 20 %
+        start_mean = float(np.mean(valid[:window]))
+        end_mean   = float(np.mean(valid[-window:]))
+
+        result["start_mean"]    = round(start_mean, 4)
+        result["end_mean"]      = round(end_mean, 4)
+        result["std_deviation"] = round(float(np.std(valid)), 4)
+
+        if start_mean > 0:
+            drift  = abs(end_mean - start_mean) / start_mean * 100
+            jitter = result["std_deviation"] / float(np.mean(valid)) * 100
+
+            result["drift_percent"]  = round(drift, 2)
+            result["jitter_percent"] = round(jitter, 2)
+            result["passed"]         = drift <= result["drift_threshold_percent"]
+        else:
+            result["error"] = "No valid signal at start of measurement"
+    else:
+        result["error"] = "Insufficient valid readings collected"
+
+    if progress_cb:
+        progress_cb(100)
+
+    result["duration"] = round(time.time() - t0, 2)
+    return result
+
+
+def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
+    """
+    Method T4 — peak load (impact) response
+    Scene: T4 (tactile_force.world)
+    Purpose: Evaluate sensor response to a sudden impact load
+
+    Conditions:
+    - Probe dropped from ~0.5 m above sensor surface
+    - Impact simulated by rapid probe teleport to deep penetration
+
+    Steps:
+    1. Position probe at drop height above sensor center
+    2. Capture baseline (no contact)
+    3. Rapidly lower probe to impact depth
+    4. Record time-series signal (2 s, 100 ms steps) around impact
+    5. Detect peak force and check for saturation (flat-top clipping)
+    Pass criteria: Impulse detected, no saturation
+    """
+    result = {
+        "passed": False,
+        "test_name": "T4 - Peak Load Response",
+        "drop_height_m": 0.5,
+        "impact_time_series": [],
+        "peak_force": None,
+        "peak_time_s": None,
+        "baseline_force": None,
+        "saturation_detected": None,
+        "saturation_ratio": None,
+        "impulse_detected": False,
+        "error": None,
+    }
+
+    t0 = time.time()
+    world_path = Worlds.TACTILE_PEAK
+
+    if not simulator.open_scene(world_path, sensor.sdf_path):
+        result["error"] = "Failed to open Gazebo scene"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    time.sleep(3)
+
+    probe_model  = "force_probe"
+    center_x, center_y  = 0.02, 0.0
+    sensor_surface_z     = 0.095
+    rest_z   = sensor_surface_z + result["drop_height_m"]  # ~0.595
+    impact_z = sensor_surface_z - 0.005                    # 5 mm penetration
+
+    if not simulator.wait_for_model_spawn(probe_model, 30):
+        result["error"] = f"Force probe '{probe_model}' not spawned"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+
+    # Position at drop height
+    simulator.set_pose(probe_model, center_x, center_y, rest_z)
+    time.sleep(1)
+
+    if progress_cb:
+        progress_cb(20)
+
+    # Baseline: no contact
+    try:
+        baseline_data  = sensor.capture_data(
+            ContactsState, window=1.0, timeout=0.2, simulator=simulator
+        )
+        baseline_force = 0.0
+        for msg in baseline_data:
+            if msg.states:
+                for state in msg.states:
+                    if state.total_wrench.force is not None:
+                        f = state.total_wrench.force
+                        mag = (f.x**2 + f.y**2 + f.z**2)**0.5
+                        baseline_force = max(baseline_force, mag)
+        result["baseline_force"] = round(baseline_force, 4)
+    except Exception:
+        result["baseline_force"] = 0.0
+
+    if progress_cb:
+        progress_cb(35)
+
+    # Simulate impact: teleport to deep penetration
+    impact_start = time.time()
+    simulator.set_pose(probe_model, center_x, center_y, impact_z)
+
+    # High-frequency capture for 2 seconds (100 ms step)
+    capture_duration = 2.0
+    sample_interval  = 0.1
+    total_samples    = int(capture_duration / sample_interval)
+    force_series     = []
+
+    for idx in range(total_samples):
+        if progress_cb:
+            progress_cb(35 + int((idx / total_samples) * 50))
+
+        try:
+            contacts = sensor.capture_data(
+                ContactsState, window=0.08, timeout=0.1, simulator=simulator
+            )
+            max_force = 0.0
+            for msg in contacts:
+                if msg.states:
+                    for state in msg.states:
+                        if state.total_wrench.force is not None:
+                            f = state.total_wrench.force
+                            mag = (f.x**2 + f.y**2 + f.z**2)**0.5
+                            max_force = max(max_force, mag)
+
+            elapsed = time.time() - impact_start
+            force_series.append(max_force)
+            result["impact_time_series"].append({
+                "t": round(elapsed, 3),
+                "force": round(max_force, 4),
+            })
+
+        except Exception:
+            force_series.append(0.0)
+
+        time.sleep(sample_interval)
+
+    # Return probe to rest
+    simulator.set_pose(probe_model, center_x, center_y, rest_z)
+
+    if progress_cb:
+        progress_cb(90)
+
+    # Analyse peak and saturation
+    if force_series:
+        peak_force = max(force_series)
+        peak_idx   = force_series.index(peak_force)
+
+        result["peak_force"] = round(peak_force, 4)
+        if peak_idx < len(result["impact_time_series"]):
+            result["peak_time_s"] = result["impact_time_series"][peak_idx]["t"]
+
+        result["impulse_detected"] = peak_force > (result["baseline_force"] or 0) + 0.1
+
+        # Saturation: if >50 % of nonzero samples sit at ≥95 % of peak → flat-top clipping
+        nonzero = [v for v in force_series if v > 0]
+        if nonzero and peak_force > 0:
+            near_peak_count          = sum(1 for v in nonzero if v >= peak_force * 0.95)
+            saturation_ratio         = near_peak_count / len(nonzero)
+            result["saturation_ratio"]    = round(saturation_ratio, 3)
+            result["saturation_detected"] = saturation_ratio > 0.5
+        else:
+            result["saturation_detected"] = False
+            result["saturation_ratio"]    = 0.0
+
+        result["passed"] = result["impulse_detected"] and not result["saturation_detected"]
+    else:
+        result["error"] = "No data captured during impact window"
+
+    if progress_cb:
+        progress_cb(100)
+
+    result["duration"] = round(time.time() - t0, 2)
     return result

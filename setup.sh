@@ -26,7 +26,11 @@ if command -v python3.14 &> /dev/null; then
     PYTHON=$(command -v python3.14)
 else
     error "python3.14 not found. Install it first."
-    exit 1
+    if [ "$SOURCED" -eq 1 ]; then
+        return 1
+    else
+        exit 1
+    fi
 fi
 
 PY_VERSION=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
