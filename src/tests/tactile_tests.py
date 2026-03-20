@@ -112,21 +112,22 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
     Purpose: Create 3x3 grid response map over 50×50 mm sensor surface
 
     Specifications:
-    - Sensor size: 0.05 × 0.05 m (50×50 mm)
+    - Sensor size: read from sensor SDF params (key "size", [X, Y, Z])
     - Mounted horizontally
     - Load points: 3×3 grid on sensor surface
     - Applied force: 1.96 N (200 gf)
 
     Steps:
     1. Apply 1.96 N force at each grid point
-    2. Measure response at each point
-    3. Calculate deviation from mean
-    Pass criteria: Deviation ≤ 10% from mean
+    2. Fixed cycle per point: rise → move → lower → stabilise → collect → rise
+    3. Compute median force per point (stable metric, not peak)
+    4. Calculate deviation from mean across all points
+    Pass criteria: Deviation ≤ 10% from mean, zero missed points
     """
     result = {
         "passed": False,
         "test_name": "T2 - Response Uniformity",
-        "sensor_size_m": 0.05,
+        "sensor_size_m": None,
         "applied_force_n": 1.96,
         "grid_size": [3, 3],
         "grid_points": [],
@@ -136,10 +137,22 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         "max_deviation": 0,
         "max_deviation_percent": 0,
         "deviation_threshold": 10.0,
-        "error": None
+        "missed_points": 0,
+        "error": None,
     }
 
     t0 = time.time()
+
+    # ── Read sensor dimensions from SDF params ────────────────────────────────
+    raw_size = sensor.params.get("size")
+    if not raw_size:
+        result["error"] = "no sensor size"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    size_x = float(raw_size[0])
+    size_y = float(raw_size[1])
+    result["sensor_size_m"] = [round(size_x, 4), round(size_y, 4)]
+
     world_path = Worlds.TACTILE_UNIFORMITY
 
     if not simulator.open_scene(world_path, sensor.sdf_path):
@@ -151,29 +164,34 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
     probe_model = "uniformity_probe"
     applied_force = result["applied_force_n"]
-    penetration = applied_force * 0.001
+    penetration   = applied_force * 0.001
+    rest_z        = 0.12
+    contact_z     = 0.095 - penetration
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Probe '{probe_model}' not spawned"
         result["duration"] = round(time.time() - t0, 2)
         return result
 
-    sensor_size = result["sensor_size_m"]
-    margin = sensor_size * 0.1
-    grid_start = -sensor_size/2 + margin
-    grid_end = sensor_size/2 - margin
-    step = (grid_end - grid_start) / 2
+    # Build 3×3 grid using actual sensor dimensions from SDF
+    x_margin = size_x * 0.1
+    y_margin = size_y * 0.1
+    x_start  = -size_x / 2 + x_margin
+    x_end    =  size_x / 2 - x_margin
+    y_start  = -size_y / 2 + y_margin
+    y_end    =  size_y / 2 - y_margin
+    x_step   = (x_end - x_start) / 2
+    y_step   = (y_end - y_start) / 2
 
-    x_positions = [grid_start, grid_start + step, grid_end]
-    y_positions = [grid_start, grid_start + step, grid_end]
+    x_positions = [x_start, x_start + x_step, x_end]
+    y_positions = [y_start, y_start + y_step, y_end]
 
     print(f"\n[DEBUG] Grid positions:")
     print(f"  X: {[round(x, 4) for x in x_positions]}")
     print(f"  Y: {[round(y, 4) for y in y_positions]}")
 
-    total_points = len(x_positions) * len(y_positions)
+    total_points  = len(x_positions) * len(y_positions)
     point_counter = 0
-
     response_grid = np.zeros((3, 3))
 
     for i, x in enumerate(x_positions):
@@ -186,72 +204,90 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
                 "x": round(x, 4),
                 "y": round(y, 4),
                 "row": i,
-                "col": j
+                "col": j,
             }
 
-            probe_z = 0.12
-            simulator.set_pose(probe_model, x, y, probe_z)
-            time.sleep(0.5)
+            # ── Rise: position probe above this grid point ────────────────────
+            simulator.set_pose(probe_model, x, y, rest_z)
+            time.sleep(1.0)
 
-            contact_z = 0.095 - penetration
+            # ── Lower: make contact and wait for physics to stabilise ─────────
             simulator.set_pose(probe_model, x, y, contact_z)
-            time.sleep(0.5)
+            time.sleep(1.5)
 
+            # ── Collect: gather all force magnitudes in the window → median ───
             try:
-                contacts = sensor.capture_data(ContactsState, window=1.0, timeout=0.2, simulator=simulator)
+                contacts = sensor.capture_data(
+                    ContactsState, window=3.0, timeout=2.0, simulator=simulator
+                )
 
-                max_force = 0.0
+                magnitudes = []
                 for msg in contacts:
                     if msg.states:
                         for state in msg.states:
                             if state.total_wrench.force is not None:
                                 f = state.total_wrench.force
                                 mag = (f.x**2 + f.y**2 + f.z**2)**0.5
-                                max_force = max(max_force, mag)
+                                magnitudes.append(mag)
 
-                response_grid[i][j] = max_force
-                grid_point["response"] = round(max_force, 4)
-                grid_point["detected"] = max_force > 0
+                stable_response = float(np.median(magnitudes)) if magnitudes else 0.0
+
+                response_grid[i][j]    = stable_response
+                grid_point["response"] = round(stable_response, 4)
+                grid_point["detected"] = stable_response > 0
+                grid_point["samples"]  = len(magnitudes)
 
             except Exception as e:
-                response_grid[i][j] = 0
-                grid_point["response"] = 0
+                response_grid[i][j]    = 0.0
+                grid_point["response"] = 0.0
                 grid_point["detected"] = False
-                grid_point["error"] = str(e)
+                grid_point["samples"]  = 0
+                grid_point["error"]    = str(e)
+
+            # ── Rise: lift before moving to the next point ────────────────────
+            simulator.set_pose(probe_model, x, y, rest_z)
+            time.sleep(1.0)
 
             result["grid_points"].append(grid_point)
 
-            simulator.set_pose(probe_model, x, y, probe_z)
+    # ── Analysis ──────────────────────────────────────────────────────────────
+    all_responses = response_grid.flatten()               # all 9 points, zeros included
+    missed        = int(np.sum(all_responses == 0))
+    result["missed_points"] = missed
 
-    valid_responses = response_grid[response_grid > 0]
+    valid_responses = all_responses[all_responses > 0]
 
     if len(valid_responses) > 0:
-        result["mean_response"] = round(float(np.mean(valid_responses)), 4)
-        result["std_deviation"] = round(float(np.std(valid_responses)), 4)
-        result["response_map"] = response_grid.tolist()
+        mean_val = float(np.mean(valid_responses))
 
-        deviations = np.abs(valid_responses - result["mean_response"])
-        result["max_deviation"] = round(float(np.max(deviations)), 4)
+        result["mean_response"]   = round(mean_val, 4)
+        result["std_deviation"]   = round(float(np.std(valid_responses)), 4)
+        result["response_map"]    = response_grid.tolist()
 
-        if result["mean_response"] > 0:
+        deviations = np.abs(valid_responses - mean_val)
+        result["max_deviation"]   = round(float(np.max(deviations)), 4)
+
+        if mean_val > 0:
             result["max_deviation_percent"] = round(
-                (result["max_deviation"] / result["mean_response"]) * 100, 2
+                (result["max_deviation"] / mean_val) * 100, 2
             )
 
-        result["passed"] = result["max_deviation_percent"] <= result["deviation_threshold"]
-
-        # Additional uniformity metrics
-        result["min_response"] = round(float(np.min(valid_responses)), 4)
-        result["max_response"] = round(float(np.max(valid_responses)), 4)
-        result["range"] = round(result["max_response"] - result["min_response"], 4)
+        result["min_response"]    = round(float(np.min(valid_responses)), 4)
+        result["max_response"]    = round(float(np.max(valid_responses)), 4)
+        result["range"]           = round(result["max_response"] - result["min_response"], 4)
         result["coeff_variation"] = round(
-            (result["std_deviation"] / result["mean_response"]) * 100, 2
+            (result["std_deviation"] / mean_val) * 100, 2
+        )
+
+        # Pass only if deviation is within threshold AND every point responded
+        result["passed"] = (
+            result["max_deviation_percent"] <= result["deviation_threshold"]
+            and missed == 0
         )
     else:
         result["error"] = "No valid responses detected at any grid point"
 
     result["duration"] = round(time.time() - t0, 2)
-
     return result
 
 
