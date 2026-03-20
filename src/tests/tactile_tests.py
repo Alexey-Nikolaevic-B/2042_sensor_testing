@@ -111,6 +111,23 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
 
     min_detected = result["min_detected_force"]
     result["passed"] = min_detected is not None and min_detected <= result["threshold_norm"]
+
+    if min_detected is not None:
+        result["description"] = (
+            f"Min detectable force: {min_detected} N, "
+            f"expected: ≤ {result['threshold_norm']} N. "
+            f"Forces tested: {result['forces_tested']}. "
+            f"Detection rates: {result['detection_rate']}."
+        )
+    else:
+        tested = result["forces_tested"]
+        result["description"] = (
+            f"No stable force detected across {len(tested)} steps "
+            f"(tested range: {min(tested) if tested else 'N/A'}–"
+            f"{max(tested) if tested else 'N/A'} N), "
+            f"expected: ≤ {result['threshold_norm']} N."
+        )
+
     result["duration"] = round(time.time() - t0, 2)
 
     return result
@@ -295,8 +312,21 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
             result["max_deviation_percent"] <= result["deviation_threshold"]
             and missed == 0
         )
+
+        result["description"] = (
+            f"Max deviation: {result['max_deviation_percent']}% "
+            f"(expected: ≤ {result['deviation_threshold']}%), "
+            f"mean response: {result['mean_response']} N, "
+            f"range: {result['min_response']}–{result['max_response']} N, "
+            f"std: {result['std_deviation']} N, "
+            f"missed points: {missed}/9."
+        )
     else:
         result["error"] = "No valid responses detected at any grid point"
+        result["description"] = (
+            f"No valid responses at any of the 9 grid points. "
+            f"Sensor size: {result['sensor_size_m']} m."
+        )
 
     result["duration"] = round(time.time() - t0, 2)
     return result
@@ -456,10 +486,29 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
             result["drift_percent"]  = round(drift, 2)
             result["jitter_percent"] = round(jitter, 2)
             result["passed"]         = drift <= result["drift_threshold_percent"]
+
+            recovery_str = (
+                "OK" if result.get("recovery_ok") is True
+                else "FAIL" if result.get("recovery_ok") is False
+                else "unknown"
+            )
+            result["description"] = (
+                f"Signal drift: {result['drift_percent']}% "
+                f"(expected: ≤ {result['drift_threshold_percent']}%), "
+                f"start mean: {result['start_mean']} N → end mean: {result['end_mean']} N, "
+                f"jitter: {result['jitter_percent']}%, "
+                f"std: {result['std_deviation']} N, "
+                f"recovery after unload: {recovery_str}."
+            )
         else:
             result["error"] = "No valid signal at start of measurement"
+            result["description"] = "Signal was zero throughout the measurement window — sensor may not be in contact."
     else:
         result["error"] = "Insufficient valid readings collected"
+        result["description"] = (
+            f"Only {len(valid)} valid readings out of {result['measurement_duration_s']} expected — "
+            f"too few samples to evaluate drift."
+        )
 
     if progress_cb:
         progress_cb(100)
@@ -628,8 +677,17 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
             result["saturation_ratio"]    = 0.0
 
         result["passed"] = result["impulse_detected"] and not result["saturation_detected"]
+
+        result["description"] = (
+            f"Peak force: {result['peak_force']} N at t={result['peak_time_s']} s "
+            f"(baseline: {result['baseline_force']} N, drop height: {result['drop_height_m']} m), "
+            f"impulse: {'detected' if result['impulse_detected'] else 'not detected'}, "
+            f"saturation ratio: {result['saturation_ratio']} "
+            f"({'clipping detected' if result['saturation_detected'] else 'no clipping'})."
+        )
     else:
         result["error"] = "No data captured during impact window"
+        result["description"] = "No contact data received during the 2-second impact capture window."
 
     if progress_cb:
         progress_cb(100)
