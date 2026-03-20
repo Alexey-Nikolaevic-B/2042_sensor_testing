@@ -1,7 +1,7 @@
 import re
 import time
 import logging
-from typing import Optional
+import rospy
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
     namespace = ""
     namespace_match = re.search(r"<namespace>\s*(/[^<\s]+)\s*</namespace>", content)
     if namespace_match:
-        namespace = namespace_match.group(1).rstrip("/")
+        namespace = namespace_match.group(1).rstrip('/')
 
     for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
         t = m.group(1).strip()
@@ -35,9 +35,9 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
             parts = re.split(r":=\s*", arg)
             if len(parts) == 2:
                 remapped = parts[1].strip()
-                if not remapped.startswith("/") and namespace:
+                if not remapped.startswith('/') and namespace:
                     topic = f"{namespace}/{remapped}"
-                elif remapped.startswith("/"):
+                elif remapped.startswith('/'):
                     topic = remapped
                 else:
                     topic = remapped
@@ -46,32 +46,27 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
                     seen.add(topic)
                     topics.append(topic)
         else:
-            if not arg.startswith("/") and namespace:
+            if not arg.startswith('/') and namespace:
                 topic = f"{namespace}/{arg}"
-            elif arg.startswith("/"):
+            elif arg.startswith('/'):
                 topic = arg
             else:
                 topic = arg
 
-            if (
-                topic
-                and topic not in seen
-                and not topic.startswith("--")
-                and not topic.startswith("-")
-            ):
+            if topic and topic not in seen and not topic.startswith('--') and not topic.startswith('-'):
                 seen.add(topic)
                 topics.append(topic)
 
     for m in re.finditer(r"<(\w*[Tt]opic\w*)>\s*([^<\s]+)\s*</\1>", content):
         topic_name = m.group(2).strip()
-        if not topic_name.startswith("/") and namespace:
+        if not topic_name.startswith('/') and namespace:
             topic = f"{namespace}/{topic_name}"
-        elif topic_name.startswith("/"):
+        elif topic_name.startswith('/'):
             topic = topic_name
         else:
             topic = topic_name
 
-        if topic and topic not in seen and not topic.startswith("--"):
+        if topic and topic not in seen and not topic.startswith('--'):
             seen.add(topic)
             topics.append(topic)
 
@@ -79,31 +74,27 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
 
 
 class Sensor:
-    def __init__(
-        self,
-        sensor_type: str,
-        sensor_name: str,
-        sdf_path: str,
-        topics: list = None,
-        description: str = "",
-        image_path: str = "",
-        params: dict = None,
-    ):
+    def __init__(self, sensor_type: str, sensor_name: str, sdf_path: str,
+                 topics: list = None, description: str = "",
+                 image_path: str = "", params: dict = None):
         self.sensor_type = sensor_type
         self.sensor_name = sensor_name
-        self.sdf_path = sdf_path
-        self.topics = list(topics or [])
+        self.sdf_path    = sdf_path
+        self.topics      = list(topics or [])
         self.description = description
-        self.image_path = image_path
-        self.params = params or {}
+        self.image_path  = image_path
+        self.params      = params or {}
+
 
     @property
     def topic(self) -> str:
         """Primary topic — first in list, for backwards compat."""
         return self.topics[0] if self.topics else ""
 
+
     def param(self, name: str, default=None):
         return self.params.get(name, default)
+
 
     def read_params_from_sdf(self, param_defs) -> dict:
         """Read parameter values from the SDF file.
@@ -142,8 +133,7 @@ class Sensor:
                 for seg in path.split("/"):
                     seg_m = re.search(
                         rf"<{re.escape(seg)}>(.*?)</{re.escape(seg)}>",
-                        search_in,
-                        re.DOTALL,
+                        search_in, re.DOTALL
                     )
                     if seg_m:
                         search_in = seg_m.group(1)
@@ -155,13 +145,13 @@ class Sensor:
 
             m = re.search(
                 rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
-                search_in,
-                re.DOTALL,
+                search_in, re.DOTALL
             )
             if m:
                 result[name] = m.group(1).strip()
 
         return result
+
 
     def write_params_to_sdf(self, params: dict) -> None:
         if not self.sdf_path:
@@ -175,48 +165,18 @@ class Sensor:
             content, n = re.subn(
                 rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)",
                 rf"\g<1>{value}\g<2>",
-                content,
-                count=1,
-                flags=re.DOTALL,
+                content, count=1, flags=re.DOTALL,
             )
             if n == 0:
-                logger.warning(
-                    "write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path
-                )
+                logger.warning("write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path)
         with open(self.sdf_path, "w", encoding="utf-8") as f:
             f.write(content)
         self.params.update(params)
 
-    def capture_frames(
-        self,
-        msg_type,
-        topic: str = "",
-        window: float = 2.0,
-        timeout: float = 0.25,
-        simulator=None,
-    ) -> dict:
-        """
-        RFID-style capture: returns {frame_id: pose} deduplicating by frame_id.
-        Wraps capture_data — keeps RFID tests unchanged.
-        """
-        msgs = self.capture_data(
-            msg_type, topic=topic, window=window, timeout=timeout, simulator=simulator
-        )
-        return {
-            msg.header.frame_id: msg.pose
-            for msg in msgs
-            if hasattr(msg, "header") and hasattr(msg, "pose")
-        }
 
-    def capture_data(
-        self,
-        msg_type,
-        topic: str = "",
-        window: float = 2.0,
-        timeout: float = 0.25,
-        warmup: float = 0.0,
-        simulator=None,
-    ) -> list:
+    def capture_data(self, msg_type, topic: str = "", window: float = 2.0,
+                     timeout: float = 0.25, warmup: float = 0.0,
+                     simulator=None) -> list:
         """
         Read messages from a ROS topic for `window` seconds.
         Uses `topic` if given, otherwise falls back to self.topic (first in list).
@@ -228,10 +188,8 @@ class Sensor:
 
         After capture: fires simulator.notify_capture and respects step-mode.
         """
-        import rospy
-
-        t = topic or self.topic
-        results = []
+        t        = topic or self.topic
+        results  = []
         if warmup > 0:
             time.sleep(warmup)
         deadline = time.time() + window
@@ -246,20 +204,17 @@ class Sensor:
             sensor_data = {
                 "sensor_type": self.sensor_type,
                 "sensor_name": self.sensor_name,
-                "topic": t,
-                "count": len(results),
-                "image_path": self.image_path,  # catalog photo from DB; UI fallback when ROS msgs don't render
-                "messages": results,  # raw ROS messages for processing
+                "topic":       t,
+                "count":       len(results),
+                "image_path":  self.image_path,  # catalog photo from DB
+                "messages":    results,   # raw ROS messages for processing
             }
-            obs_img = (
-                simulator.capture_observer_frame()
-                if simulator.gazebo_is_running
-                else None
-            )
+            obs_img = simulator.capture_observer_frame() if simulator.gazebo_is_running else None
             simulator.notify_capture(sensor_data, obs_img)
             simulator.wait_for_step()
 
         return results
+
 
     def __repr__(self):
         return f"<Sensor {self.sensor_type!r} name={self.sensor_name!r}>"
