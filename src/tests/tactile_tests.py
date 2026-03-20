@@ -22,6 +22,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     """
     result = {
         "passed": False,
+        "description": None,
         "test_name": "T1 - Minimum Force Threshold",
         "sensor_size_m": None,
         "threshold_norm": 2.0,
@@ -154,6 +155,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
     """
     result = {
         "passed": False,
+        "description": None,
         "test_name": "T2 - Response Uniformity",
         "sensor_size_m": None,
         "applied_force_n": 1.96,
@@ -352,6 +354,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     """
     result = {
         "passed": False,
+        "description": None,
         "test_name": "T3 - Temporal Stability",
         "sensor_size_m": None,
         "applied_force_n": 4.9,
@@ -537,6 +540,7 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     """
     result = {
         "passed": False,
+        "description": None,
         "test_name": "T4 - Peak Load Response",
         "sensor_size_m": None,
         "drop_height_m": 0.5,
