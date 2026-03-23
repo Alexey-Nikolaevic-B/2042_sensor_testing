@@ -13,11 +13,13 @@ class Core:
 
     def get_sensor_types(self) -> List[str]:
         import src.sensor_storage as db
+
         return db.get_sensor_type_names()
 
     def get_tests(self, sensor) -> Dict[str, Any]:
         """Return {func_name: callable} for all tests registered for this sensor's type."""
         import logging as _log
+
         _logger = _log.getLogger(__name__)
 
         sensor_type = getattr(sensor, "sensor_type", None)
@@ -36,7 +38,6 @@ class Core:
             _logger.error("get_tests_for_type(%r) failed: %s", sensor_type, e)
             return {}
 
-
     def detect_sensor_type(self, sdf_path: str) -> Optional[str]:
         return _detect(sdf_path)
 
@@ -45,7 +46,7 @@ class Core:
         import src.sensor_storage as db
 
         sensor_type = getattr(sensor, "sensor_type", None)
-        sdf_path    = getattr(sensor, "sdf_path", None)
+        sdf_path = getattr(sensor, "sdf_path", None)
         if not sensor_type or not sdf_path:
             return {}
 
@@ -75,9 +76,9 @@ class Core:
 
         # Use Sensor directly — REGISTRY is mostly empty since types come from DB
         instance = Sensor(
-            sensor_type = sensor_data.get("type", ""),
-            sensor_name = sensor_data.get("name", ""),
-            sdf_path    = sdf_path,
+            sensor_type=sensor_data.get("type", ""),
+            sensor_name=sensor_data.get("name", ""),
+            sdf_path=sdf_path,
         )
         instance.write_params_to_sdf(params)
         repo.update_sensor(sensor_id, {"params": params})

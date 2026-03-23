@@ -1,4 +1,5 @@
 """Stereo camera (scam) tests — S1, S2, stereo_topics, stereo_disparity, stereo_occlusion."""
+
 import copy
 import logging
 import math
@@ -49,7 +50,14 @@ class _StereoProfileTestContext:
     C7_CASES = {"occ_25": 0.20, "occ_50": 0.10}
     C7_MIN_PIXELS = 800
     MIN_DISPARITY_PX = 2
-    C8_OBJECTS = ("obj_near_cube", "obj_near_sphere", "obj_far_cube", "obj_far_sphere", "wall_left", "wall_right")
+    C8_OBJECTS = (
+        "obj_near_cube",
+        "obj_near_sphere",
+        "obj_far_cube",
+        "obj_far_sphere",
+        "wall_left",
+        "wall_right",
+    )
     S1_MAX_REL_ERROR = 0.10
     S1_MIN_PASS_OBJECTS = 3
     S2_MIN_VALID_GAIN = 0.05
@@ -70,7 +78,9 @@ class _StereoProfileTestContext:
     TOPIC_WARMUP_TIMEOUT_S = 25.0
 
     def __init__(self, sensor):
-        print(f"[DEBUG StereoCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}")
+        print(
+            f"[DEBUG StereoCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}"
+        )
         self.sensor = sensor
         self.sensor_name = str(getattr(sensor, "sensor_name", ""))
         self.sensor_type = str(getattr(sensor, "sensor_type", ""))
@@ -78,33 +88,61 @@ class _StereoProfileTestContext:
         self.CONFIG = {"ROOT_PATH": str(CONFIG["ROOT_PATH"])}
 
         worlds_root = _camera_worlds_root()
-        profile = _camera_load_sensor_profile(self.sensor_sdf_path) if self.sensor_sdf_path else {}
-        print(f"[DEBUG StereoCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}")
-        print(f"[DEBUG StereoCtx.__init__] profile.left_topic={profile.get('left_topic', 'N/A')}, profile.right_topic={profile.get('right_topic', 'N/A')}")
+        profile = (
+            _camera_load_sensor_profile(self.sensor_sdf_path)
+            if self.sensor_sdf_path
+            else {}
+        )
+        print(
+            f"[DEBUG StereoCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}"
+        )
+        print(
+            f"[DEBUG StereoCtx.__init__] profile.left_topic={profile.get('left_topic', 'N/A')}, profile.right_topic={profile.get('right_topic', 'N/A')}"
+        )
 
         self.test_to_world = {
-            "stereo_topics_presence_test": str(worlds_root / "camera_c4_geometries.world"),
+            "stereo_topics_presence_test": str(
+                worlds_root / "camera_c4_geometries.world"
+            ),
             "stereo_disparity_test": str(worlds_root / "camera_c1_single_cube.world"),
             "stereo_occlusion_test": str(worlds_root / "camera_c7_occlusion.world"),
-            "s1_stereo_accuracy_test": str(worlds_root / "camera_c8_stereo_complex.world"),
-            "s2_texture_vs_smooth_stability_test": str(worlds_root / "camera_c8_stereo_complex.world"),
+            "s1_stereo_accuracy_test": str(
+                worlds_root / "camera_c8_stereo_complex.world"
+            ),
+            "s2_texture_vs_smooth_stability_test": str(
+                worlds_root / "camera_c8_stereo_complex.world"
+            ),
         }
         for test_name, wpath in self.test_to_world.items():
-            print(f"[DEBUG StereoCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}")
+            print(
+                f"[DEBUG StereoCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}"
+            )
 
         sensor_topics = list(getattr(sensor, "topics", []) or [])
         print(f"[DEBUG StereoCtx.__init__] sensor.topics={sensor_topics}")
-        self.LEFT_IMAGE_TOPIC = str(profile.get("left_topic", "") or (sensor_topics[0] if len(sensor_topics) > 0 else self.LEFT_IMAGE_TOPIC))
-        self.RIGHT_IMAGE_TOPIC = str(profile.get("right_topic", "") or (sensor_topics[1] if len(sensor_topics) > 1 else self.RIGHT_IMAGE_TOPIC))
+        self.LEFT_IMAGE_TOPIC = str(
+            profile.get("left_topic", "")
+            or (sensor_topics[0] if len(sensor_topics) > 0 else self.LEFT_IMAGE_TOPIC)
+        )
+        self.RIGHT_IMAGE_TOPIC = str(
+            profile.get("right_topic", "")
+            or (sensor_topics[1] if len(sensor_topics) > 1 else self.RIGHT_IMAGE_TOPIC)
+        )
         self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
         self.image_height = int(profile.get("image_height") or self.IMAGE_HEIGHT)
-        self.horizontal_fov = float(profile.get("horizontal_fov") or self.HORIZONTAL_FOV_RAD)
+        self.horizontal_fov = float(
+            profile.get("horizontal_fov") or self.HORIZONTAL_FOV_RAD
+        )
         self.clip_near = float(profile.get("clip_near") or self.CLIP_NEAR)
         self.clip_far = float(profile.get("clip_far") or self.CLIP_FAR)
         self.update_rate = int(profile.get("update_rate") or self.UPDATE_RATE)
         self.baseline = float(profile.get("baseline") or self.BASELINE_M)
-        print(f"[DEBUG StereoCtx.__init__] resolved: LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}")
-        print(f"[DEBUG StereoCtx.__init__] {self.image_width}x{self.image_height}, baseline={self.baseline}m, clip=[{self.clip_near}, {self.clip_far}]")
+        print(
+            f"[DEBUG StereoCtx.__init__] resolved: LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}"
+        )
+        print(
+            f"[DEBUG StereoCtx.__init__] {self.image_width}x{self.image_height}, baseline={self.baseline}m, clip=[{self.clip_near}, {self.clip_far}]"
+        )
         self._last_test_diagnostics: Dict[str, Any] = {}
         self._last_scene_diag: Dict[str, Any] = {}
         self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
@@ -149,7 +187,9 @@ class _StereoProfileTestContext:
 
     def _update_resolved_stereo_topics(self, simulator) -> Dict[str, Any]:
         scene_diag = self._scene_diag(simulator)
-        self._last_scene_diag = copy.deepcopy(scene_diag) if isinstance(scene_diag, dict) else {}
+        self._last_scene_diag = (
+            copy.deepcopy(scene_diag) if isinstance(scene_diag, dict) else {}
+        )
         self._resolved_left_topic = str(self.LEFT_IMAGE_TOPIC)
         self._resolved_right_topic = str(self.RIGHT_IMAGE_TOPIC)
         return scene_diag
@@ -161,24 +201,40 @@ class _StereoProfileTestContext:
         display_env = self._ensure_render_display_env()
         if display_env:
             print(f"[DEBUG StereoCtx._open_test_scene] display_env={display_env}")
-            self._set_test_diagnostics(stereo_render_env={"display_env": dict(display_env)})
+            self._set_test_diagnostics(
+                stereo_render_env={"display_env": dict(display_env)}
+            )
         world = self.test_to_world[test_name]
-        print(f"[DEBUG StereoCtx._open_test_scene] world={world}, exists={os.path.exists(world)}")
-        print(f"[DEBUG StereoCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}")
+        print(
+            f"[DEBUG StereoCtx._open_test_scene] world={world}, exists={os.path.exists(world)}"
+        )
+        print(
+            f"[DEBUG StereoCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}"
+        )
         print(f"[DEBUG StereoCtx._open_test_scene] calling simulator.open_scene()...")
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = self._scene_diag(simulator)
-            self._last_scene_diag = copy.deepcopy(diag) if isinstance(diag, dict) else {}
-            reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            self._last_scene_diag = (
+                copy.deepcopy(diag) if isinstance(diag, dict) else {}
+            )
+            reason = (
+                diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            )
             print(f"[DEBUG StereoCtx._open_test_scene] FAILED: reason={reason}")
-            raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
+            raise RuntimeError(
+                f"Failed to open scene for {test_name}: {world} (reason={reason})"
+            )
 
-        print(f"[DEBUG StereoCtx._open_test_scene] scene opened OK, waiting for services...")
-        rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
-        rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+        print(
+            f"[DEBUG StereoCtx._open_test_scene] scene opened OK, waiting for services..."
+        )
+        rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
+        rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
         print(f"[DEBUG StereoCtx._open_test_scene] services ready, resolving topics...")
         scene_diag = self._update_resolved_stereo_topics(simulator)
-        print(f"[DEBUG StereoCtx._open_test_scene] resolved_left={self._resolved_left_topic}, resolved_right={self._resolved_right_topic}")
+        print(
+            f"[DEBUG StereoCtx._open_test_scene] resolved_left={self._resolved_left_topic}, resolved_right={self._resolved_right_topic}"
+        )
         self._set_test_diagnostics(
             stereo_scene={
                 "display_env": dict(display_env),
@@ -213,7 +269,9 @@ class _StereoProfileTestContext:
         raise ValueError(f"Unsupported image encoding: {msg.encoding}")
 
     def _wait_pair(self, timeout: float = 35.0) -> Tuple[Image, Image]:
-        left, right, _ = self._wait_pair_closest(timeout=timeout, retries=1, max_skew_s=float(self.PAIR_MAX_SKEW_S))
+        left, right, _ = self._wait_pair_closest(
+            timeout=timeout, retries=1, max_skew_s=float(self.PAIR_MAX_SKEW_S)
+        )
         return left, right
 
     @staticmethod
@@ -225,7 +283,12 @@ class _StereoProfileTestContext:
 
     @staticmethod
     def _pair_stamp(left_msg: Image, right_msg: Image) -> float:
-        return float(max(_StereoProfileTestContext._msg_stamp(left_msg), _StereoProfileTestContext._msg_stamp(right_msg)))
+        return float(
+            max(
+                _StereoProfileTestContext._msg_stamp(left_msg),
+                _StereoProfileTestContext._msg_stamp(right_msg),
+            )
+        )
 
     @staticmethod
     def _list_image_topics() -> List[str]:
@@ -233,7 +296,9 @@ class _StereoProfileTestContext:
             published = rospy.get_published_topics()
         except Exception:
             return []
-        return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
+        return sorted(
+            [name for name, msg_type in published if msg_type == "sensor_msgs/Image"]
+        )
 
     @staticmethod
     def _looks_like_side_topic(topic: str, side: str) -> bool:
@@ -241,9 +306,17 @@ class _StereoProfileTestContext:
         if not normalized:
             return False
         if side == "left":
-            return ("/left/" in normalized) or ("_left/" in normalized) or normalized.endswith("_left/image_raw")
+            return (
+                ("/left/" in normalized)
+                or ("_left/" in normalized)
+                or normalized.endswith("_left/image_raw")
+            )
         if side == "right":
-            return ("/right/" in normalized) or ("_right/" in normalized) or normalized.endswith("_right/image_raw")
+            return (
+                ("/right/" in normalized)
+                or ("_right/" in normalized)
+                or normalized.endswith("_right/image_raw")
+            )
         return False
 
     @classmethod
@@ -252,27 +325,50 @@ class _StereoProfileTestContext:
         right = str(right_topic or "").strip()
         if not left or not right or left == right:
             return False
-        return bool(cls._looks_like_side_topic(left, "left") and cls._looks_like_side_topic(right, "right"))
+        return bool(
+            cls._looks_like_side_topic(left, "left")
+            and cls._looks_like_side_topic(right, "right")
+        )
 
-    def _resolve_stereo_topics(self, warmup_timeout: float) -> Tuple[str, str, Dict[str, Any]]:
-        print(f"[DEBUG StereoCtx._resolve_stereo_topics] warmup_timeout={warmup_timeout}s")
+    def _resolve_stereo_topics(
+        self, warmup_timeout: float
+    ) -> Tuple[str, str, Dict[str, Any]]:
+        print(
+            f"[DEBUG StereoCtx._resolve_stereo_topics] warmup_timeout={warmup_timeout}s"
+        )
         expected_left = str(self.LEFT_IMAGE_TOPIC)
         expected_right = str(self.RIGHT_IMAGE_TOPIC)
         cached_left = str(self._resolved_left_topic or "").strip()
         cached_right = str(self._resolved_right_topic or "").strip()
         sensor_name = str(self.sensor_name)
-        print(f"[DEBUG StereoCtx._resolve_stereo_topics] expected_left={expected_left}, expected_right={expected_right}")
-        print(f"[DEBUG StereoCtx._resolve_stereo_topics] cached_left={cached_left}, cached_right={cached_right}")
+        print(
+            f"[DEBUG StereoCtx._resolve_stereo_topics] expected_left={expected_left}, expected_right={expected_right}"
+        )
+        print(
+            f"[DEBUG StereoCtx._resolve_stereo_topics] cached_left={cached_left}, cached_right={cached_right}"
+        )
 
         preferred_pairs: List[Tuple[str, str, str]] = []
         if self._is_valid_stereo_pair(cached_left, cached_right):
             preferred_pairs.append((cached_left, cached_right, "scene_resolved"))
-        if expected_left and expected_right and (expected_left, expected_right) != (cached_left, cached_right):
+        if (
+            expected_left
+            and expected_right
+            and (expected_left, expected_right) != (cached_left, cached_right)
+        ):
             preferred_pairs.append((expected_left, expected_right, "expected"))
         preferred_pairs.extend(
             [
-                (f"/{sensor_name}_left/image_raw", f"/{sensor_name}_right/image_raw", "name_underscore"),
-                (f"/{sensor_name}/left/image_raw", f"/{sensor_name}/right/image_raw", "name_namespace"),
+                (
+                    f"/{sensor_name}_left/image_raw",
+                    f"/{sensor_name}_right/image_raw",
+                    "name_underscore",
+                ),
+                (
+                    f"/{sensor_name}/left/image_raw",
+                    f"/{sensor_name}/right/image_raw",
+                    "name_namespace",
+                ),
             ]
         )
 
@@ -282,72 +378,119 @@ class _StereoProfileTestContext:
             topics = self._list_image_topics()
             last_topics = topics
             for left_topic, right_topic, source in preferred_pairs:
-                if self._is_valid_stereo_pair(left_topic, right_topic) and left_topic in topics and right_topic in topics:
-                    return left_topic, right_topic, {
+                if (
+                    self._is_valid_stereo_pair(left_topic, right_topic)
+                    and left_topic in topics
+                    and right_topic in topics
+                ):
+                    return (
+                        left_topic,
+                        right_topic,
+                        {
+                            "expected_left": expected_left,
+                            "expected_right": expected_right,
+                            "selected_left": left_topic,
+                            "selected_right": right_topic,
+                            "selected_source": source,
+                            "topics_found": topics,
+                            "topic_mapping_changed": bool(
+                                left_topic != expected_left
+                                or right_topic != expected_right
+                            ),
+                        },
+                    )
+            time.sleep(0.2)
+
+        if (
+            self._is_valid_stereo_pair(expected_left, expected_right)
+            and expected_left in last_topics
+            and expected_right in last_topics
+        ):
+            return (
+                expected_left,
+                expected_right,
+                {
+                    "expected_left": expected_left,
+                    "expected_right": expected_right,
+                    "selected_left": expected_left,
+                    "selected_right": expected_right,
+                    "selected_source": "expected_after_warmup",
+                    "topics_found": last_topics,
+                    "topic_mapping_changed": False,
+                },
+            )
+
+        for left_topic, right_topic, source in preferred_pairs[1:]:
+            if (
+                self._is_valid_stereo_pair(left_topic, right_topic)
+                and left_topic in last_topics
+                and right_topic in last_topics
+            ):
+                return (
+                    left_topic,
+                    right_topic,
+                    {
                         "expected_left": expected_left,
                         "expected_right": expected_right,
                         "selected_left": left_topic,
                         "selected_right": right_topic,
-                        "selected_source": source,
-                        "topics_found": topics,
-                        "topic_mapping_changed": bool(left_topic != expected_left or right_topic != expected_right),
-                    }
-            time.sleep(0.2)
-
-        if self._is_valid_stereo_pair(expected_left, expected_right) and expected_left in last_topics and expected_right in last_topics:
-            return expected_left, expected_right, {
-                "expected_left": expected_left,
-                "expected_right": expected_right,
-                "selected_left": expected_left,
-                "selected_right": expected_right,
-                "selected_source": "expected_after_warmup",
-                "topics_found": last_topics,
-                "topic_mapping_changed": False,
-            }
-
-        for left_topic, right_topic, source in preferred_pairs[1:]:
-            if self._is_valid_stereo_pair(left_topic, right_topic) and left_topic in last_topics and right_topic in last_topics:
-                return left_topic, right_topic, {
-                    "expected_left": expected_left,
-                    "expected_right": expected_right,
-                    "selected_left": left_topic,
-                    "selected_right": right_topic,
-                    "selected_source": f"{source}_after_warmup",
-                    "topics_found": last_topics,
-                    "topic_mapping_changed": True,
-                }
+                        "selected_source": f"{source}_after_warmup",
+                        "topics_found": last_topics,
+                        "topic_mapping_changed": True,
+                    },
+                )
         safe_candidates = [
             {
                 "left": left_topic,
                 "right": right_topic,
                 "source": source,
-                "published": bool(left_topic in last_topics and right_topic in last_topics),
+                "published": bool(
+                    left_topic in last_topics and right_topic in last_topics
+                ),
             }
             for left_topic, right_topic, source in preferred_pairs
             if self._is_valid_stereo_pair(left_topic, right_topic)
         ]
-        published_left_candidates = [topic for topic in last_topics if self._looks_like_side_topic(topic, "left")]
-        published_right_candidates = [topic for topic in last_topics if self._looks_like_side_topic(topic, "right")]
-        sensor_namespace_left = [topic for topic in published_left_candidates if sensor_name and sensor_name in topic]
-        sensor_namespace_right = [topic for topic in published_right_candidates if sensor_name and sensor_name in topic]
+        published_left_candidates = [
+            topic for topic in last_topics if self._looks_like_side_topic(topic, "left")
+        ]
+        published_right_candidates = [
+            topic
+            for topic in last_topics
+            if self._looks_like_side_topic(topic, "right")
+        ]
+        sensor_namespace_left = [
+            topic
+            for topic in published_left_candidates
+            if sensor_name and sensor_name in topic
+        ]
+        sensor_namespace_right = [
+            topic
+            for topic in published_right_candidates
+            if sensor_name and sensor_name in topic
+        ]
 
-        return "", "", {
-            "expected_left": expected_left,
-            "expected_right": expected_right,
-            "selected_left": "",
-            "selected_right": "",
-            "selected_source": "unresolved_no_safe_pair",
-            "topics_found": last_topics,
-            "topic_mapping_changed": False,
-            "scene_resolved_left": cached_left,
-            "scene_resolved_right": cached_right,
-            "safe_candidates": safe_candidates,
-            "published_left_candidates": published_left_candidates,
-            "published_right_candidates": published_right_candidates,
-            "sensor_namespace_left_candidates": sensor_namespace_left,
-            "sensor_namespace_right_candidates": sensor_namespace_right,
-            "resolve_reason": "no_safe_stereo_pair_after_warmup",
-        }
+        return (
+            "",
+            "",
+            {
+                "expected_left": expected_left,
+                "expected_right": expected_right,
+                "selected_left": "",
+                "selected_right": "",
+                "selected_source": "unresolved_no_safe_pair",
+                "topics_found": last_topics,
+                "topic_mapping_changed": False,
+                "scene_resolved_left": cached_left,
+                "scene_resolved_right": cached_right,
+                "safe_candidates": safe_candidates,
+                "published_left_candidates": published_left_candidates,
+                "published_right_candidates": published_right_candidates,
+                "sensor_namespace_left_candidates": sensor_namespace_left,
+                "sensor_namespace_right_candidates": sensor_namespace_right,
+                "resolve_reason": "no_safe_stereo_pair_after_warmup",
+            },
+        )
 
     def _wait_pair_closest(
         self,
@@ -356,25 +499,43 @@ class _StereoProfileTestContext:
         max_skew_s: float = 0.08,
         min_pair_stamp_s: Optional[float] = None,
     ) -> Tuple[Image, Image, float]:
-        print(f"[DEBUG StereoCtx._wait_pair_closest] timeout={timeout}, retries={retries}, max_skew={max_skew_s}")
-        print(f"[DEBUG StereoCtx._wait_pair_closest] LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}")
+        print(
+            f"[DEBUG StereoCtx._wait_pair_closest] timeout={timeout}, retries={retries}, max_skew={max_skew_s}"
+        )
+        print(
+            f"[DEBUG StereoCtx._wait_pair_closest] LEFT={self.LEFT_IMAGE_TOPIC}, RIGHT={self.RIGHT_IMAGE_TOPIC}"
+        )
         try:
             import message_filters
+
             print(f"[DEBUG StereoCtx._wait_pair_closest] message_filters imported OK")
         except Exception as exc:  # noqa: BLE001
-            print(f"[DEBUG StereoCtx._wait_pair_closest] FAILED to import message_filters: {exc}")
-            self._set_test_diagnostics(stereo_pair_capture={"reason": "message_filters_import_error", "error": str(exc)})
+            print(
+                f"[DEBUG StereoCtx._wait_pair_closest] FAILED to import message_filters: {exc}"
+            )
+            self._set_test_diagnostics(
+                stereo_pair_capture={
+                    "reason": "message_filters_import_error",
+                    "error": str(exc),
+                }
+            )
             raise RuntimeError(f"message_filters import failed: {exc}")
 
-        left_topic, right_topic, topic_diag = self._resolve_stereo_topics(self.TOPIC_WARMUP_TIMEOUT_S)
-        print(f"[DEBUG StereoCtx._wait_pair_closest] resolved: left={left_topic}, right={right_topic}")
+        left_topic, right_topic, topic_diag = self._resolve_stereo_topics(
+            self.TOPIC_WARMUP_TIMEOUT_S
+        )
+        print(
+            f"[DEBUG StereoCtx._wait_pair_closest] resolved: left={left_topic}, right={right_topic}"
+        )
         pair_diag: Dict[str, Any] = dict(topic_diag)
         pair_diag.update(
             {
                 "timeout_s": float(timeout),
                 "retries": int(retries),
                 "max_skew_s": float(max_skew_s),
-                "min_pair_stamp_s": None if min_pair_stamp_s is None else float(min_pair_stamp_s),
+                "min_pair_stamp_s": (
+                    None if min_pair_stamp_s is None else float(min_pair_stamp_s)
+                ),
                 "queue_size": int(self.PAIR_QUEUE_SIZE),
                 "slop_s": float(self.PAIR_SLOP_S),
                 "attempts": [],
@@ -391,7 +552,11 @@ class _StereoProfileTestContext:
             raise RuntimeError(f"Stereo topics collapsed to one topic: {left_topic}")
 
         for attempt in range(1, int(retries) + 1):
-            attempt_diag: Dict[str, Any] = {"attempt": int(attempt), "left_msgs": 0, "right_msgs": 0}
+            attempt_diag: Dict[str, Any] = {
+                "attempt": int(attempt),
+                "left_msgs": 0,
+                "right_msgs": 0,
+            }
             lock = threading.Lock()
             pair_holder: Dict[str, Any] = {}
 
@@ -406,10 +571,14 @@ class _StereoProfileTestContext:
                     if pair_holder:
                         return
                     pair_stamp = self._pair_stamp(left_msg, right_msg)
-                    if min_pair_stamp_s is not None and pair_stamp <= float(min_pair_stamp_s) + 1e-6:
-                        attempt_diag["pairs_rejected_before_min_stamp"] = int(
-                            attempt_diag.get("pairs_rejected_before_min_stamp", 0)
-                        ) + 1
+                    if (
+                        min_pair_stamp_s is not None
+                        and pair_stamp <= float(min_pair_stamp_s) + 1e-6
+                    ):
+                        attempt_diag["pairs_rejected_before_min_stamp"] = (
+                            int(attempt_diag.get("pairs_rejected_before_min_stamp", 0))
+                            + 1
+                        )
                         return
                     skew = abs(self._msg_stamp(left_msg) - self._msg_stamp(right_msg))
                     pair_holder["left"] = left_msg
@@ -417,8 +586,12 @@ class _StereoProfileTestContext:
                     pair_holder["skew"] = float(skew)
                     pair_holder["pair_stamp"] = float(pair_stamp)
 
-            left_counter_sub = rospy.Subscriber(left_topic, Image, _left_count, queue_size=200)
-            right_counter_sub = rospy.Subscriber(right_topic, Image, _right_count, queue_size=200)
+            left_counter_sub = rospy.Subscriber(
+                left_topic, Image, _left_count, queue_size=200
+            )
+            right_counter_sub = rospy.Subscriber(
+                right_topic, Image, _right_count, queue_size=200
+            )
 
             left_mf = message_filters.Subscriber(left_topic, Image)
             right_mf = message_filters.Subscriber(right_topic, Image)
@@ -472,7 +645,9 @@ class _StereoProfileTestContext:
     @staticmethod
     def _fx_from_fov(width_px: int, horizontal_fov_rad: float) -> float:
         if width_px <= 0 or horizontal_fov_rad <= 0.0:
-            raise RuntimeError(f"Invalid camera intrinsics for fx estimation: width={width_px}, fov={horizontal_fov_rad}")
+            raise RuntimeError(
+                f"Invalid camera intrinsics for fx estimation: width={width_px}, fov={horizontal_fov_rad}"
+            )
         return float((width_px / 2.0) / tan(horizontal_fov_rad / 2.0))
 
     def _compute_disparity_and_depth(
@@ -481,7 +656,9 @@ class _StereoProfileTestContext:
         right_bgr: np.ndarray,
     ) -> Tuple[np.ndarray, np.ndarray, float]:
         if left_bgr.shape[:2] != right_bgr.shape[:2]:
-            raise RuntimeError(f"Stereo size mismatch: left={left_bgr.shape[:2]}, right={right_bgr.shape[:2]}")
+            raise RuntimeError(
+                f"Stereo size mismatch: left={left_bgr.shape[:2]}, right={right_bgr.shape[:2]}"
+            )
 
         if self.baseline <= 0.0:
             raise RuntimeError(f"Invalid baseline: {self.baseline}")
@@ -553,7 +730,7 @@ class _StereoProfileTestContext:
         bbox: Tuple[int, int, int, int],
     ) -> Tuple[Optional[float], int]:
         x, y, w, h = bbox
-        roi = depth_map[y:y + h, x:x + w]
+        roi = depth_map[y : y + h, x : x + w]
         with np.errstate(invalid="ignore"):
             finite = np.isfinite(roi)
         valid = roi[finite]
@@ -589,7 +766,9 @@ class _StereoProfileTestContext:
         if num_disp < 16:
             num_disp = 16
 
-        matcher = cv2.StereoBM_create(numDisparities=int(num_disp), blockSize=int(block_size))
+        matcher = cv2.StereoBM_create(
+            numDisparities=int(num_disp), blockSize=int(block_size)
+        )
         matcher.setTextureThreshold(int(texture_threshold))
         matcher.setUniquenessRatio(int(uniqueness_ratio))
         matcher.setSpeckleWindowSize(50)
@@ -646,7 +825,9 @@ class _StereoProfileTestContext:
             raise ValueError(f"Unsupported color: {color}")
 
         lower, upper = ranges[color]
-        mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+        mask = cv2.inRange(
+            hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8)
+        )
         return self._clean_mask(mask)
 
     @staticmethod
@@ -664,19 +845,25 @@ class _StereoProfileTestContext:
         return int(cv2.countNonZero(mask))
 
     @staticmethod
-    def _move_and_settle(simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8) -> None:
+    def _move_and_settle(
+        simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8
+    ) -> None:
         simulator.set_pose(model_name, x=x, y=y, z=z)
         time.sleep(settle_s)
 
     @staticmethod
-    def _set_model_pose_and_readback(model_name: str, x: float, y: float, z: float, settle_s: float = 0.5) -> Dict[str, Any]:
+    def _set_model_pose_and_readback(
+        model_name: str, x: float, y: float, z: float, settle_s: float = 0.5
+    ) -> Dict[str, Any]:
         set_state = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
         get_state = rospy.ServiceProxy("/gazebo/get_model_state", GetModelState)
 
         state = ModelState()
         state.model_name = model_name
         state.reference_frame = "world"
-        state.pose = Pose(Point(float(x), float(y), float(z)), Quaternion(0.0, 0.0, 0.0, 1.0))
+        state.pose = Pose(
+            Point(float(x), float(y), float(z)), Quaternion(0.0, 0.0, 0.0, 1.0)
+        )
 
         set_resp = set_state(state)
         time.sleep(float(settle_s))
@@ -715,11 +902,13 @@ class _StereoProfileTestContext:
             self._reset_resolved_stereo_topics()
             display_env = self._ensure_render_display_env()
             if display_env:
-                self._set_test_diagnostics(stereo_render_env={"display_env": dict(display_env)})
+                self._set_test_diagnostics(
+                    stereo_render_env={"display_env": dict(display_env)}
+                )
             if not simulator.open_scene(world_path, self.sensor_sdf_path):
                 return None
-            rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
-            rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+            rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
+            rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
             self._update_resolved_stereo_topics(simulator)
 
         left_msg, right_msg = self._wait_pair(timeout=timeout)
@@ -752,7 +941,9 @@ class _StereoProfileTestContext:
     def stereo_topics_presence_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "stereo_topics_presence_test")
 
-        data = self.capture_data(simulator, world_path=None, timeout=35.0, convert2cv=True)
+        data = self.capture_data(
+            simulator, world_path=None, timeout=35.0, convert2cv=True
+        )
         if data is None:
             raise RuntimeError("No stereo frames")
 
@@ -760,23 +951,38 @@ class _StereoProfileTestContext:
         right = data["right_cv"]
 
         if left.shape[:2] != (self.image_height, self.image_width):
-            raise AssertionError(f"Left frame shape mismatch: {left.shape[:2]} != {(self.image_height, self.image_width)}")
+            raise AssertionError(
+                f"Left frame shape mismatch: {left.shape[:2]} != {(self.image_height, self.image_width)}"
+            )
         if right.shape[:2] != (self.image_height, self.image_width):
-            raise AssertionError(f"Right frame shape mismatch: {right.shape[:2]} != {(self.image_height, self.image_width)}")
+            raise AssertionError(
+                f"Right frame shape mismatch: {right.shape[:2]} != {(self.image_height, self.image_width)}"
+            )
 
-        metrics: Dict[str, Any] = {"left": {}, "right": {}, "threshold": int(self.C4_MIN_PIXELS)}
+        metrics: Dict[str, Any] = {
+            "left": {},
+            "right": {},
+            "threshold": int(self.C4_MIN_PIXELS),
+        }
         pair_diag = self.get_last_test_diagnostics().get("stereo_pair_capture", {})
         if pair_diag:
             metrics["topic_diagnostics"] = pair_diag
 
         for side, frame in (("left", left), ("right", right)):
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-            counts = {color: self._count_pixels(self._color_mask(hsv, color)) for color in ("red", "green", "blue", "yellow")}
+            counts = {
+                color: self._count_pixels(self._color_mask(hsv, color))
+                for color in ("red", "green", "blue", "yellow")
+            }
             metrics[side] = counts
 
         missing: Dict[str, Dict[str, int]] = {}
         for side in ("left", "right"):
-            low = {c: n for c, n in metrics[side].items() if int(n) <= int(self.C4_MIN_PIXELS)}
+            low = {
+                c: n
+                for c, n in metrics[side].items()
+                if int(n) <= int(self.C4_MIN_PIXELS)
+            }
             if low:
                 missing[side] = low
 
@@ -828,7 +1034,9 @@ class _StereoProfileTestContext:
             "disparity_px_signed": float(disparity_px_signed),
             "min_disparity_px": float(self.MIN_DISPARITY_PX),
             "pair_skew_s": float(skew),
-            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
+            "topic_diagnostics": self.get_last_test_diagnostics().get(
+                "stereo_pair_capture", {}
+            ),
         }
         self._set_test_diagnostics(stereo_disparity={"metrics": dict(metrics)})
 
@@ -856,7 +1064,9 @@ class _StereoProfileTestContext:
 
         # Базово делаем синий объект (back cube) видимым в центре,
         # затем двигаем передний окклюдер по Y.
-        move_back = self._set_model_pose_and_readback(self.C7_BACK_CUBE_NAME, x=back_x, y=0.0, z=0.25, settle_s=0.45)
+        move_back = self._set_model_pose_and_readback(
+            self.C7_BACK_CUBE_NAME, x=back_x, y=0.0, z=0.25, settle_s=0.45
+        )
         if not move_back.get("set_model_state", {}).get("success", False):
             raise RuntimeError(f"Failed to position back cube: {move_back}")
 
@@ -870,17 +1080,25 @@ class _StereoProfileTestContext:
             settle_s=0.45,
         )
         if not move_before.get("set_model_state", {}).get("success", False):
-            raise RuntimeError(f"Failed to position front cube before occlusion cases: {move_before}")
+            raise RuntimeError(
+                f"Failed to position front cube before occlusion cases: {move_before}"
+            )
 
         metrics: Dict[str, Any] = {
             "left": {"blue_pixels": {}},
             "right": {"blue_pixels": {}},
             "cases": dict(self.C7_CASES),
             "threshold": int(self.C7_MIN_PIXELS),
-            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
+            "topic_diagnostics": self.get_last_test_diagnostics().get(
+                "stereo_pair_capture", {}
+            ),
             "occluder_model": str(self.C7_FRONT_CUBE_NAME),
             "occluded_model": str(self.C7_BACK_CUBE_NAME),
-            "occluder_motion": {"before": move_before, "cases": {}, "back_cube": move_back},
+            "occluder_motion": {
+                "before": move_before,
+                "cases": {},
+                "back_cube": move_back,
+            },
             "pair_skew_s": {"before": None, "cases": {}},
         }
 
@@ -892,7 +1110,10 @@ class _StereoProfileTestContext:
         )
         prev_pair_stamp = self._pair_stamp(base_left_msg, base_right_msg)
         metrics["pair_skew_s"]["before"] = float(base_skew)
-        for side, frame in (("left", self._msg_to_bgr(base_left_msg)), ("right", self._msg_to_bgr(base_right_msg))):
+        for side, frame in (
+            ("left", self._msg_to_bgr(base_left_msg)),
+            ("right", self._msg_to_bgr(base_right_msg)),
+        ):
             hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
             blue = self._color_mask(hsv, "blue")
             blue_count = self._count_pixels(blue)
@@ -908,7 +1129,9 @@ class _StereoProfileTestContext:
             )
             metrics["occluder_motion"]["cases"][case_name] = move_diag
             if not move_diag.get("set_model_state", {}).get("success", False):
-                raise RuntimeError(f"set_model_state failed for {case_name}: {move_diag}")
+                raise RuntimeError(
+                    f"set_model_state failed for {case_name}: {move_diag}"
+                )
 
             left_msg, right_msg, skew = self._wait_pair_closest(
                 timeout=float(self.PAIR_TIMEOUT_S),
@@ -919,7 +1142,10 @@ class _StereoProfileTestContext:
             prev_pair_stamp = self._pair_stamp(left_msg, right_msg)
             metrics["pair_skew_s"]["cases"][case_name] = float(skew)
 
-            for side, frame in (("left", self._msg_to_bgr(left_msg)), ("right", self._msg_to_bgr(right_msg))):
+            for side, frame in (
+                ("left", self._msg_to_bgr(left_msg)),
+                ("right", self._msg_to_bgr(right_msg)),
+            ):
                 hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
                 blue = self._color_mask(hsv, "blue")
                 blue_count = self._count_pixels(blue)
@@ -937,7 +1163,9 @@ class _StereoProfileTestContext:
             }
 
             if not (relation_ok and threshold_ok):
-                self._set_test_diagnostics(stereo_occlusion={"metrics": copy.deepcopy(metrics)})
+                self._set_test_diagnostics(
+                    stereo_occlusion={"metrics": copy.deepcopy(metrics)}
+                )
                 raise AssertionError(
                     f"Stereo C7 failed on {side}: blue_25={blue_25}, blue_50={blue_50}, threshold={self.C7_MIN_PIXELS}"
                 )
@@ -992,7 +1220,10 @@ class _StereoProfileTestContext:
             mask = self._color_mask(left_hsv, cfg["color"])
             area, bbox = self._bbox(mask)
             if area <= 0:
-                metrics["objects"][obj_name] = {"detected": False, "reason": "color contour not found"}
+                metrics["objects"][obj_name] = {
+                    "detected": False,
+                    "reason": "color contour not found",
+                }
                 continue
 
             roi = self._expand_bbox(bbox, width=w, height=h, pad=6)
@@ -1008,7 +1239,9 @@ class _StereoProfileTestContext:
                 }
                 continue
 
-            rel_err = abs(float(depth_est) - float(cfg["depth_gt"])) / float(cfg["depth_gt"])
+            rel_err = abs(float(depth_est) - float(cfg["depth_gt"])) / float(
+                cfg["depth_gt"]
+            )
             ok = rel_err <= float(self.S1_MAX_REL_ERROR)
             if ok:
                 passed += 1
@@ -1027,10 +1260,21 @@ class _StereoProfileTestContext:
             cv2.rectangle(left_dbg, (x, y), (x + bw, y + bh), color, 2)
             cv2.rectangle(disp_dbg, (x, y), (x + bw, y + bh), color, 2)
             label = f"{obj_name}: z={depth_est:.2f}m gt={cfg['depth_gt']:.2f} err={rel_err:.2f}"
-            cv2.putText(left_dbg, label, (x, max(20, y - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 2, cv2.LINE_AA)
+            cv2.putText(
+                left_dbg,
+                label,
+                (x, max(20, y - 8)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
 
         metrics["passed_objects"] = int(passed)
-        metrics["checks"] = {"pass_count_ok": bool(passed >= int(self.S1_MIN_PASS_OBJECTS))}
+        metrics["checks"] = {
+            "pass_count_ok": bool(passed >= int(self.S1_MIN_PASS_OBJECTS))
+        }
 
         if passed < int(self.S1_MIN_PASS_OBJECTS):
             raise AssertionError(
@@ -1072,7 +1316,9 @@ class _StereoProfileTestContext:
             finite_depth = np.isfinite(depth_map)
         wall_depth_mask = np.zeros((h, w), dtype=bool)
         with np.errstate(invalid="ignore"):
-            wall_depth_mask[finite_depth] = (depth_map[finite_depth] >= 4.2) & (depth_map[finite_depth] <= 5.8)
+            wall_depth_mask[finite_depth] = (depth_map[finite_depth] >= 4.2) & (
+                depth_map[finite_depth] <= 5.8
+            )
         wall_mask = wall_band & wall_depth_mask
 
         left_half_mask = np.zeros((h, w), dtype=bool)
@@ -1088,8 +1334,12 @@ class _StereoProfileTestContext:
             left_wall = left_half_mask
             right_wall = right_half_mask
 
-        left_texture = float(np.std(gray[left_wall])) if np.count_nonzero(left_wall) > 0 else 0.0
-        right_texture = float(np.std(gray[right_wall])) if np.count_nonzero(right_wall) > 0 else 0.0
+        left_texture = (
+            float(np.std(gray[left_wall])) if np.count_nonzero(left_wall) > 0 else 0.0
+        )
+        right_texture = (
+            float(np.std(gray[right_wall])) if np.count_nonzero(right_wall) > 0 else 0.0
+        )
 
         left_crop_left = gray[y0:y1, x0:xm]
         left_crop_right = gray_right[y0:y1, x0:xm]
@@ -1128,7 +1378,9 @@ class _StereoProfileTestContext:
 
         metrics = {
             "pair_skew_s": float(skew),
-            "topic_diagnostics": self.get_last_test_diagnostics().get("stereo_pair_capture", {}),
+            "topic_diagnostics": self.get_last_test_diagnostics().get(
+                "stereo_pair_capture", {}
+            ),
             "assignment_by_texture_std": {
                 "left_std": float(left_texture),
                 "right_std": float(right_texture),
@@ -1140,7 +1392,13 @@ class _StereoProfileTestContext:
                 "block_size": int(self.S2_CROP_BLOCK_SIZE),
                 "texture_threshold": int(self.S2_CROP_TEXTURE_THRESHOLD),
                 "uniqueness_ratio": int(self.S2_CROP_UNIQUENESS_RATIO),
-                "crop_bounds": {"x0": int(x0), "x1": int(x1), "xm": int(xm), "y0": int(y0), "y1": int(y1)},
+                "crop_bounds": {
+                    "x0": int(x0),
+                    "x1": int(x1),
+                    "xm": int(xm),
+                    "y0": int(y0),
+                    "y1": int(y1),
+                },
             },
             "valid_ratio": {
                 "left": float(left_ratio),
@@ -1182,36 +1440,61 @@ def _camera_method_passed(result: dict) -> bool:
     return True
 
 
-def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, progress_cb=None) -> dict:
+def _run_camera_context_test(
+    context_cls, method_name: str, simulator, sensor, progress_cb=None
+) -> dict:
     print(f"\n[DEBUG _run_camera_context_test] ═══════════════════════════════════════")
-    print(f"[DEBUG _run_camera_context_test] context_cls={context_cls.__name__}, method={method_name}")
-    print(f"[DEBUG _run_camera_context_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}")
-    print(f"[DEBUG _run_camera_context_test] sdf_path={getattr(sensor, 'sdf_path', '?')}")
+    print(
+        f"[DEBUG _run_camera_context_test] context_cls={context_cls.__name__}, method={method_name}"
+    )
+    print(
+        f"[DEBUG _run_camera_context_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}"
+    )
+    print(
+        f"[DEBUG _run_camera_context_test] sdf_path={getattr(sensor, 'sdf_path', '?')}"
+    )
     print(f"[DEBUG _run_camera_context_test] topic={getattr(sensor, 'topic', '?')}")
     try:
         ctx = context_cls(sensor)
         print(f"[DEBUG _run_camera_context_test] context created OK")
     except Exception as e:
         import traceback
+
         print(f"[DEBUG _run_camera_context_test] FAILED to create context: {e}")
         print(traceback.format_exc())
         raise
 
-    if context_cls.__name__ == "_DepthProfileTestContext" and not getattr(ctx, "DEPTH_TOPIC", ""):
-        msg = (f"Test {method_name} requires a depth camera, but sensor "
-               f"'{getattr(sensor, 'sensor_name', '?')}' has no depth topic configured. "
-               f"This test is not applicable to mono/RGB cameras.")
+    if context_cls.__name__ == "_DepthProfileTestContext" and not getattr(
+        ctx, "DEPTH_TOPIC", ""
+    ):
+        msg = (
+            f"Test {method_name} requires a depth camera, but sensor "
+            f"'{getattr(sensor, 'sensor_name', '?')}' has no depth topic configured. "
+            f"This test is not applicable to mono/RGB cameras."
+        )
         print(f"[DEBUG _run_camera_context_test] SKIP: {msg}")
-        return {"passed": False, "skipped": True, "error": msg,
-                "metrics": {"status": "SKIP", "error_reason": msg}}
+        return {
+            "passed": False,
+            "skipped": True,
+            "error": msg,
+            "metrics": {"status": "SKIP", "error_reason": msg},
+        }
 
-    if context_cls.__name__ == "_StereoProfileTestContext" and not getattr(ctx, "LEFT_TOPIC", ""):
-        msg = (f"Test {method_name} requires a stereo camera, but sensor "
-               f"'{getattr(sensor, 'sensor_name', '?')}' has no stereo topics configured. "
-               f"This test is not applicable to mono/RGB cameras.")
+    if context_cls.__name__ == "_StereoProfileTestContext" and not getattr(
+        ctx, "LEFT_TOPIC", ""
+    ):
+        msg = (
+            f"Test {method_name} requires a stereo camera, but sensor "
+            f"'{getattr(sensor, 'sensor_name', '?')}' has no stereo topics configured. "
+            f"This test is not applicable to mono/RGB cameras."
+        )
         print(f"[DEBUG _run_camera_context_test] SKIP: {msg}")
-        return {"passed": False, "skipped": True, "error": msg,
-                "metrics": {"status": "SKIP", "error_reason": msg}}
+        return {
+            "passed": False,
+            "skipped": True,
+            "error": msg,
+            "metrics": {"status": "SKIP", "error_reason": msg},
+        }
     method = getattr(ctx, method_name)
     if progress_cb:
         try:
@@ -1219,12 +1502,19 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
         except Exception:
             pass
     try:
-        print(f"[DEBUG _run_camera_context_test] calling ctx.{method_name}(simulator)...")
+        print(
+            f"[DEBUG _run_camera_context_test] calling ctx.{method_name}(simulator)..."
+        )
         result = method(simulator)
-        print(f"[DEBUG _run_camera_context_test] method returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        print(
+            f"[DEBUG _run_camera_context_test] method returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}"
+        )
     except Exception as e:
         import traceback
-        print(f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}")
+
+        print(
+            f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}"
+        )
         print(traceback.format_exc())
         raise
     if not isinstance(result, dict):
@@ -1245,26 +1535,67 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
 # Entry-point functions (registered in TESTS dict in _common.py)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def stereo_topics_presence_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG stereo_topics_presence_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_StereoProfileTestContext, "stereo_topics_presence_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG stereo_topics_presence_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _StereoProfileTestContext,
+        "stereo_topics_presence_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def stereo_disparity_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG stereo_disparity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_StereoProfileTestContext, "stereo_disparity_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG stereo_disparity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _StereoProfileTestContext,
+        "stereo_disparity_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def stereo_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG stereo_occlusion_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_StereoProfileTestContext, "stereo_occlusion_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG stereo_occlusion_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _StereoProfileTestContext,
+        "stereo_occlusion_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def s1_stereo_accuracy_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG s1_stereo_accuracy_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_StereoProfileTestContext, "s1_stereo_accuracy_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG s1_stereo_accuracy_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _StereoProfileTestContext,
+        "s1_stereo_accuracy_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def s2_texture_vs_smooth_stability_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG s2_texture_vs_smooth_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_StereoProfileTestContext, "s2_texture_vs_smooth_stability_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG s2_texture_vs_smooth_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _StereoProfileTestContext,
+        "s2_texture_vs_smooth_stability_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )

@@ -1,25 +1,41 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel,
-    QSizePolicy, QMenu, QAction, QPushButton,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFrame,
+    QLabel,
+    QSizePolicy,
+    QMenu,
+    QAction,
+    QPushButton,
 )
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QIcon
 from PyQt5 import uic
 
-from ._theme import Colors, Styles, Icons, Layout, QT_DIR, ICON_DIR, LightColors as LC, LightStyles as LS
-
+from ._theme import (
+    Colors,
+    Styles,
+    Icons,
+    Layout,
+    QT_DIR,
+    ICON_DIR,
+    LightColors as LC,
+    LightStyles as LS,
+)
 
 # ── Sensor type cell ──────────────────────────────────────────────────────────
 
+
 class SensorTypeCell(QFrame):
-    clicked        = pyqtSignal(str)   # sensor_type
-    delete_clicked = pyqtSignal(str)   # sensor_type
+    clicked = pyqtSignal(str)  # sensor_type
+    delete_clicked = pyqtSignal(str)  # sensor_type
 
     def __init__(self, sensor_type: str, builtin: bool = False, parent=None):
         super().__init__(parent)
-        self._type     = sensor_type
-        self._builtin  = builtin
-        self._selected    = False
+        self._type = sensor_type
+        self._builtin = builtin
+        self._selected = False
         self._delete_mode = False
         self.setFixedHeight(32)
         self.setCursor(Qt.PointingHandCursor)
@@ -33,9 +49,7 @@ class SensorTypeCell(QFrame):
 
         self._dot = QFrame()
         self._dot.setFixedSize(6, 6)
-        self._dot.setStyleSheet(
-            "background-color: transparent; border: none;"
-        )
+        self._dot.setStyleSheet("background-color: transparent; border: none;")
         h.addWidget(self._dot)
 
         self._lbl = QLabel(self._type)
@@ -90,21 +104,22 @@ class SensorTypeCell(QFrame):
 
 # ── Sensor instance cell ──────────────────────────────────────────────────────
 
+
 class SensorCell(QFrame):
-    clicked        = pyqtSignal(str)
+    clicked = pyqtSignal(str)
     delete_clicked = pyqtSignal(str)
 
     STATUS_COLORS = {
-        "all_passed":   Colors.STATUS_GREEN,
-        "some_failed":  Colors.STATUS_YELLOW,
-        "all_failed":   Colors.STATUS_RED,
+        "all_passed": Colors.STATUS_GREEN,
+        "some_failed": Colors.STATUS_YELLOW,
+        "all_failed": Colors.STATUS_RED,
         "never_tested": Colors.STATUS_BLUE,
     }
 
     def __init__(self, sensor_data: dict, parent=None):
         super().__init__(parent)
-        self._data        = sensor_data
-        self._selected    = False
+        self._data = sensor_data
+        self._selected = False
         self._delete_mode = False
         self.setFixedHeight(Layout.SENSOR_CELL_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
@@ -130,7 +145,9 @@ class SensorCell(QFrame):
         self._btn_trash.setIcon(QIcon(f"{ICON_DIR}/clear.png"))
         self._btn_trash.setIconSize(Layout.ICON_SIZE_SM)
         self._btn_trash.setVisible(False)
-        self._btn_trash.clicked.connect(lambda: self.delete_clicked.emit(self._data["id"]))
+        self._btn_trash.clicked.connect(
+            lambda: self.delete_clicked.emit(self._data["id"])
+        )
         h.addWidget(self._btn_trash)
         h.setContentsMargins(0, 0, 4, 0)
 
@@ -195,14 +212,15 @@ class SensorCell(QFrame):
 
 # ── ColSensors ────────────────────────────────────────────────────────────────
 
+
 class ColSensors(QWidget):
-    sensor_selected       = pyqtSignal(str)
-    add_requested         = pyqtSignal()
-    delete_requested      = pyqtSignal(str)
-    add_type_requested    = pyqtSignal()
-    edit_type_requested   = pyqtSignal(str)
+    sensor_selected = pyqtSignal(str)
+    add_requested = pyqtSignal()
+    delete_requested = pyqtSignal(str)
+    add_type_requested = pyqtSignal()
+    edit_type_requested = pyqtSignal(str)
     delete_type_requested = pyqtSignal(str)
-    type_updated          = pyqtSignal(str)   # emitted after type is saved
+    type_updated = pyqtSignal(str)  # emitted after type is saved
 
     BUILTIN_TYPES: set = set()
 
@@ -210,13 +228,13 @@ class ColSensors(QWidget):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_1.ui", self)
 
-        self._cells:            dict[str, SensorCell]     = {}
-        self._type_cells:       dict[str, SensorTypeCell] = {}
-        self._selected_id:      str | None = None
-        self._selected_type:    str | None = None
-        self._current_filter:   str | None = None
-        self._all_sensors:      list[dict] = []
-        self._delete_mode:      bool = False
+        self._cells: dict[str, SensorCell] = {}
+        self._type_cells: dict[str, SensorTypeCell] = {}
+        self._selected_id: str | None = None
+        self._selected_type: str | None = None
+        self._current_filter: str | None = None
+        self._all_sensors: list[dict] = []
+        self._delete_mode: bool = False
         self._delete_type_mode: bool = False
 
         self._setup_heights()
@@ -230,10 +248,14 @@ class ColSensors(QWidget):
         self._rebuild_cells(sensors)
         try:
             import src.sensor_storage as db
+
             self.load_types(db.get_sensor_type_names())
         except Exception as exc:
             import traceback
-            print(f"[ColSensors] load_sensors / load_types failed: {exc}\n{traceback.format_exc()}")
+
+            print(
+                f"[ColSensors] load_sensors / load_types failed: {exc}\n{traceback.format_exc()}"
+            )
 
     def load_types(self, types: list[str]):
         layout = self.scroll_types_contents.layout()
@@ -276,12 +298,16 @@ class ColSensors(QWidget):
 
     def _open_add_type_dialog(self):
         from .dialog_add_sensor_type import AddSensorTypeDialog
+
         try:
             from src.tests import TESTS
+
             existing_tests = sorted(TESTS.keys())
         except Exception:
             existing_tests = []
-        dlg = AddSensorTypeDialog(existing_tests=existing_tests, mode="add", parent=self)
+        dlg = AddSensorTypeDialog(
+            existing_tests=existing_tests, mode="add", parent=self
+        )
         dlg.type_saved.connect(self._on_type_saved)
         dlg.exec_()
 
@@ -289,31 +315,34 @@ class ColSensors(QWidget):
         if not self._selected_type:
             return
         from .dialog_add_sensor_type import AddSensorTypeDialog
+
         try:
             from src.tests import TESTS
+
             existing_tests = sorted(TESTS.keys())
         except Exception:
             existing_tests = []
         try:
             import src.sensor_storage as db
+
             type_def = db.get_sensor_type(self._selected_type) or {}
-            tests    = db.get_type_tests(self._selected_type)
+            tests = db.get_type_tests(self._selected_type)
         except Exception:
             type_def = {}
-            tests    = []
+            tests = []
 
         prefill = {
-            "name":        type_def.get("sensor_type", self._selected_type),
+            "name": type_def.get("sensor_type", self._selected_type),
             "description": type_def.get("description", ""),
-            "params":      type_def.get("params", []),
-            "detection":   type_def.get("detection", {}),
-            "tests":       tests,
+            "params": type_def.get("params", []),
+            "detection": type_def.get("detection", {}),
+            "tests": tests,
         }
         dlg = AddSensorTypeDialog(
-            existing_tests = existing_tests,
-            mode           = "edit",
-            prefill        = prefill,
-            parent         = self,
+            existing_tests=existing_tests,
+            mode="edit",
+            prefill=prefill,
+            parent=self,
         )
         dlg.type_saved.connect(self._on_type_saved)
         dlg.exec_()
@@ -324,10 +353,12 @@ class ColSensors(QWidget):
     def _on_type_saved(self, definition: dict):
         try:
             import src.sensor_storage as db
+
             self.load_types(db.get_sensor_type_names())
             self.type_updated.emit(definition.get("name", ""))
         except Exception as exc:
             import traceback
+
             print(f"[ColSensors] _on_type_saved error: {exc}\n{traceback.format_exc()}")
 
     def _on_type_clicked(self, sensor_type: str):
@@ -375,7 +406,9 @@ class ColSensors(QWidget):
             }}
             QPushButton:hover {{ background-color: {Colors.ACCENT_DIM}; }}
         """
-        self.btn_delete_type.setStyleSheet(checked_style if active else Styles.BUTTON_ICON)
+        self.btn_delete_type.setStyleSheet(
+            checked_style if active else Styles.BUTTON_ICON
+        )
 
     def _setup_heights(self):
         self.wt_types_toolbar.setFixedHeight(Layout.TOOLBAR_H)
@@ -436,13 +469,13 @@ class ColSensors(QWidget):
             (self.btn_edit_type, Icons.EDIT()),
             (self.btn_delete_type, Icons.CLEAR()),
         ]
-        
+
         for btn, icon in button_configs:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_SM)
             btn.setFixedSize(28, 28)  # Consistent size for all toolbar buttons
             btn.setStyleSheet(Styles.BUTTON_ICON)
-        
+
         # Placeholder texts
         self.input_search.setPlaceholderText("Search sensors...")
         self.input_types_search.setPlaceholderText("Search types...")
@@ -461,11 +494,17 @@ class ColSensors(QWidget):
     def _on_delete_type(self, sensor_type: str):
         try:
             import src.sensor_storage as db
-            
+
             sensors = db.get_sensors_by_type(sensor_type)
             if sensors:
-                from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-                
+                from PyQt5.QtWidgets import (
+                    QDialog,
+                    QVBoxLayout,
+                    QHBoxLayout,
+                    QLabel,
+                    QPushButton,
+                )
+
                 dialog = QDialog(self)
                 dialog.setWindowTitle("Cannot Delete Type")
                 dialog.setFixedSize(360, 150)
@@ -474,17 +513,21 @@ class ColSensors(QWidget):
                         background-color: {LC.BG_PANEL};
                     }}
                 """)
-                
+
                 layout = QVBoxLayout(dialog)
-                
-                text = QLabel(f"Cannot delete type '{sensor_type}' because it is used by {len(sensors)} sensor(s).\n\nPlease delete or reassign these sensors first.")
+
+                text = QLabel(
+                    f"Cannot delete type '{sensor_type}' because it is used by {len(sensors)} sensor(s).\n\nPlease delete or reassign these sensors first."
+                )
                 text.setWordWrap(True)
-                text.setStyleSheet(f"color: {LC.TEXT}; font-size: 12px; background-color: transparent;")
+                text.setStyleSheet(
+                    f"color: {LC.TEXT}; font-size: 12px; background-color: transparent;"
+                )
                 layout.addWidget(text)
-                
+
                 button_layout = QHBoxLayout()
                 button_layout.addStretch()
-                
+
                 ok_button = QPushButton("OK")
                 ok_button.setFixedSize(80, 28)
                 ok_button.setStyleSheet(f"""
@@ -500,23 +543,25 @@ class ColSensors(QWidget):
                     }}
                 """)
                 ok_button.clicked.connect(dialog.accept)
-                
+
                 button_layout.addWidget(ok_button)
                 layout.addLayout(button_layout)
-                
+
                 dialog.exec_()
                 return
-            
+
             db.delete_sensor_type(sensor_type)
             db_types = db.get_sensor_type_names()
             self.load_types(db_types)
             if self._selected_type == sensor_type:
                 self._selected_type = None
-                
+
         except Exception as exc:
             import traceback, logging
+
             logging.getLogger(__name__).error(
-                "_on_delete_type failed: %s\n%s", exc, traceback.format_exc())
+                "_on_delete_type failed: %s\n%s", exc, traceback.format_exc()
+            )
 
     def _rebuild_cells(self, sensors: list[dict]):
         layout = self.scroll_sensors_contents.layout()

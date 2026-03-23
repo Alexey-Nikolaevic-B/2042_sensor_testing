@@ -8,22 +8,21 @@ from .widget_test_item import TestItem
 from .logic_queue_manager import TestStatus
 
 
-
 class ColTests(QWidget):
 
     # Emitted whenever a result arrives — connected to ColCapture.load_test_result()
-    test_result_ready = pyqtSignal(str, dict)   # func_name, result
+    test_result_ready = pyqtSignal(str, dict)  # func_name, result
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_3.ui", self)
 
         self._sensor_data: dict | None = None
-        self._sensor_id:   str  | None = None
-        self._backend      = None
-        self._qm           = None
-        self._repo         = None
-        self._simulator    = None
+        self._sensor_id: str | None = None
+        self._backend = None
+        self._qm = None
+        self._repo = None
+        self._simulator = None
         self._widgets: dict[str, TestItem] = {}
         self._selected: str | None = None
         self._runner_log_forward = None
@@ -39,7 +38,7 @@ class ColTests(QWidget):
     # ─────────────────────────────────────────
 
     def set_runner(self, queue_manager, repo):
-        self._qm   = queue_manager
+        self._qm = queue_manager
         self._repo = repo
         queue_manager.item_state_changed.connect(self._on_state_changed)
         queue_manager.item_progress_changed.connect(self._on_progress_changed)
@@ -54,9 +53,9 @@ class ColTests(QWidget):
         fresh = SensorRepository.instance().get_sensor(sensor_data["id"]) or sensor_data
 
         self._sensor_data = fresh
-        self._sensor_id   = str(fresh["id"])
-        self._backend     = self._make_backend(fresh)
-        self._selected    = None
+        self._sensor_id = str(fresh["id"])
+        self._backend = self._make_backend(fresh)
+        self._selected = None
         self._test_results.clear()
 
         self._reset_detail_panel()
@@ -74,16 +73,18 @@ class ColTests(QWidget):
                 w = self._widgets.get(r_func)
                 if w:
                     w.set_status(TestStatus.RUNNING)
-        for func_name, status in self._qm.get_queued_for_sensor(self._sensor_id).items():
+        for func_name, status in self._qm.get_queued_for_sensor(
+            self._sensor_id
+        ).items():
             w = self._widgets.get(func_name)
             if w:
                 w.set_status(status)
 
     def clear(self):
         self._sensor_data = None
-        self._sensor_id   = None
-        self._backend     = None
-        self._selected    = None
+        self._sensor_id = None
+        self._backend = None
+        self._selected = None
         self._test_results.clear()
 
         self._reset_detail_panel()
@@ -131,15 +132,11 @@ class ColTests(QWidget):
             return
 
         tests = self._qm.get_tests(self._backend)
-        func  = tests.get(func_name)
+        func = tests.get(func_name)
 
         if func:
             self._qm.enqueue(
-                self._sensor_id,
-                func_name,
-                self._backend,
-                func,
-                sensor=self._backend
+                self._sensor_id, func_name, self._backend, func, sensor=self._backend
             )
 
     def _on_item_stop(self, func_name):
@@ -174,13 +171,13 @@ class ColTests(QWidget):
             from src.sensor import Sensor as SensorModel
 
             return SensorModel(
-                sensor_type = sensor_data.get("type", ""),
-                sensor_name = sensor_data.get("name", ""),
-                sdf_path    = sensor_data.get("sdf_path", ""),
-                topics      = sensor_data.get("topics", []),
-                description = sensor_data.get("description", ""),
-                image_path  = sensor_data.get("image_path", ""),
-                params      = sensor_data.get("params", {}),
+                sensor_type=sensor_data.get("type", ""),
+                sensor_name=sensor_data.get("name", ""),
+                sdf_path=sensor_data.get("sdf_path", ""),
+                topics=sensor_data.get("topics", []),
+                description=sensor_data.get("description", ""),
+                image_path=sensor_data.get("image_path", ""),
+                params=sensor_data.get("params", {}),
             )
         except Exception as exc:
             print(exc)
@@ -248,6 +245,7 @@ class ColTests(QWidget):
         if not self._sensor_data:
             return
         from .logic_sensor_repository import SensorRepository
+
         fresh = SensorRepository.instance().get_sensor(self._sensor_data["id"])
         if fresh:
             self.load_sensor(fresh)
@@ -260,11 +258,7 @@ class ColTests(QWidget):
 
         for func_name, func in tests.items():
             self._qm.enqueue(
-                self._sensor_id,
-                func_name,
-                self._backend,
-                func,
-                sensor=self._backend
+                self._sensor_id, func_name, self._backend, func, sensor=self._backend
             )
 
     def _on_edit_tests(self):
@@ -274,55 +268,63 @@ class ColTests(QWidget):
         from .dialog_edit_tests import EditTestsDialog
         from .logic_sensor_repository import SensorRepository
 
-        sensor_id   = self._sensor_id
+        sensor_id = self._sensor_id
         sensor_name = self._sensor_data.get("name", "")
 
         # Build test list: start from what the queue manager knows,
         # then overlay display meta from the repo.
         tests = []
         if self._qm and self._backend:
-            repo      = SensorRepository.instance()
-            meta_map  = repo.get_test_meta(sensor_id)   # {func_name: {display_name, description, image_path}}
+            repo = SensorRepository.instance()
+            meta_map = repo.get_test_meta(
+                sensor_id
+            )  # {func_name: {display_name, description, image_path}}
             core_tests = self._qm.get_tests(self._backend)
             core_names = set(core_tests.keys())
 
             # Tests present in core
             for func_name in core_tests:
                 meta = meta_map.get(func_name, {})
-                tests.append({
-                    "func_name":    func_name,
-                    "display_name": meta.get("display_name") or func_name,
-                    "description":  meta.get("description") or "",
-                    "image_path":   meta.get("image_path") or "",
-                    "missing":      False,
-                })
+                tests.append(
+                    {
+                        "func_name": func_name,
+                        "display_name": meta.get("display_name") or func_name,
+                        "description": meta.get("description") or "",
+                        "image_path": meta.get("image_path") or "",
+                        "missing": False,
+                    }
+                )
 
             # Tests in meta but not in core (stale / renamed)
             for func_name, meta in meta_map.items():
                 if func_name not in core_names:
-                    tests.append({
-                        "func_name":    func_name,
-                        "display_name": meta.get("display_name") or func_name,
-                        "description":  meta.get("description") or "",
-                        "image_path":   meta.get("image_path") or "",
-                        "missing":      True,
-                    })
+                    tests.append(
+                        {
+                            "func_name": func_name,
+                            "display_name": meta.get("display_name") or func_name,
+                            "description": meta.get("description") or "",
+                            "image_path": meta.get("image_path") or "",
+                            "missing": True,
+                        }
+                    )
         else:
             # Fallback: use whatever is stored in sensor_data tests
             for t in self._sensor_data.get("tests", []):
-                tests.append({
-                    "func_name":    t.get("name", ""),
-                    "display_name": t.get("display_name") or t.get("name", ""),
-                    "description":  t.get("description") or "",
-                    "image_path":   t.get("image_path") or "",
-                    "missing":      False,
-                })
+                tests.append(
+                    {
+                        "func_name": t.get("name", ""),
+                        "display_name": t.get("display_name") or t.get("name", ""),
+                        "description": t.get("description") or "",
+                        "image_path": t.get("image_path") or "",
+                        "missing": False,
+                    }
+                )
 
         dlg = EditTestsDialog(
-            sensor_id   = sensor_id,
-            sensor_name = sensor_name,
-            tests       = tests,
-            parent      = self,
+            sensor_id=sensor_id,
+            sensor_name=sensor_name,
+            tests=tests,
+            parent=self,
         )
         dlg.tests_saved.connect(self._on_tests_saved)
         dlg.exec_()
@@ -360,7 +362,7 @@ class ColTests(QWidget):
         self.scroll_description.setStyleSheet(Styles.DESCRIPTION_AREA)
 
         for btn, icon in [
-            (self.btn_run_all,    Icons.RUN_ALL()),
+            (self.btn_run_all, Icons.RUN_ALL()),
             (self.btn_edit_tests, Icons.EDIT()),
         ]:
             btn.setIcon(icon)

@@ -1,4 +1,5 @@
 """Mono camera (mcam) tests — C1, C2, C4, C7, C9, C10, C11."""
+
 import logging
 import os
 import subprocess
@@ -22,8 +23,11 @@ from ._common import (
 
 logger = logging.getLogger(__name__)
 
+
 def _mono_build_ctx(sensor):
-    print(f"[DEBUG _mono_build_ctx] building context for sensor_name={getattr(sensor, 'sensor_name', '?')}")
+    print(
+        f"[DEBUG _mono_build_ctx] building context for sensor_name={getattr(sensor, 'sensor_name', '?')}"
+    )
     print(f"[DEBUG _mono_build_ctx] sensor.sdf_path={getattr(sensor, 'sdf_path', '?')}")
     print(f"[DEBUG _mono_build_ctx] sensor.topic={getattr(sensor, 'topic', '?')}")
     ctx = SimpleNamespace()
@@ -69,19 +73,33 @@ def _mono_build_ctx(sensor):
     ctx.sensor_type = str(getattr(sensor, "sensor_type", ""))
     ctx.sensor_sdf_path = str(getattr(sensor, "sdf_path", ""))
     ctx.CONFIG = {"ROOT_PATH": str(CONFIG["ROOT_PATH"])}
-    profile = _camera_load_sensor_profile(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else {}
-    print(f"[DEBUG _mono_build_ctx] SDF profile loaded: {list(profile.keys()) if profile else 'EMPTY'}")
-    print(f"[DEBUG _mono_build_ctx] profile.image_topic={profile.get('image_topic', 'N/A')}, profile.family={profile.get('family', 'N/A')}")
-    ctx.IMAGE_TOPIC = str(profile.get("image_topic", "") or getattr(sensor, "topic", "") or ctx.IMAGE_TOPIC)
+    profile = (
+        _camera_load_sensor_profile(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else {}
+    )
+    print(
+        f"[DEBUG _mono_build_ctx] SDF profile loaded: {list(profile.keys()) if profile else 'EMPTY'}"
+    )
+    print(
+        f"[DEBUG _mono_build_ctx] profile.image_topic={profile.get('image_topic', 'N/A')}, profile.family={profile.get('family', 'N/A')}"
+    )
+    ctx.IMAGE_TOPIC = str(
+        profile.get("image_topic", "")
+        or getattr(sensor, "topic", "")
+        or ctx.IMAGE_TOPIC
+    )
     ctx.image_width = int(profile.get("image_width") or ctx.IMAGE_WIDTH)
     ctx.image_height = int(profile.get("image_height") or ctx.IMAGE_HEIGHT)
     ctx.horizontal_fov = float(profile.get("horizontal_fov") or ctx.HORIZONTAL_FOV_RAD)
     ctx.clip_near = float(profile.get("clip_near") or ctx.CLIP_NEAR)
     ctx.clip_far = float(profile.get("clip_far") or ctx.CLIP_FAR)
     ctx.update_rate = int(profile.get("update_rate") or ctx.UPDATE_RATE)
-    print(f"[DEBUG _mono_build_ctx] resolved: IMAGE_TOPIC={ctx.IMAGE_TOPIC}, {ctx.image_width}x{ctx.image_height}, fov={ctx.horizontal_fov:.3f}, clip=[{ctx.clip_near}, {ctx.clip_far}], rate={ctx.update_rate}")
+    print(
+        f"[DEBUG _mono_build_ctx] resolved: IMAGE_TOPIC={ctx.IMAGE_TOPIC}, {ctx.image_width}x{ctx.image_height}, fov={ctx.horizontal_fov:.3f}, clip=[{ctx.clip_near}, {ctx.clip_far}], rate={ctx.update_rate}"
+    )
     worlds_root = _camera_worlds_root()
-    print(f"[DEBUG _mono_build_ctx] worlds_root={worlds_root}, exists={worlds_root.exists()}")
+    print(
+        f"[DEBUG _mono_build_ctx] worlds_root={worlds_root}, exists={worlds_root.exists()}"
+    )
     ctx.test_to_world = {
         "c1_size_order_test": str(worlds_root / "camera_c1_single_cube.world"),
         "c2_resolution_test": str(worlds_root / "camera_c2_resolution.world"),
@@ -94,71 +112,80 @@ def _mono_build_ctx(sensor):
     ctx._last_test_diagnostics = {}
     return ctx
 
+
 def _mono__set_test_diagnostics(ctx, **kwargs) -> None:
     ctx._last_test_diagnostics.update(kwargs)
-    
+
 
 def _mono_get_last_test_diagnostics(ctx) -> Dict[str, Any]:
     # JSON-serializable payload, shallow-copy is enough here.
     return dict(ctx._last_test_diagnostics)
-    
+
 
 def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None) -> Image:
     target_topic = str(topic or ctx.IMAGE_TOPIC)
     print(f"[DEBUG _mono__wait_image] topic={target_topic}, timeout={timeout:.1f}s")
     try:
         msg = rospy.wait_for_message(target_topic, Image, timeout=timeout)
-        print(f"[DEBUG _mono__wait_image] GOT image: {msg.width}x{msg.height}, enc={msg.encoding}, data_len={len(msg.data)}")
+        print(
+            f"[DEBUG _mono__wait_image] GOT image: {msg.width}x{msg.height}, enc={msg.encoding}, data_len={len(msg.data)}"
+        )
         return msg
     except rospy.ROSException as e:
-        print(f"[DEBUG _mono__wait_image] TIMEOUT on {target_topic} after {timeout:.1f}s: {e}")
+        print(
+            f"[DEBUG _mono__wait_image] TIMEOUT on {target_topic} after {timeout:.1f}s: {e}"
+        )
         # список активных топиков для диагностики
         try:
             topics = rospy.get_published_topics()
-            image_topics = [t for t, tp in topics if 'image' in t.lower() or 'camera' in t.lower()]
-            print(f"[DEBUG _mono__wait_image] active image/camera topics: {image_topics[:15]}")
+            image_topics = [
+                t for t, tp in topics if "image" in t.lower() or "camera" in t.lower()
+            ]
+            print(
+                f"[DEBUG _mono__wait_image] active image/camera topics: {image_topics[:15]}"
+            )
         except Exception:
             pass
         raise
-    
+
 
 def _mono__scene_diag(ctx, simulator) -> Dict[str, Any]:
     return {}
-    
+
 
 def _mono__resolved_image_topic(ctx, simulator) -> Tuple[str, Dict[str, Any]]:
     scene_diag = _mono__scene_diag(ctx, simulator)
     return str(ctx.IMAGE_TOPIC), scene_diag
-    
+
 
 def _mono__ensure_render_display_env(ctx) -> Dict[str, str]:
     applied: Dict[str, str] = {}
     if os.environ.get("DISPLAY"):
         return applied
-    
+
     xauthority = os.environ.get("XAUTHORITY", "").strip()
     if not xauthority:
         default_xauthority = os.path.expanduser("~/.Xauthority")
         if os.path.exists(default_xauthority):
             os.environ["XAUTHORITY"] = default_xauthority
             applied["XAUTHORITY"] = default_xauthority
-    
+
     for display in (":0",):
         display_socket = f"/tmp/.X11-unix/X{display.lstrip(':')}"
         if os.path.exists(display_socket):
             os.environ["DISPLAY"] = display
             applied["DISPLAY"] = display
             break
-    
+
     return applied
-    
+
 
 def _mono__msg_stamp_s(ctx, msg: Image) -> float:
     stamp = float(msg.header.stamp.to_sec())
     if stamp <= 0.0:
         return float(time.time())
     return stamp
-    
+
 
 def _mono__wait_image_after(
     ctx,
@@ -172,16 +199,22 @@ def _mono__wait_image_after(
     saw_message = False
     attempt = 0
     frames_to_skip = int(skip_frames)
-    print(f"[DEBUG _mono__wait_image_after] topic={target_topic}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s, skip_frames={frames_to_skip}")
+    print(
+        f"[DEBUG _mono__wait_image_after] topic={target_topic}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s, skip_frames={frames_to_skip}"
+    )
 
     while (time.time() - start) < float(timeout):
         remaining = max(0.2, float(timeout) - (time.time() - start))
         attempt += 1
         try:
-            msg = _mono__wait_image(ctx, timeout=min(remaining, 5.0), topic=target_topic)
+            msg = _mono__wait_image(
+                ctx, timeout=min(remaining, 5.0), topic=target_topic
+            )
         except rospy.ROSException:
             if attempt <= 3 or attempt % 5 == 0:
-                print(f"[DEBUG _mono__wait_image_after] attempt {attempt}: timeout, retrying... elapsed={time.time()-start:.1f}s")
+                print(
+                    f"[DEBUG _mono__wait_image_after] attempt {attempt}: timeout, retrying... elapsed={time.time()-start:.1f}s"
+                )
             continue
         saw_message = True
 
@@ -189,7 +222,9 @@ def _mono__wait_image_after(
             if frames_to_skip > 0:
                 frames_to_skip -= 1
                 continue
-            print(f"[DEBUG _mono__wait_image_after] got first image (no prev_stamp), attempt={attempt}")
+            print(
+                f"[DEBUG _mono__wait_image_after] got first image (no prev_stamp), attempt={attempt}"
+            )
             return msg
 
         stamp = _mono__msg_stamp_s(ctx, msg)
@@ -198,35 +233,49 @@ def _mono__wait_image_after(
                 frames_to_skip -= 1
                 prev_stamp_s = stamp
                 continue
-            print(f"[DEBUG _mono__wait_image_after] got fresh image: stamp={stamp:.6f} > prev={prev_stamp_s:.6f}, attempt={attempt}")
+            print(
+                f"[DEBUG _mono__wait_image_after] got fresh image: stamp={stamp:.6f} > prev={prev_stamp_s:.6f}, attempt={attempt}"
+            )
             return msg
         elif attempt <= 3:
-            print(f"[DEBUG _mono__wait_image_after] attempt {attempt}: stamp={stamp:.6f} not fresh enough (need > {prev_stamp_s:.6f})")
+            print(
+                f"[DEBUG _mono__wait_image_after] attempt {attempt}: stamp={stamp:.6f} not fresh enough (need > {prev_stamp_s:.6f})"
+            )
 
     if not saw_message:
-        print(f"[DEBUG _mono__wait_image_after] FAIL: no image at all on {target_topic}")
+        print(
+            f"[DEBUG _mono__wait_image_after] FAIL: no image at all on {target_topic}"
+        )
         raise RuntimeError(f"No image received on {target_topic} within {timeout:.1f}s")
-    print(f"[DEBUG _mono__wait_image_after] FAIL: no fresh image after {prev_stamp_s:.6f}")
+    print(
+        f"[DEBUG _mono__wait_image_after] FAIL: no fresh image after {prev_stamp_s:.6f}"
+    )
     raise RuntimeError(
         f"No fresh image received on {target_topic} after stamp {float(prev_stamp_s):.6f} "
         f"within {timeout:.1f}s"
     )
-    
+
 
 def _mono__msg_to_bgr(ctx, msg: Image) -> np.ndarray:
     h, w = msg.height, msg.width
     enc = (msg.encoding or "").lower()
-    print(f"[DEBUG _mono__msg_to_bgr] {w}x{h}, encoding={msg.encoding}, data_len={len(msg.data)}")
+    print(
+        f"[DEBUG _mono__msg_to_bgr] {w}x{h}, encoding={msg.encoding}, data_len={len(msg.data)}"
+    )
 
     if enc in ("rgb8", "r8g8b8"):
         rgb = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        print(f"[DEBUG _mono__msg_to_bgr] converted rgb8 -> bgr, shape={bgr.shape}, mean={bgr.mean():.1f}")
+        print(
+            f"[DEBUG _mono__msg_to_bgr] converted rgb8 -> bgr, shape={bgr.shape}, mean={bgr.mean():.1f}"
+        )
         return bgr
 
     if enc == "bgr8":
         bgr = np.frombuffer(msg.data, dtype=np.uint8).reshape(h, w, 3)
-        print(f"[DEBUG _mono__msg_to_bgr] bgr8 direct, shape={bgr.shape}, mean={bgr.mean():.1f}")
+        print(
+            f"[DEBUG _mono__msg_to_bgr] bgr8 direct, shape={bgr.shape}, mean={bgr.mean():.1f}"
+        )
         return bgr
 
     if enc in ("mono8", "8uc1"):
@@ -237,14 +286,14 @@ def _mono__msg_to_bgr(ctx, msg: Image) -> np.ndarray:
 
     print(f"[DEBUG _mono__msg_to_bgr] UNSUPPORTED encoding: {msg.encoding}")
     raise ValueError(f"Unsupported image encoding: {msg.encoding}")
-    
+
 
 def _mono__clean_mask(ctx, mask: np.ndarray) -> np.ndarray:
     kernel = np.ones((5, 5), np.uint8)
     opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     closed = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
     return closed
-    
+
 
 def _mono__red_mask(ctx, hsv: np.ndarray) -> np.ndarray:
     lower_1 = np.array([0, 90, 60], dtype=np.uint8)
@@ -254,12 +303,12 @@ def _mono__red_mask(ctx, hsv: np.ndarray) -> np.ndarray:
     mask_1 = cv2.inRange(hsv, lower_1, upper_1)
     mask_2 = cv2.inRange(hsv, lower_2, upper_2)
     return _mono__clean_mask(ctx, cv2.bitwise_or(mask_1, mask_2))
-    
+
 
 def _mono__color_mask(ctx, hsv: np.ndarray, color: str) -> np.ndarray:
     if color == "red":
         return _mono__red_mask(ctx, hsv)
-    
+
     ranges: Dict[str, Tuple[Tuple[int, int, int], Tuple[int, int, int]]] = {
         "green": ((40, 80, 60), (85, 255, 255)),
         "blue": ((100, 90, 60), (135, 255, 255)),
@@ -267,25 +316,27 @@ def _mono__color_mask(ctx, hsv: np.ndarray, color: str) -> np.ndarray:
     }
     if color not in ranges:
         raise ValueError(f"Unsupported color: {color}")
-    
+
     lower, upper = ranges[color]
-    mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+    mask = cv2.inRange(
+        hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8)
+    )
     return _mono__clean_mask(ctx, mask)
-    
+
 
 def _mono__bbox_area(ctx, mask: np.ndarray) -> Tuple[int, Tuple[int, int, int, int]]:
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return 0, (0, 0, 0, 0)
-    
+
     contour = max(contours, key=cv2.contourArea)
     x, y, w, h = cv2.boundingRect(contour)
     return int(w * h), (int(x), int(y), int(w), int(h))
-    
+
 
 def _mono__count_pixels(ctx, mask: np.ndarray) -> int:
     return int(cv2.countNonZero(mask))
-    
+
 
 def _mono__iter_float_range(ctx, start: float, stop: float, step: float) -> List[float]:
     values: List[float] = []
@@ -294,7 +345,7 @@ def _mono__iter_float_range(ctx, start: float, stop: float, step: float) -> List
         values.append(round(cur, 4))
         cur += float(step)
     return values
-    
+
 
 def _mono__white_mask(ctx, frame_bgr: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
@@ -304,7 +355,7 @@ def _mono__white_mask(ctx, frame_bgr: np.ndarray) -> np.ndarray:
         np.array([180, 85, 255], dtype=np.uint8),
     )
     return _mono__clean_mask(ctx, mask)
-    
+
 
 def _mono__large_contours(
     ctx,
@@ -314,38 +365,38 @@ def _mono__large_contours(
 ) -> List[Tuple[float, Tuple[int, int, int, int]]]:
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     h, w = mask.shape[:2]
-    
+
     result: List[Tuple[float, Tuple[int, int, int, int]]] = []
     for cnt in contours:
         area = float(cv2.contourArea(cnt))
         if area < float(min_area):
             continue
-    
+
         x, y, cw, ch = cv2.boundingRect(cnt)
         if x <= border_margin or y <= border_margin:
             continue
         if x + cw >= (w - border_margin) or y + ch >= (h - border_margin):
             continue
-    
+
         result.append((area, (int(x), int(y), int(cw), int(ch))))
     return result
-    
+
 
 def _mono__red_stats(ctx, frame_bgr: np.ndarray) -> Dict[str, float]:
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     red = _mono__red_mask(ctx, hsv)
     red_pixels = float(_mono__count_pixels(ctx, red))
-    
+
     contours, _ = cv2.findContours(red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     max_contour_area = 0.0
     if contours:
         max_contour_area = float(max(cv2.contourArea(c) for c in contours))
-    
+
     h, w = frame_bgr.shape[:2]
     frame_area = float(max(1, h * w))
     pixel_ratio = float(red_pixels / frame_area)
     contour_ratio = float(max_contour_area / frame_area)
-    
+
     return {
         "red_pixels": float(red_pixels),
         "pixel_ratio": pixel_ratio,
@@ -353,16 +404,25 @@ def _mono__red_stats(ctx, frame_bgr: np.ndarray) -> Dict[str, float]:
         "contour_ratio": contour_ratio,
         "visible_by_pixels": bool(red_pixels >= int(ctx.C10_MIN_RED_PIXELS)),
     }
-    
+
 
 def _mono__annotate(ctx, frame: np.ndarray, lines: List[str]) -> np.ndarray:
     debug = frame.copy()
     y = 30
     for line in lines:
-        cv2.putText(debug, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(
+            debug,
+            line,
+            (10, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
         y += 28
     return debug
-    
+
 
 def _mono__read_clip_from_sdf(ctx, camera_model_path_abs: str) -> Dict[str, Any]:
     result: Dict[str, Any] = {
@@ -375,7 +435,7 @@ def _mono__read_clip_from_sdf(ctx, camera_model_path_abs: str) -> Dict[str, Any]
     if not camera_model_path_abs:
         result["error"] = "camera_model_path_abs is empty"
         return result
-    
+
     try:
         tree = ET.parse(camera_model_path_abs)
         root = tree.getroot()
@@ -385,13 +445,13 @@ def _mono__read_clip_from_sdf(ctx, camera_model_path_abs: str) -> Dict[str, Any]
         if clip is None:
             result["error"] = "No <clip> section found in SDF"
             return result
-    
+
         near_node = clip.find("near")
         far_node = clip.find("far")
         if near_node is None or far_node is None:
             result["error"] = "No <near>/<far> in <clip>"
             return result
-    
+
         near_v = float((near_node.text or "").strip())
         far_v = float((far_node.text or "").strip())
         result["near_m"] = float(near_v)
@@ -401,32 +461,44 @@ def _mono__read_clip_from_sdf(ctx, camera_model_path_abs: str) -> Dict[str, Any]
     except Exception as exc:
         result["error"] = f"Failed to parse SDF clip: {exc}"
         return result
-    
+
 
 def _mono__open_test_scene(ctx, simulator, test_name: str) -> None:
     print(f"[DEBUG _mono__open_test_scene] test_name={test_name}")
     ctx._last_test_diagnostics = {}
     world = ctx.test_to_world[test_name]
-    print(f"[DEBUG _mono__open_test_scene] world={world}, exists={os.path.exists(world)}")
-    print(f"[DEBUG _mono__open_test_scene] sdf_path={ctx.sensor_sdf_path}, exists={os.path.exists(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else False}")
+    print(
+        f"[DEBUG _mono__open_test_scene] world={world}, exists={os.path.exists(world)}"
+    )
+    print(
+        f"[DEBUG _mono__open_test_scene] sdf_path={ctx.sensor_sdf_path}, exists={os.path.exists(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else False}"
+    )
     print(f"[DEBUG _mono__open_test_scene] calling simulator.open_scene()...")
     if not simulator.open_scene(world, ctx.sensor_sdf_path):
         diag = _mono__scene_diag(ctx, simulator)
         reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
-        print(f"[DEBUG _mono__open_test_scene] FAILED to open scene: reason={reason}, diag={diag}")
-        raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
+        print(
+            f"[DEBUG _mono__open_test_scene] FAILED to open scene: reason={reason}, diag={diag}"
+        )
+        raise RuntimeError(
+            f"Failed to open scene for {test_name}: {world} (reason={reason})"
+        )
     print(f"[DEBUG _mono__open_test_scene] scene opened OK, waiting for services...")
-    rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
-    rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+    rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
+    rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
     print(f"[DEBUG _mono__open_test_scene] services ready")
-    
 
-def _mono__move_and_settle(ctx, simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8) -> None:
+
+def _mono__move_and_settle(
+    ctx, simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.8
+) -> None:
     simulator.set_pose(model_name, x=x, y=y, z=z)
     time.sleep(settle_s)
-    
 
-def _mono__c4_run_shell_capture(ctx, cmd: str, timeout_s: float = 5.0, max_lines: int = 200) -> Dict[str, Any]:
+
+def _mono__c4_run_shell_capture(
+    ctx, cmd: str, timeout_s: float = 5.0, max_lines: int = 200
+) -> Dict[str, Any]:
     try:
         res = subprocess.run(
             ["bash", "-lc", cmd],
@@ -438,8 +510,8 @@ def _mono__c4_run_shell_capture(ctx, cmd: str, timeout_s: float = 5.0, max_lines
         return {
             "cmd": str(cmd),
             "returncode": int(res.returncode),
-            "stdout_tail": (res.stdout or "").splitlines()[-int(max_lines):],
-            "stderr_tail": (res.stderr or "").splitlines()[-int(max_lines):],
+            "stdout_tail": (res.stdout or "").splitlines()[-int(max_lines) :],
+            "stderr_tail": (res.stderr or "").splitlines()[-int(max_lines) :],
         }
     except Exception as exc:
         return {
@@ -448,7 +520,7 @@ def _mono__c4_run_shell_capture(ctx, cmd: str, timeout_s: float = 5.0, max_lines
             "stdout_tail": [],
             "stderr_tail": [str(exc)],
         }
-    
+
 
 def _mono__c4_extract_log_path_from_lines(ctx, lines: List[str]) -> str:
     # Typical token inside pgrep/command line: __log:=/abs/path/gazebo-1.log
@@ -458,7 +530,7 @@ def _mono__c4_extract_log_path_from_lines(ctx, lines: List[str]) -> str:
         idx = s.find(marker)
         if idx < 0:
             continue
-        tail = s[idx + len(marker):].strip()
+        tail = s[idx + len(marker) :].strip()
         if not tail:
             continue
         token = tail.split()[0].strip().strip("'").strip('"')
@@ -467,9 +539,11 @@ def _mono__c4_extract_log_path_from_lines(ctx, lines: List[str]) -> str:
         if ".log" in token:
             return token.split(".log", 1)[0] + ".log"
     return ""
-    
 
-def _mono__c4_collect_log_candidates_from_dir(ctx, base: Path, recursive: bool = False) -> List[Path]:
+
+def _mono__c4_collect_log_candidates_from_dir(
+    ctx, base: Path, recursive: bool = False
+) -> List[Path]:
     if not base.exists() or not base.is_dir():
         return []
     patterns = ("gazebo-*.log", "gzserver-*.log")
@@ -477,7 +551,7 @@ def _mono__c4_collect_log_candidates_from_dir(ctx, base: Path, recursive: bool =
     for pattern in patterns:
         found.extend(base.rglob(pattern) if recursive else base.glob(pattern))
     return found
-    
+
 
 def _mono__c4_read_latest_gzserver_log_tail(
     ctx,
@@ -491,14 +565,14 @@ def _mono__c4_read_latest_gzserver_log_tail(
     hint_dir_exists = False
     hint_file_size_bytes: Optional[int] = None
     waited_ms = 0
-    
+
     def _read_tail(path: Path) -> Dict[str, Any]:
         try:
             with path.open("r", encoding="utf-8", errors="replace") as f_in:
                 lines = f_in.read().splitlines()
             return {
                 "path": str(path),
-                "tail": lines[-int(max_lines):],
+                "tail": lines[-int(max_lines) :],
                 "searched_paths": searched_paths,
                 "hint_file_exists": bool(hint_file_exists),
                 "hint_dir_exists": bool(hint_dir_exists),
@@ -515,7 +589,7 @@ def _mono__c4_read_latest_gzserver_log_tail(
                 "hint_file_size_bytes": hint_file_size_bytes,
                 "waited_ms": int(waited_ms),
             }
-    
+
     if log_path_hint:
         hint = Path(log_path_hint).expanduser()
         searched_paths.append(str(hint))
@@ -540,28 +614,36 @@ def _mono__c4_read_latest_gzserver_log_tail(
                 hint_file_size_bytes = int(hint.stat().st_size)
             except Exception:
                 hint_file_size_bytes = None
-    
+
     candidates: List[Path] = []
-    
+
     if ros_log_dir_hint:
         ros_dir = Path(str(ros_log_dir_hint)).expanduser()
         searched_paths.append(str(ros_dir))
-        candidates.extend(cls._c4_collect_log_candidates_from_dir(ros_dir, recursive=True))
-    
+        candidates.extend(
+            cls._c4_collect_log_candidates_from_dir(ros_dir, recursive=True)
+        )
+
     env_ros_log_dir = os.environ.get("ROS_LOG_DIR", "")
     if env_ros_log_dir:
         env_dir = Path(env_ros_log_dir).expanduser()
         searched_paths.append(str(env_dir))
-        candidates.extend(cls._c4_collect_log_candidates_from_dir(env_dir, recursive=True))
-    
+        candidates.extend(
+            cls._c4_collect_log_candidates_from_dir(env_dir, recursive=True)
+        )
+
     latest_dir = Path.home() / ".ros" / "log" / "latest"
     searched_paths.append(str(latest_dir))
-    candidates.extend(cls._c4_collect_log_candidates_from_dir(latest_dir, recursive=False))
-    
+    candidates.extend(
+        cls._c4_collect_log_candidates_from_dir(latest_dir, recursive=False)
+    )
+
     ros_log_root = Path.home() / ".ros" / "log"
     searched_paths.append(str(ros_log_root))
-    candidates.extend(cls._c4_collect_log_candidates_from_dir(ros_log_root, recursive=True))
-    
+    candidates.extend(
+        cls._c4_collect_log_candidates_from_dir(ros_log_root, recursive=True)
+    )
+
     unique_existing: List[Path] = []
     for path in candidates:
         try:
@@ -569,7 +651,7 @@ def _mono__c4_read_latest_gzserver_log_tail(
                 unique_existing.append(path)
         except Exception:
             continue
-    
+
     if not unique_existing:
         return {
             "path": "",
@@ -580,31 +662,37 @@ def _mono__c4_read_latest_gzserver_log_tail(
             "hint_file_size_bytes": hint_file_size_bytes,
             "waited_ms": int(waited_ms),
         }
-    
+
     chosen = sorted(unique_existing, key=lambda p: p.stat().st_mtime)[-1]
     return _read_tail(chosen)
-    
 
-def _mono__c4_collect_scene_open_diagnostics(ctx, simulator, scene_diag: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+
+def _mono__c4_collect_scene_open_diagnostics(
+    ctx, simulator, scene_diag: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     if not isinstance(scene_diag, dict):
         scene_diag = {}
-    
-    rosservice_full = _mono__c4_run_shell_capture(ctx, 
+
+    rosservice_full = _mono__c4_run_shell_capture(
+        ctx,
         "rosservice list | grep '^/gazebo/' || true",
         timeout_s=6.0,
         max_lines=400,
     )
-    rosnode_info = _mono__c4_run_shell_capture(ctx, 
+    rosnode_info = _mono__c4_run_shell_capture(
+        ctx,
         "rosnode info /gazebo || true",
         timeout_s=6.0,
         max_lines=200,
     )
-    rostopic_gazebo_clock = _mono__c4_run_shell_capture(ctx, 
+    rostopic_gazebo_clock = _mono__c4_run_shell_capture(
+        ctx,
         "rostopic list | grep -E '^/clock$|^/gazebo/' || true",
         timeout_s=6.0,
         max_lines=300,
     )
-    gz_pid_info = _mono__c4_run_shell_capture(ctx, 
+    gz_pid_info = _mono__c4_run_shell_capture(
+        ctx,
         "pgrep -f '(^|/)gzserver([[:space:]]|$)' | head -n 1 || true",
         timeout_s=3.0,
         max_lines=10,
@@ -616,7 +704,8 @@ def _mono__c4_collect_scene_open_diagnostics(ctx, simulator, scene_diag: Optiona
             gz_pid = s
             break
     if gz_pid:
-        gzserver_ps = _mono__c4_run_shell_capture(ctx, 
+        gzserver_ps = _mono__c4_run_shell_capture(
+            ctx,
             f"ps -fp {gz_pid} || true",
             timeout_s=3.0,
             max_lines=80,
@@ -628,46 +717,59 @@ def _mono__c4_collect_scene_open_diagnostics(ctx, simulator, scene_diag: Optiona
             "stdout_tail": [],
             "stderr_tail": ["gzserver pid not found"],
         }
-    
+
     gz_log_hint = ""
     gz_state = scene_diag.get("gzserver_state", {})
     if isinstance(gz_state, dict):
         pgrep_tail = gz_state.get("pgrep_tail", [])
         if isinstance(pgrep_tail, list):
-            gz_log_hint = _mono__c4_extract_log_path_from_lines(ctx, [str(x) for x in pgrep_tail])
-    
+            gz_log_hint = _mono__c4_extract_log_path_from_lines(
+                ctx, [str(x) for x in pgrep_tail]
+            )
+
     ros_log_dir_hint = ""
     launch_env = scene_diag.get("launch_env", {})
     if isinstance(launch_env, dict):
         ros_log_dir_hint = str(launch_env.get("ROS_LOG_DIR", "") or "")
-    
+
     launch_stdout_tail = scene_diag.get("launch_stdout_tail", [])
     launch_stderr_tail = scene_diag.get("launch_stderr_tail", [])
-    
+
     return {
         "rosservice_gazebo_full": rosservice_full,
         "rosnode_info_gazebo": rosnode_info,
         "rostopic_gazebo_clock": rostopic_gazebo_clock,
         "gzserver_ps": gzserver_ps,
-        "roslaunch_stdout_tail": list(launch_stdout_tail)[-50:] if isinstance(launch_stdout_tail, list) else [],
-        "roslaunch_stderr_tail": list(launch_stderr_tail)[-50:] if isinstance(launch_stderr_tail, list) else [],
+        "roslaunch_stdout_tail": (
+            list(launch_stdout_tail)[-50:]
+            if isinstance(launch_stdout_tail, list)
+            else []
+        ),
+        "roslaunch_stderr_tail": (
+            list(launch_stderr_tail)[-50:]
+            if isinstance(launch_stderr_tail, list)
+            else []
+        ),
         "gazebo_log_path_hint": str(gz_log_hint),
-        "gazebo_log_tail": _mono__c4_read_latest_gzserver_log_tail(ctx, 
+        "gazebo_log_tail": _mono__c4_read_latest_gzserver_log_tail(
+            ctx,
             log_path_hint=gz_log_hint,
             ros_log_dir_hint=ros_log_dir_hint,
             max_lines=200,
         ),
     }
-    
 
-def _mono__c4_classify_scene_reason(ctx, last_reason: str, diagnostics: Dict[str, Any]) -> Tuple[str, str]:
+
+def _mono__c4_classify_scene_reason(
+    ctx, last_reason: str, diagnostics: Dict[str, Any]
+) -> Tuple[str, str]:
     reason = str(last_reason or "gazebo_api_timeout")
     if reason in ("topics_not_ready", "roslaunch_exited_while_waiting_topics"):
         return (
             "camera_topics_not_ready",
             "Expected camera topics were not resolved or did not publish messages in time",
         )
-    
+
     rosservice = diagnostics.get("rosservice_gazebo_full", {})
     services = [
         str(line).strip()
@@ -685,15 +787,21 @@ def _mono__c4_classify_scene_reason(ctx, last_reason: str, diagnostics: Dict[str
     gz_ps = diagnostics.get("gzserver_ps", {})
     gz_alive = bool(gz_ps.get("stdout_tail"))
     if reason in ("gzserver_died", "roslaunch_exited") or not gz_alive:
-        return ("gzserver_died_early", "gzserver died before Gazebo API services became available")
-    return ("gazebo_api_timeout", "Gazebo API services timeout; see diagnostics: rosservice_gazebo_full / gazebo_log_tail")
-    
+        return (
+            "gzserver_died_early",
+            "gzserver died before Gazebo API services became available",
+        )
+    return (
+        "gazebo_api_timeout",
+        "Gazebo API services timeout; see diagnostics: rosservice_gazebo_full / gazebo_log_tail",
+    )
+
 
 def _mono__open_c4_scene_with_retry(ctx, simulator) -> None:
     world = ctx.test_to_world["c4_geometries_presence_test"]
     attempts: List[Dict[str, Any]] = []
     last_reason = "unknown"
-    
+
     for attempt in (1, 2):
         if attempt == 2:
             simulator.kill_gazebo()
@@ -707,11 +815,17 @@ def _mono__open_c4_scene_with_retry(ctx, simulator) -> None:
             if not isinstance(scene_diag, dict):
                 scene_diag = {}
             scene_diag.setdefault("open_scene_exception", str(exc))
-        last_reason = str(scene_diag.get("reason", "unknown")) if isinstance(scene_diag, dict) else "unknown"
-        attempts.append({"attempt": int(attempt), "opened": bool(opened), "reason": last_reason})
+        last_reason = (
+            str(scene_diag.get("reason", "unknown"))
+            if isinstance(scene_diag, dict)
+            else "unknown"
+        )
+        attempts.append(
+            {"attempt": int(attempt), "opened": bool(opened), "reason": last_reason}
+        )
         if opened:
-            rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
-            rospy.wait_for_service('/gazebo/set_model_state', timeout=30.0)
+            rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
+            rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
             return
 
         retryable_reasons = {
@@ -722,22 +836,25 @@ def _mono__open_c4_scene_with_retry(ctx, simulator) -> None:
         if attempt == 1 and last_reason in retryable_reasons:
             continue
         break
-    
+
     extra_diag = _mono__c4_collect_scene_open_diagnostics(ctx, simulator, scene_diag={})
-    classified_reason, classified_msg = _mono__c4_classify_scene_reason(ctx, last_reason, extra_diag)
-    _mono__set_test_diagnostics(ctx, 
+    classified_reason, classified_msg = _mono__c4_classify_scene_reason(
+        ctx, last_reason, extra_diag
+    )
+    _mono__set_test_diagnostics(
+        ctx,
         c4_scene_open={
             "reason": classified_reason,
             "message": classified_msg,
             "attempts": attempts,
             "diagnostics": extra_diag,
-        }
+        },
     )
     raise RuntimeError(
         f"Failed to open scene for c4_geometries_presence_test (reason={classified_reason}). "
         f"See diagnostics: rosservice_gazebo_full / gazebo_log_tail"
     )
-    
+
 
 def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {
@@ -757,25 +874,30 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c1_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c1_size_order={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c1_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c1_size_order_test")
     except Exception:
         resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
         metrics["resolved_topic"] = str(resolved_topic)
-        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
+        metrics["topic_mapping_changed"] = bool(
+            str(resolved_topic) != str(ctx.IMAGE_TOPIC)
+        )
         metrics["scene_open_success"] = False
         reason = "unknown"
         if isinstance(scene_diag, dict):
@@ -783,22 +905,23 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         metrics["error_reason"] = f"scene_open_failed:{reason}"
         _store_c1_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, _ = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _store_c1_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C1_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C1_CUBE_NAME}"
         _store_c1_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C1_CUBE_NAME}")
-    
+
     prev_stamp_s: Optional[float] = None
     for x in ctx.C1_POSITIONS:
         label = f"x{int(x)}"
-        _mono__move_and_settle(ctx,
+        _mono__move_and_settle(
+            ctx,
             simulator,
             ctx.C1_CUBE_NAME,
             x=float(x),
@@ -808,22 +931,31 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         )
 
         try:
-            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2)
+            msg = _mono__wait_image_after(
+                ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2
+            )
         except Exception as exc:
             metrics["error_reason"] = f"image_receive_failed:{exc}"
             _store_c1_diag()
-            raise RuntimeError(f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}"
+            ) from exc
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
         red = _mono__red_mask(ctx, hsv)
         area, (bx, by, bw, bh) = _mono__bbox_area(ctx, red)
         metrics["bbox_area_px"][label] = int(area)
-        metrics["bbox_px"][label] = {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)}
+        metrics["bbox_px"][label] = {
+            "x": int(bx),
+            "y": int(by),
+            "w": int(bw),
+            "h": int(bh),
+        }
         metrics["red_pixels"][label] = int(_mono__count_pixels(ctx, red))
         metrics["frame_stamp_s"][label] = float(prev_stamp_s)
-    
+
         debug = frame.copy()
         if area > 0:
             cv2.rectangle(debug, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
@@ -837,12 +969,14 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
             2,
             cv2.LINE_AA,
         )
-    
+
     x2 = metrics["bbox_area_px"].get("x2", 0)
     x5 = metrics["bbox_area_px"].get("x5", 0)
     x8 = metrics["bbox_area_px"].get("x8", 0)
     order_ok = x2 > x5 > x8
-    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO)
+    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (
+        x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO
+    )
     metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
     metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
     if not (order_ok and margin_ok):
@@ -851,9 +985,12 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         )
     _store_c1_diag()
     if not (order_ok and margin_ok):
-        raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
+        raise AssertionError(
+            f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}"
+        )
 
     return {"id": "C1", "passed": True, "metrics": metrics}
+
 
 def _mono_c4_geometries_presence_test(ctx, simulator) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {
@@ -868,53 +1005,65 @@ def _mono_c4_geometries_presence_test(ctx, simulator) -> Dict[str, Any]:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c4_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c4_geometries_presence={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c4_diag()
-    
+
     try:
         _mono__open_c4_scene_with_retry(ctx, simulator)
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c4_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c4_diag()
-    
+
     try:
         msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"image_receive_failed:{exc}"
         _store_c4_diag()
-        raise RuntimeError(f"Failed to receive image for C4 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive image for C4 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     frame = _mono__msg_to_bgr(ctx, msg)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
     for color in ("red", "green", "blue", "yellow"):
-        metrics["pixel_counts"][color] = _mono__count_pixels(ctx, _mono__color_mask(ctx, hsv, color))
-    
-    missing = {c: n for c, n in metrics["pixel_counts"].items() if int(n) <= int(metrics["threshold"])}
+        metrics["pixel_counts"][color] = _mono__count_pixels(
+            ctx, _mono__color_mask(ctx, hsv, color)
+        )
+
+    missing = {
+        c: n
+        for c, n in metrics["pixel_counts"].items()
+        if int(n) <= int(metrics["threshold"])
+    }
     metrics["checks"] = {"all_present": len(missing) == 0, "missing_or_low": missing}
     metrics["status"] = "PASS" if len(missing) == 0 else "FAIL"
     if missing:
         metrics["error_reason"] = f"missing_or_low:{missing}"
-    
-    debug = _mono__annotate(ctx, 
+
+    debug = _mono__annotate(
+        ctx,
         frame,
         [
             f"topic={resolved_topic}",
@@ -926,12 +1075,14 @@ def _mono_c4_geometries_presence_test(ctx, simulator) -> Dict[str, Any]:
         ],
     )
     _store_c4_diag()
-    
+
     if missing:
-        raise AssertionError(f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}")
+        raise AssertionError(
+            f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}"
+        )
 
     return {"id": "C4", "passed": True, "metrics": metrics}
-    
+
 
 def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {
@@ -947,33 +1098,36 @@ def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c7_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c7_occlusion={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c7_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c7_occlusion_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c7_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c7_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C7_FRONT_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C7_FRONT_CUBE_NAME}"
         _store_c7_diag()
@@ -982,35 +1136,50 @@ def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
         metrics["error_reason"] = f"model_not_spawned:{ctx.C7_BACK_CUBE_NAME}"
         _store_c7_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C7_BACK_CUBE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c7_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    
-    def _move_and_capture(model_name: str, x: float, y: float, z: float, settle_s: float = 0.35) -> np.ndarray:
+
+    def _move_and_capture(
+        model_name: str, x: float, y: float, z: float, settle_s: float = 0.35
+    ) -> np.ndarray:
         nonlocal prev_stamp_s
-    
-        _mono__move_and_settle(ctx, simulator, model_name, x=float(x), y=float(y), z=float(z), settle_s=settle_s)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            model_name,
+            x=float(x),
+            y=float(y),
+            z=float(z),
+            settle_s=settle_s,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         return _mono__msg_to_bgr(ctx, msg)
-    
+
     _move_and_capture(ctx.C7_BACK_CUBE_NAME, x=3.6, y=0.0, z=0.25)
-    
+
     for case_name, y in ctx.C7_CASES.items():
         frame = _move_and_capture(ctx.C7_FRONT_CUBE_NAME, x=3.0, y=float(y), z=0.25)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
         blue = _mono__color_mask(ctx, hsv, "blue")
         blue_count = _mono__count_pixels(ctx, blue)
         metrics["blue_pixels"][case_name] = int(blue_count)
-    
-        debug = _mono__annotate(ctx, 
+
+        debug = _mono__annotate(
+            ctx,
             frame,
             [
                 f"topic={resolved_topic}",
@@ -1018,19 +1187,22 @@ def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
                 f"front_y={float(y):.2f}",
             ],
         )
-    
+
     blue_25 = metrics["blue_pixels"].get("occ_25", 0)
     blue_50 = metrics["blue_pixels"].get("occ_50", 0)
     relation_ok = blue_25 > blue_50
     threshold_ok = blue_25 > ctx.C7_MIN_PIXELS and blue_50 > ctx.C7_MIN_PIXELS
-    metrics["checks"] = {"occlusion_relation": bool(relation_ok), "threshold_ok": bool(threshold_ok)}
+    metrics["checks"] = {
+        "occlusion_relation": bool(relation_ok),
+        "threshold_ok": bool(threshold_ok),
+    }
     metrics["status"] = "PASS" if (relation_ok and threshold_ok) else "FAIL"
     if not (relation_ok and threshold_ok):
         metrics["error_reason"] = (
             f"occlusion_mismatch: occ_25={blue_25}, occ_50={blue_50}, threshold={ctx.C7_MIN_PIXELS}"
         )
     _store_c7_diag()
-    
+
     if not (relation_ok and threshold_ok):
         raise AssertionError(
             f"C7 checks failed: {metrics['checks']}, blue_pixels={metrics['blue_pixels']}, "
@@ -1038,7 +1210,7 @@ def _mono_c7_occlusion_test(ctx, simulator) -> Dict[str, Any]:
         )
 
     return {"id": "C7", "passed": True, "metrics": metrics}
-    
+
 
 def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {
@@ -1058,37 +1230,45 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
         "display_env": {},
     }
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-    
+
     world = ctx.test_to_world["c2_resolution_test"]
     if not simulator.open_scene(world, ctx.sensor_sdf_path):
         scene_diag = _mono__scene_diag(ctx, simulator)
         metrics["resolved_topic"] = str(ctx.IMAGE_TOPIC)
         metrics["topic_mapping_changed"] = False
         metrics["scene_open_success"] = False
-        metrics["error_reason"] = f"scene_open_failed:{scene_diag.get('reason', 'unknown')}" if scene_diag else "scene_open_failed"
+        metrics["error_reason"] = (
+            f"scene_open_failed:{scene_diag.get('reason', 'unknown')}"
+            if scene_diag
+            else "scene_open_failed"
+        )
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
         raise RuntimeError(
             f"Failed to open scene for c2_resolution_test: {world} "
             f"(reason={scene_diag.get('reason', 'unknown') if scene_diag else 'unknown'})"
         )
-    
-    rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+
+    rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
     metrics["scene_open_success"] = True
-    
+
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-    
+
     try:
         msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"image_receive_failed:{exc}"
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-        raise RuntimeError(f"Failed to receive image for C2 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive image for C2 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     actual_width = int(getattr(msg, "width", 0) or 0)
     actual_height = int(getattr(msg, "height", 0) or 0)
     metrics["actual_resolution"] = {
@@ -1097,7 +1277,7 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
     }
     metrics["encoding"] = str(getattr(msg, "encoding", "") or "")
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
-    
+
     if actual_width <= 0 or actual_height <= 0:
         metrics["error_reason"] = "invalid_image_resolution"
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
@@ -1105,14 +1285,15 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
             f"C2 received invalid image dimensions from topic {resolved_topic}: "
             f"width={actual_width}, height={actual_height}"
         )
-    
+
     try:
         frame = _mono__msg_to_bgr(ctx, msg)
     except Exception:
         frame = None
-    
+
     if frame is not None:
-        debug = _mono__annotate(ctx, 
+        debug = _mono__annotate(
+            ctx,
             frame,
             [
                 f"topic={resolved_topic}",
@@ -1120,9 +1301,9 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
                 f"actual={actual_width}x{actual_height}",
             ],
         )
-    
-    resolution_matches = (
-        actual_width == int(ctx.image_width) and actual_height == int(ctx.image_height)
+
+    resolution_matches = actual_width == int(ctx.image_width) and actual_height == int(
+        ctx.image_height
     )
     metrics["checks"] = {"resolution_matches": bool(resolution_matches)}
     metrics["status"] = "PASS" if resolution_matches else "FAIL"
@@ -1131,7 +1312,7 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
             f"resolution_mismatch: expected={ctx.image_width}x{ctx.image_height}, "
             f"actual={actual_width}x{actual_height}"
         )
-    
+
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
     if not resolution_matches:
         raise AssertionError(
@@ -1140,11 +1321,11 @@ def _mono_c2_resolution_test(ctx, simulator) -> Dict[str, Any]:
         )
 
     return {"id": "C2", "passed": True, "metrics": metrics}
-    
+
 
 def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
     x_fixed = 2.0
-    
+
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c9_fov_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -1160,67 +1341,86 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c9_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c9_fov={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c9_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c9_fov_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c9_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c9_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C9_SPHERE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C9_SPHERE_NAME}"
         _store_c9_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C9_SPHERE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c9_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
     last_visible: Optional[Tuple[float, np.ndarray, int]] = None
     first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     for y in _mono__iter_float_range(ctx, 0.0, float(ctx.C9_MAX_Y), float(ctx.C9_STEP)):
-        _mono__move_and_settle(ctx, simulator, ctx.C9_SPHERE_NAME, x=x_fixed, y=float(y), z=0.2, settle_s=0.35)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            ctx.C9_SPHERE_NAME,
+            x=x_fixed,
+            y=float(y),
+            z=0.2,
+            settle_s=0.35,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         white = _mono__white_mask(ctx, frame)
-        contours = _mono__large_contours(ctx, white, min_area=ctx.C9_MIN_CONTOUR_AREA, border_margin=4)
+        contours = _mono__large_contours(
+            ctx, white, min_area=ctx.C9_MIN_CONTOUR_AREA, border_margin=4
+        )
         contour_count = len(contours)
         visible = contour_count > 0
-    
-        metrics["samples"].append({"y_m": float(y), "visible": bool(visible), "contours": int(contour_count)})
-    
+
+        metrics["samples"].append(
+            {"y_m": float(y), "visible": bool(visible), "contours": int(contour_count)}
+        )
+
         if visible:
             last_visible = (float(y), frame, contour_count)
         elif last_visible is not None:
             first_not_visible = (float(y), frame, contour_count)
             break
-    
+
     if last_visible is None:
         metrics["error_reason"] = "object_never_detected"
         _store_c9_diag()
@@ -1228,17 +1428,24 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
     if first_not_visible is None:
         metrics["error_reason"] = "object_never_lost"
         _store_c9_diag()
-        raise AssertionError("C9 failed: object did not disappear within tested Y range")
-    
+        raise AssertionError(
+            "C9 failed: object did not disappear within tested Y range"
+        )
+
     y_visible = float(last_visible[0])
     y_lost = float(first_not_visible[0])
     y_transition = float((y_visible + y_lost) / 2.0)
     y_edge_estimate = float(y_transition + float(ctx.C9_SPHERE_RADIUS_M))
     measured_fov = float(2.0 * atan(y_edge_estimate / x_fixed))
     target_fov = float(ctx.horizontal_fov)
-    rel_error = float(abs(measured_fov - target_fov) / target_fov) if target_fov > 0 else float("inf")
-    
-    dbg_visible = _mono__annotate(ctx, 
+    rel_error = (
+        float(abs(measured_fov - target_fov) / target_fov)
+        if target_fov > 0
+        else float("inf")
+    )
+
+    dbg_visible = _mono__annotate(
+        ctx,
         last_visible[1],
         [
             f"topic={resolved_topic}",
@@ -1248,8 +1455,9 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
             "visible=True",
         ],
     )
-    
-    dbg_lost = _mono__annotate(ctx, 
+
+    dbg_lost = _mono__annotate(
+        ctx,
         first_not_visible[1],
         [
             f"topic={resolved_topic}",
@@ -1259,7 +1467,7 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
             "visible=False",
         ],
     )
-    
+
     metrics["y_max_visible_m"] = y_visible
     metrics["y_first_not_visible_m"] = y_lost
     metrics["y_transition_m"] = y_transition
@@ -1281,12 +1489,20 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
         )
 
     return {"id": "C9", "passed": True, "metrics": metrics}
-    
+
 
 def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
     clip_cfg = _mono__read_clip_from_sdf(ctx, ctx.sensor_sdf_path)
-    near_target = float(clip_cfg["near_m"]) if clip_cfg.get("near_m") is not None else float(ctx.clip_near)
-    far_target = float(clip_cfg["far_m"]) if clip_cfg.get("far_m") is not None else float(ctx.clip_far)
+    near_target = (
+        float(clip_cfg["near_m"])
+        if clip_cfg.get("near_m") is not None
+        else float(ctx.clip_near)
+    )
+    far_target = (
+        float(clip_cfg["far_m"])
+        if clip_cfg.get("far_m") is not None
+        else float(ctx.clip_far)
+    )
     near_tol = max(0.05, abs(near_target) * 0.05)
     far_tol = max(0.05, abs(far_target) * 0.05)
     near_start = min(float(ctx.C10_NEAR_START_X), max(0.01, near_target * 0.3))
@@ -1304,92 +1520,115 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "near_tolerance_m": float(near_tol),
         "far_tolerance_m": float(far_tol),
         "near_search": {"start_x": float(near_start), "end_x": float(near_end)},
-        "far_search": {"coarse_step": float(ctx.C10_FAR_COARSE_STEP), "fine_step": float(ctx.C10_FAR_FINE_STEP)},
+        "far_search": {
+            "coarse_step": float(ctx.C10_FAR_COARSE_STEP),
+            "fine_step": float(ctx.C10_FAR_FINE_STEP),
+        },
         "min_red_pixels": int(ctx.C10_MIN_RED_PIXELS),
         "visibility_rule": f"red_pixels>={int(ctx.C10_MIN_RED_PIXELS)}",
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c10_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c10_clipping={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c10_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c10_clipping_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c10_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c10_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C10_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C10_CUBE_NAME}"
         _store_c10_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C10_CUBE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c10_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    
-    def _move_and_capture(x: float, settle_s: float) -> Tuple[np.ndarray, Dict[str, float], int]:
+
+    def _move_and_capture(
+        x: float, settle_s: float
+    ) -> Tuple[np.ndarray, Dict[str, float], int]:
         nonlocal prev_stamp_s
-    
-        _mono__move_and_settle(ctx, simulator, ctx.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=settle_s)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            ctx.C10_CUBE_NAME,
+            x=float(x),
+            y=0.0,
+            z=0.25,
+            settle_s=settle_s,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         red_stats = _mono__red_stats(ctx, frame)
         red_pixels = int(red_stats["red_pixels"])
         return frame, red_stats, red_pixels
-    
+
     near_before: Optional[Tuple[float, np.ndarray, int]] = None
     near_after: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     for x in _mono__iter_float_range(ctx, near_start, near_end, ctx.C10_NEAR_STEP):
         frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
         if bool(red_stats["visible_by_pixels"]):
             near_after = (float(x), frame, red_pixels)
             break
         near_before = (float(x), frame, red_pixels)
-    
+
     if near_after is None:
         metrics["error_reason"] = "near_boundary_not_found"
         _store_c10_diag()
-        raise AssertionError("C10 failed: clip_cube did not appear in near search range")
-    
+        raise AssertionError(
+            "C10 failed: clip_cube did not appear in near search range"
+        )
+
     near_x = float(near_after[0])
     metrics["x_near_m"] = near_x
     metrics["near_boundary"] = {
         "before_x_m": float(near_before[0]) if near_before is not None else None,
         "after_x_m": float(near_after[0]),
     }
-    
+
     far_last_visible = near_after
     far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
     metrics["far_search_stop_m"] = float(far_search_stop)
-    for x in _mono__iter_float_range(ctx, 
+    for x in _mono__iter_float_range(
+        ctx,
         near_x + float(ctx.C10_FAR_COARSE_STEP),
         far_search_stop,
         float(ctx.C10_FAR_COARSE_STEP),
@@ -1401,18 +1640,24 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         else:
             far_first_not_visible = (float(x), frame, red_pixels)
             break
-    
+
     if far_first_not_visible is None:
         metrics["error_reason"] = "far_boundary_not_found"
         _store_c10_diag()
-        raise AssertionError("C10 failed: clip_cube did not disappear in far search range")
-    
-    fine_start = max(float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP))
+        raise AssertionError(
+            "C10 failed: clip_cube did not disappear in far search range"
+        )
+
+    fine_start = max(
+        float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP)
+    )
     fine_end = float(far_first_not_visible[0])
     far_last_visible_fine = far_last_visible
     far_first_not_visible_fine = far_first_not_visible
-    
-    for x in _mono__iter_float_range(ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)):
+
+    for x in _mono__iter_float_range(
+        ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)
+    ):
         frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.15)
         visible = bool(red_stats["visible_by_pixels"])
         if visible:
@@ -1420,7 +1665,7 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         else:
             far_first_not_visible_fine = (float(x), frame, red_pixels)
             break
-    
+
     far_x = float(far_last_visible_fine[0])
     metrics["x_far_m"] = far_x
     metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
@@ -1428,7 +1673,7 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "last_visible_x_m": float(far_last_visible_fine[0]),
         "first_not_visible_x_m": float(far_first_not_visible_fine[0]),
     }
-    
+
     near_ok = abs(near_x - float(near_target)) <= float(near_tol)
     far_ok = abs(far_x - float(far_target)) <= float(far_tol)
     metrics["checks"] = {
@@ -1437,13 +1682,19 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "near_ok": bool(near_ok),
         "far_ok": bool(far_ok),
     }
-    
+
     near_after_stats = _mono__red_stats(ctx, near_after[1])
     far_before_stats = _mono__red_stats(ctx, far_last_visible_fine[1])
     far_after_stats = _mono__red_stats(ctx, far_first_not_visible_fine[1])
     metrics["visibility_debug"] = {
-        "near_before_red_pixels": int(near_before[2]) if near_before is not None else None,
-        "near_before_pixel_ratio": float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"]) if near_before is not None else None,
+        "near_before_red_pixels": (
+            int(near_before[2]) if near_before is not None else None
+        ),
+        "near_before_pixel_ratio": (
+            float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"])
+            if near_before is not None
+            else None
+        ),
         "near_after_red_pixels": int(near_after[2]),
         "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
         "far_before_red_pixels": int(far_last_visible_fine[2]),
@@ -1451,9 +1702,10 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "far_after_red_pixels": int(far_first_not_visible_fine[2]),
         "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
     }
-    
+
     if near_before is not None:
-        dbg = _mono__annotate(ctx, 
+        dbg = _mono__annotate(
+            ctx,
             near_before[1],
             [
                 f"near_before x={near_before[0]:.2f}",
@@ -1463,8 +1715,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
                 f"topic={resolved_topic}",
             ],
         )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         near_after[1],
         [
             f"near_after x={near_after[0]:.2f}",
@@ -1474,8 +1727,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
             f"topic={resolved_topic}",
         ],
     )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         far_last_visible_fine[1],
         [
             f"far_before x={far_last_visible_fine[0]:.2f}",
@@ -1485,8 +1739,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
             f"topic={resolved_topic}",
         ],
     )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         far_first_not_visible_fine[1],
         [
             f"far_after x={far_first_not_visible_fine[0]:.2f}",
@@ -1496,7 +1751,7 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
             f"topic={resolved_topic}",
         ],
     )
-    
+
     metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
     if not (near_ok and far_ok):
         metrics["error_reason"] = (
@@ -1511,7 +1766,7 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         )
 
     return {"id": "C10", "passed": True, "metrics": metrics}
-    
+
 
 def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {
@@ -1529,25 +1784,30 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c11_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c11_fps_stability={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c11_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c11_fps_stability_test")
     except Exception:
         resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
         metrics["resolved_topic"] = str(resolved_topic)
-        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
+        metrics["topic_mapping_changed"] = bool(
+            str(resolved_topic) != str(ctx.IMAGE_TOPIC)
+        )
         metrics["scene_open_success"] = False
         reason = "unknown"
         if isinstance(scene_diag, dict):
@@ -1555,25 +1815,27 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         metrics["error_reason"] = f"scene_open_failed:{reason}"
         _store_c11_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, _ = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _store_c11_diag()
-    
+
     try:
         _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_receive_failed:{exc}"
         _store_c11_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C11 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C11 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     timestamps: List[float] = []
     first_msg: Dict[str, Optional[Image]] = {"msg": None}
     last_msg: Dict[str, Optional[Image]] = {"msg": None}
     header_stamp_missing_count = 0
-    
+
     def _on_image(msg: Image) -> None:
         nonlocal header_stamp_missing_count
         stamp = float(msg.header.stamp.to_sec())
@@ -1584,7 +1846,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         if first_msg["msg"] is None:
             first_msg["msg"] = msg
         last_msg["msg"] = msg
-    
+
     sub = rospy.Subscriber(resolved_topic, Image, _on_image, queue_size=2000)
     started_wall = time.perf_counter()
     try:
@@ -1592,7 +1854,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             time.sleep(0.1)
     finally:
         sub.unregister()
-    
+
     metrics["duration_actual_s"] = round(time.perf_counter() - started_wall, 4)
     metrics["raw_frames_captured"] = int(len(timestamps))
     metrics["header_stamp_missing_count"] = int(header_stamp_missing_count)
@@ -1601,21 +1863,25 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     if len(timestamps) < 2:
         metrics["error_reason"] = f"not_enough_frames_captured:{len(timestamps)}"
         _store_c11_diag()
-        raise AssertionError(f"C11 failed: not enough frames captured ({len(timestamps)})")
-    
+        raise AssertionError(
+            f"C11 failed: not enough frames captured ({len(timestamps)})"
+        )
+
     monotonic_stamps: List[float] = []
     for ts in timestamps:
         if not monotonic_stamps or ts > monotonic_stamps[-1]:
             monotonic_stamps.append(float(ts))
-    
+
     metrics["monotonic_frames_captured"] = int(len(monotonic_stamps))
     metrics["non_monotonic_dropped"] = int(len(timestamps) - len(monotonic_stamps))
     if len(monotonic_stamps) < 2:
         metrics["error_reason"] = "no_monotonic_timestamp_sequence"
         _store_c11_diag()
         raise AssertionError("C11 failed: no monotonic timestamp sequence")
-    
-    warmup_frames = int(max(1, round(float(ctx.update_rate) * float(ctx.C11_WARMUP_SECONDS))))
+
+    warmup_frames = int(
+        max(1, round(float(ctx.update_rate) * float(ctx.C11_WARMUP_SECONDS)))
+    )
     if len(monotonic_stamps) <= (warmup_frames + 1):
         metrics["error_reason"] = (
             f"not_enough_frames_after_warmup:{len(monotonic_stamps)} total,warmup={warmup_frames}"
@@ -1624,31 +1890,37 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         raise AssertionError(
             f"C11 failed: not enough frames after warmup ({len(monotonic_stamps)} total, warmup={warmup_frames})"
         )
-    
+
     eval_stamps = monotonic_stamps[warmup_frames:]
     total_dt = float(eval_stamps[-1] - eval_stamps[0])
     if total_dt <= 0.0:
         metrics["error_reason"] = f"invalid_timestamps_interval:{total_dt}"
         _store_c11_diag()
         raise AssertionError(f"C11 failed: invalid timestamps interval ({total_dt})")
-    
+
     n_frames = len(eval_stamps)
     fps_actual = float((n_frames - 1) / total_dt)
     ideal_dt = float(1.0 / float(ctx.update_rate))
     deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
-    
-    abs_jitter = np.abs(deltas - ideal_dt) if deltas.size > 0 else np.array([], dtype=np.float64)
+
+    abs_jitter = (
+        np.abs(deltas - ideal_dt) if deltas.size > 0 else np.array([], dtype=np.float64)
+    )
     # Было раньше: jitter = max(|dt - ideal_dt|), что слишком чувствительно к единичным пикам.
     # Теперь: устойчивый jitter = P95(|dt - ideal_dt|), max оставляем как диагностическую метрику.
-    jitter = float(np.percentile(abs_jitter, ctx.C11_JITTER_PERCENTILE)) if abs_jitter.size > 0 else 0.0
+    jitter = (
+        float(np.percentile(abs_jitter, ctx.C11_JITTER_PERCENTILE))
+        if abs_jitter.size > 0
+        else 0.0
+    )
     jitter_max_abs = float(np.max(abs_jitter)) if abs_jitter.size > 0 else 0.0
     max_dt = float(np.max(deltas)) if deltas.size > 0 else 0.0
     dropouts = int(np.sum(deltas > (2.0 * ideal_dt))) if deltas.size > 0 else 0
-    
+
     fps_ok = fps_actual >= (0.95 * float(ctx.update_rate))
     jitter_ok = jitter <= float(ctx.C11_MAX_JITTER_S)
     dropouts_ok = dropouts == 0
-    
+
     metrics.update(
         {
             "frames_captured": int(n_frames),
@@ -1669,14 +1941,22 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             },
         }
     )
-    
+
     if first_msg["msg"] is not None:
         frame_first = _mono__msg_to_bgr(ctx, first_msg["msg"])
-        debug_first = _mono__annotate(ctx, frame_first, ["C11 first frame", f"fps={fps_actual:.2f}", f"jitter={jitter:.4f}s"])
+        debug_first = _mono__annotate(
+            ctx,
+            frame_first,
+            ["C11 first frame", f"fps={fps_actual:.2f}", f"jitter={jitter:.4f}s"],
+        )
     if last_msg["msg"] is not None:
         frame_last = _mono__msg_to_bgr(ctx, last_msg["msg"])
-        debug_last = _mono__annotate(ctx, frame_last, ["C11 last frame", f"dropouts={dropouts}", f"max_dt={max_dt:.4f}s"])
-    
+        debug_last = _mono__annotate(
+            ctx,
+            frame_last,
+            ["C11 last frame", f"dropouts={dropouts}", f"max_dt={max_dt:.4f}s"],
+        )
+
     metrics["status"] = "PASS" if (fps_ok and jitter_ok and dropouts_ok) else "FAIL"
     if not (fps_ok and jitter_ok and dropouts_ok):
         metrics["error_reason"] = (
@@ -1690,6 +1970,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         )
 
     return {"id": "C11", "passed": True, "metrics": metrics}
+
 
 def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -1715,25 +1996,30 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c1_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c1_size_order={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c1_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c1_size_order_test")
     except Exception:
         resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
         metrics["resolved_topic"] = str(resolved_topic)
-        metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
+        metrics["topic_mapping_changed"] = bool(
+            str(resolved_topic) != str(ctx.IMAGE_TOPIC)
+        )
         metrics["scene_open_success"] = False
         reason = "unknown"
         if isinstance(scene_diag, dict):
@@ -1741,22 +2027,23 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         metrics["error_reason"] = f"scene_open_failed:{reason}"
         _store_c1_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, _ = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _store_c1_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C1_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C1_CUBE_NAME}"
         _store_c1_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C1_CUBE_NAME}")
-    
+
     prev_stamp_s: Optional[float] = None
     for x in ctx.C1_POSITIONS:
         label = f"x{int(x)}"
-        _mono__move_and_settle(ctx,
+        _mono__move_and_settle(
+            ctx,
             simulator,
             ctx.C1_CUBE_NAME,
             x=float(x),
@@ -1766,22 +2053,31 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         )
 
         try:
-            msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2)
+            msg = _mono__wait_image_after(
+                ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic, skip_frames=2
+            )
         except Exception as exc:
             metrics["error_reason"] = f"image_receive_failed:{exc}"
             _store_c1_diag()
-            raise RuntimeError(f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to receive fresh image for C1 from topic {resolved_topic}: {exc}"
+            ) from exc
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
         red = _mono__red_mask(ctx, hsv)
         area, (bx, by, bw, bh) = _mono__bbox_area(ctx, red)
         metrics["bbox_area_px"][label] = int(area)
-        metrics["bbox_px"][label] = {"x": int(bx), "y": int(by), "w": int(bw), "h": int(bh)}
+        metrics["bbox_px"][label] = {
+            "x": int(bx),
+            "y": int(by),
+            "w": int(bw),
+            "h": int(bh),
+        }
         metrics["red_pixels"][label] = int(_mono__count_pixels(ctx, red))
         metrics["frame_stamp_s"][label] = float(prev_stamp_s)
-    
+
         debug = frame.copy()
         if area > 0:
             cv2.rectangle(debug, (bx, by), (bx + bw, by + bh), (255, 255, 255), 2)
@@ -1795,12 +2091,14 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
             2,
             cv2.LINE_AA,
         )
-    
+
     x2 = metrics["bbox_area_px"].get("x2", 0)
     x5 = metrics["bbox_area_px"].get("x5", 0)
     x8 = metrics["bbox_area_px"].get("x8", 0)
     order_ok = x2 > x5 > x8
-    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO)
+    margin_ok = (x2 >= x5 * ctx.C1_MIN_MARGIN_RATIO) and (
+        x5 >= x8 * ctx.C1_MIN_MARGIN_RATIO
+    )
     metrics["checks"] = {"size_order": bool(order_ok), "size_margin": bool(margin_ok)}
     metrics["status"] = "PASS" if (order_ok and margin_ok) else "FAIL"
     if not (order_ok and margin_ok):
@@ -1809,7 +2107,9 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         )
     _store_c1_diag()
     if not (order_ok and margin_ok):
-        raise AssertionError(f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}")
+        raise AssertionError(
+            f"C1 checks failed: {metrics['checks']}, bbox_area_px={metrics['bbox_area_px']}"
+        )
 
     if progress_cb:
         try:
@@ -1817,6 +2117,7 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     return {"id": "C1", "passed": True, "metrics": metrics}
+
 
 def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -1842,37 +2143,45 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
         "display_env": {},
     }
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-    
+
     world = ctx.test_to_world["c2_resolution_test"]
     if not simulator.open_scene(world, ctx.sensor_sdf_path):
         scene_diag = _mono__scene_diag(ctx, simulator)
         metrics["resolved_topic"] = str(ctx.IMAGE_TOPIC)
         metrics["topic_mapping_changed"] = False
         metrics["scene_open_success"] = False
-        metrics["error_reason"] = f"scene_open_failed:{scene_diag.get('reason', 'unknown')}" if scene_diag else "scene_open_failed"
+        metrics["error_reason"] = (
+            f"scene_open_failed:{scene_diag.get('reason', 'unknown')}"
+            if scene_diag
+            else "scene_open_failed"
+        )
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
         raise RuntimeError(
             f"Failed to open scene for c2_resolution_test: {world} "
             f"(reason={scene_diag.get('reason', 'unknown') if scene_diag else 'unknown'})"
         )
-    
-    rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
+
+    rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
     metrics["scene_open_success"] = True
-    
+
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-    
+
     try:
         msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"image_receive_failed:{exc}"
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
-        raise RuntimeError(f"Failed to receive image for C2 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive image for C2 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     actual_width = int(getattr(msg, "width", 0) or 0)
     actual_height = int(getattr(msg, "height", 0) or 0)
     metrics["actual_resolution"] = {
@@ -1881,7 +2190,7 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
     }
     metrics["encoding"] = str(getattr(msg, "encoding", "") or "")
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
-    
+
     if actual_width <= 0 or actual_height <= 0:
         metrics["error_reason"] = "invalid_image_resolution"
         _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
@@ -1889,14 +2198,15 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
             f"C2 received invalid image dimensions from topic {resolved_topic}: "
             f"width={actual_width}, height={actual_height}"
         )
-    
+
     try:
         frame = _mono__msg_to_bgr(ctx, msg)
     except Exception:
         frame = None
-    
+
     if frame is not None:
-        debug = _mono__annotate(ctx, 
+        debug = _mono__annotate(
+            ctx,
             frame,
             [
                 f"topic={resolved_topic}",
@@ -1904,9 +2214,9 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
                 f"actual={actual_width}x{actual_height}",
             ],
         )
-    
-    resolution_matches = (
-        actual_width == int(ctx.image_width) and actual_height == int(ctx.image_height)
+
+    resolution_matches = actual_width == int(ctx.image_width) and actual_height == int(
+        ctx.image_height
     )
     metrics["checks"] = {"resolution_matches": bool(resolution_matches)}
     metrics["status"] = "PASS" if resolution_matches else "FAIL"
@@ -1915,20 +2225,21 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
             f"resolution_mismatch: expected={ctx.image_width}x{ctx.image_height}, "
             f"actual={actual_width}x{actual_height}"
         )
-    
+
     _mono__set_test_diagnostics(ctx, c2_resolution=dict(metrics))
     if not resolution_matches:
         raise AssertionError(
             f"C2 resolution mismatch: expected={ctx.image_width}x{ctx.image_height}, "
             f"actual={actual_width}x{actual_height}, topic={resolved_topic}"
         )
-    
+
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
     return {"id": "C2", "passed": True, "metrics": metrics}
+
 
 def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -1949,53 +2260,65 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c4_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c4_geometries_presence={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c4_diag()
-    
+
     try:
         _mono__open_c4_scene_with_retry(ctx, simulator)
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c4_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c4_diag()
-    
+
     try:
         msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"image_receive_failed:{exc}"
         _store_c4_diag()
-        raise RuntimeError(f"Failed to receive image for C4 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive image for C4 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     frame = _mono__msg_to_bgr(ctx, msg)
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
     for color in ("red", "green", "blue", "yellow"):
-        metrics["pixel_counts"][color] = _mono__count_pixels(ctx, _mono__color_mask(ctx, hsv, color))
-    
-    missing = {c: n for c, n in metrics["pixel_counts"].items() if int(n) <= int(metrics["threshold"])}
+        metrics["pixel_counts"][color] = _mono__count_pixels(
+            ctx, _mono__color_mask(ctx, hsv, color)
+        )
+
+    missing = {
+        c: n
+        for c, n in metrics["pixel_counts"].items()
+        if int(n) <= int(metrics["threshold"])
+    }
     metrics["checks"] = {"all_present": len(missing) == 0, "missing_or_low": missing}
     metrics["status"] = "PASS" if len(missing) == 0 else "FAIL"
     if missing:
         metrics["error_reason"] = f"missing_or_low:{missing}"
-    
-    debug = _mono__annotate(ctx, 
+
+    debug = _mono__annotate(
+        ctx,
         frame,
         [
             f"topic={resolved_topic}",
@@ -2007,17 +2330,19 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
         ],
     )
     _store_c4_diag()
-    
+
     if missing:
-        raise AssertionError(f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}")
-    
+        raise AssertionError(
+            f"C4 checks failed: missing_or_low={missing}, threshold={metrics['threshold']}"
+        )
+
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
     return {"id": "C4", "passed": True, "metrics": metrics}
-    
+
 
 def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -2039,33 +2364,36 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c7_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c7_occlusion={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c7_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c7_occlusion_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c7_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c7_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C7_FRONT_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C7_FRONT_CUBE_NAME}"
         _store_c7_diag()
@@ -2074,35 +2402,50 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
         metrics["error_reason"] = f"model_not_spawned:{ctx.C7_BACK_CUBE_NAME}"
         _store_c7_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C7_BACK_CUBE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c7_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    
-    def _move_and_capture(model_name: str, x: float, y: float, z: float, settle_s: float = 0.35) -> np.ndarray:
+
+    def _move_and_capture(
+        model_name: str, x: float, y: float, z: float, settle_s: float = 0.35
+    ) -> np.ndarray:
         nonlocal prev_stamp_s
-    
-        _mono__move_and_settle(ctx, simulator, model_name, x=float(x), y=float(y), z=float(z), settle_s=settle_s)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            model_name,
+            x=float(x),
+            y=float(y),
+            z=float(z),
+            settle_s=settle_s,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         return _mono__msg_to_bgr(ctx, msg)
-    
+
     _move_and_capture(ctx.C7_BACK_CUBE_NAME, x=3.6, y=0.0, z=0.25)
-    
+
     for case_name, y in ctx.C7_CASES.items():
         frame = _move_and_capture(ctx.C7_FRONT_CUBE_NAME, x=3.0, y=float(y), z=0.25)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
+
         blue = _mono__color_mask(ctx, hsv, "blue")
         blue_count = _mono__count_pixels(ctx, blue)
         metrics["blue_pixels"][case_name] = int(blue_count)
-    
-        debug = _mono__annotate(ctx, 
+
+        debug = _mono__annotate(
+            ctx,
             frame,
             [
                 f"topic={resolved_topic}",
@@ -2110,31 +2453,35 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
                 f"front_y={float(y):.2f}",
             ],
         )
-    
+
     blue_25 = metrics["blue_pixels"].get("occ_25", 0)
     blue_50 = metrics["blue_pixels"].get("occ_50", 0)
     relation_ok = blue_25 > blue_50
     threshold_ok = blue_25 > ctx.C7_MIN_PIXELS and blue_50 > ctx.C7_MIN_PIXELS
-    metrics["checks"] = {"occlusion_relation": bool(relation_ok), "threshold_ok": bool(threshold_ok)}
+    metrics["checks"] = {
+        "occlusion_relation": bool(relation_ok),
+        "threshold_ok": bool(threshold_ok),
+    }
     metrics["status"] = "PASS" if (relation_ok and threshold_ok) else "FAIL"
     if not (relation_ok and threshold_ok):
         metrics["error_reason"] = (
             f"occlusion_mismatch: occ_25={blue_25}, occ_50={blue_50}, threshold={ctx.C7_MIN_PIXELS}"
         )
     _store_c7_diag()
-    
+
     if not (relation_ok and threshold_ok):
         raise AssertionError(
             f"C7 checks failed: {metrics['checks']}, blue_pixels={metrics['blue_pixels']}, "
             f"threshold={ctx.C7_MIN_PIXELS}"
         )
-    
+
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
     return {"id": "C7", "passed": True, "metrics": metrics}
+
 
 def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -2144,7 +2491,7 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
             pass
     ctx = _mono_build_ctx(sensor)
     x_fixed = 2.0
-    
+
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c9_fov_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -2160,67 +2507,86 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c9_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c9_fov={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c9_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c9_fov_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c9_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c9_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C9_SPHERE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C9_SPHERE_NAME}"
         _store_c9_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C9_SPHERE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c9_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
     last_visible: Optional[Tuple[float, np.ndarray, int]] = None
     first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     for y in _mono__iter_float_range(ctx, 0.0, float(ctx.C9_MAX_Y), float(ctx.C9_STEP)):
-        _mono__move_and_settle(ctx, simulator, ctx.C9_SPHERE_NAME, x=x_fixed, y=float(y), z=0.2, settle_s=0.35)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            ctx.C9_SPHERE_NAME,
+            x=x_fixed,
+            y=float(y),
+            z=0.2,
+            settle_s=0.35,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         white = _mono__white_mask(ctx, frame)
-        contours = _mono__large_contours(ctx, white, min_area=ctx.C9_MIN_CONTOUR_AREA, border_margin=4)
+        contours = _mono__large_contours(
+            ctx, white, min_area=ctx.C9_MIN_CONTOUR_AREA, border_margin=4
+        )
         contour_count = len(contours)
         visible = contour_count > 0
-    
-        metrics["samples"].append({"y_m": float(y), "visible": bool(visible), "contours": int(contour_count)})
-    
+
+        metrics["samples"].append(
+            {"y_m": float(y), "visible": bool(visible), "contours": int(contour_count)}
+        )
+
         if visible:
             last_visible = (float(y), frame, contour_count)
         elif last_visible is not None:
             first_not_visible = (float(y), frame, contour_count)
             break
-    
+
     if last_visible is None:
         metrics["error_reason"] = "object_never_detected"
         _store_c9_diag()
@@ -2228,17 +2594,24 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     if first_not_visible is None:
         metrics["error_reason"] = "object_never_lost"
         _store_c9_diag()
-        raise AssertionError("C9 failed: object did not disappear within tested Y range")
-    
+        raise AssertionError(
+            "C9 failed: object did not disappear within tested Y range"
+        )
+
     y_visible = float(last_visible[0])
     y_lost = float(first_not_visible[0])
     y_transition = float((y_visible + y_lost) / 2.0)
     y_edge_estimate = float(y_transition + float(ctx.C9_SPHERE_RADIUS_M))
     measured_fov = float(2.0 * atan(y_edge_estimate / x_fixed))
     target_fov = float(ctx.horizontal_fov)
-    rel_error = float(abs(measured_fov - target_fov) / target_fov) if target_fov > 0 else float("inf")
-    
-    dbg_visible = _mono__annotate(ctx, 
+    rel_error = (
+        float(abs(measured_fov - target_fov) / target_fov)
+        if target_fov > 0
+        else float("inf")
+    )
+
+    dbg_visible = _mono__annotate(
+        ctx,
         last_visible[1],
         [
             f"topic={resolved_topic}",
@@ -2248,8 +2621,9 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
             "visible=True",
         ],
     )
-    
-    dbg_lost = _mono__annotate(ctx, 
+
+    dbg_lost = _mono__annotate(
+        ctx,
         first_not_visible[1],
         [
             f"topic={resolved_topic}",
@@ -2259,7 +2633,7 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
             "visible=False",
         ],
     )
-    
+
     metrics["y_max_visible_m"] = y_visible
     metrics["y_first_not_visible_m"] = y_lost
     metrics["y_transition_m"] = y_transition
@@ -2279,13 +2653,14 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
         raise AssertionError(
             f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
         )
-    
+
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
     return {"id": "C9", "passed": True, "metrics": metrics}
+
 
 def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
@@ -2295,8 +2670,16 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             pass
     ctx = _mono_build_ctx(sensor)
     clip_cfg = _mono__read_clip_from_sdf(ctx, ctx.sensor_sdf_path)
-    near_target = float(clip_cfg["near_m"]) if clip_cfg.get("near_m") is not None else float(ctx.clip_near)
-    far_target = float(clip_cfg["far_m"]) if clip_cfg.get("far_m") is not None else float(ctx.clip_far)
+    near_target = (
+        float(clip_cfg["near_m"])
+        if clip_cfg.get("near_m") is not None
+        else float(ctx.clip_near)
+    )
+    far_target = (
+        float(clip_cfg["far_m"])
+        if clip_cfg.get("far_m") is not None
+        else float(ctx.clip_far)
+    )
     near_tol = max(0.05, abs(near_target) * 0.05)
     far_tol = max(0.05, abs(far_target) * 0.05)
     near_start = min(float(ctx.C10_NEAR_START_X), max(0.01, near_target * 0.3))
@@ -2314,92 +2697,115 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         "near_tolerance_m": float(near_tol),
         "far_tolerance_m": float(far_tol),
         "near_search": {"start_x": float(near_start), "end_x": float(near_end)},
-        "far_search": {"coarse_step": float(ctx.C10_FAR_COARSE_STEP), "fine_step": float(ctx.C10_FAR_FINE_STEP)},
+        "far_search": {
+            "coarse_step": float(ctx.C10_FAR_COARSE_STEP),
+            "fine_step": float(ctx.C10_FAR_FINE_STEP),
+        },
         "min_red_pixels": int(ctx.C10_MIN_RED_PIXELS),
         "visibility_rule": f"red_pixels>={int(ctx.C10_MIN_RED_PIXELS)}",
         "status": "ERROR",
         "error_reason": "",
     }
-    
+
     def _store_c10_diag() -> None:
-        _mono__set_test_diagnostics(ctx, 
+        _mono__set_test_diagnostics(
+            ctx,
             c10_clipping={
                 "metrics": dict(metrics),
-            }
+            },
         )
         return None
-    
+
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(ctx, )
+    metrics["display_env"] = _mono__ensure_render_display_env(
+        ctx,
+    )
     _store_c10_diag()
-    
+
     try:
         _mono__open_test_scene(ctx, simulator, "c10_clipping_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c10_diag()
         raise
-    
+
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c10_diag()
-    
+
     if not simulator.wait_for_model_spawn(ctx.C10_CUBE_NAME, timeout=20):
         metrics["error_reason"] = f"model_not_spawned:{ctx.C10_CUBE_NAME}"
         _store_c10_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C10_CUBE_NAME}")
-    
+
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c10_diag()
-        raise RuntimeError(f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}") from exc
-    
+        raise RuntimeError(
+            f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}"
+        ) from exc
+
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    
-    def _move_and_capture(x: float, settle_s: float) -> Tuple[np.ndarray, Dict[str, float], int]:
+
+    def _move_and_capture(
+        x: float, settle_s: float
+    ) -> Tuple[np.ndarray, Dict[str, float], int]:
         nonlocal prev_stamp_s
-    
-        _mono__move_and_settle(ctx, simulator, ctx.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=settle_s)
-        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
+
+        _mono__move_and_settle(
+            ctx,
+            simulator,
+            ctx.C10_CUBE_NAME,
+            x=float(x),
+            y=0.0,
+            z=0.25,
+            settle_s=settle_s,
+        )
+        msg = _mono__wait_image_after(
+            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
+        )
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         red_stats = _mono__red_stats(ctx, frame)
         red_pixels = int(red_stats["red_pixels"])
         return frame, red_stats, red_pixels
-    
+
     near_before: Optional[Tuple[float, np.ndarray, int]] = None
     near_after: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     for x in _mono__iter_float_range(ctx, near_start, near_end, ctx.C10_NEAR_STEP):
         frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
         if bool(red_stats["visible_by_pixels"]):
             near_after = (float(x), frame, red_pixels)
             break
         near_before = (float(x), frame, red_pixels)
-    
+
     if near_after is None:
         metrics["error_reason"] = "near_boundary_not_found"
         _store_c10_diag()
-        raise AssertionError("C10 failed: clip_cube did not appear in near search range")
-    
+        raise AssertionError(
+            "C10 failed: clip_cube did not appear in near search range"
+        )
+
     near_x = float(near_after[0])
     metrics["x_near_m"] = near_x
     metrics["near_boundary"] = {
         "before_x_m": float(near_before[0]) if near_before is not None else None,
         "after_x_m": float(near_after[0]),
     }
-    
+
     far_last_visible = near_after
     far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-    
+
     far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
     metrics["far_search_stop_m"] = float(far_search_stop)
-    for x in _mono__iter_float_range(ctx, 
+    for x in _mono__iter_float_range(
+        ctx,
         near_x + float(ctx.C10_FAR_COARSE_STEP),
         far_search_stop,
         float(ctx.C10_FAR_COARSE_STEP),
@@ -2411,18 +2817,24 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         else:
             far_first_not_visible = (float(x), frame, red_pixels)
             break
-    
+
     if far_first_not_visible is None:
         metrics["error_reason"] = "far_boundary_not_found"
         _store_c10_diag()
-        raise AssertionError("C10 failed: clip_cube did not disappear in far search range")
-    
-    fine_start = max(float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP))
+        raise AssertionError(
+            "C10 failed: clip_cube did not disappear in far search range"
+        )
+
+    fine_start = max(
+        float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP)
+    )
     fine_end = float(far_first_not_visible[0])
     far_last_visible_fine = far_last_visible
     far_first_not_visible_fine = far_first_not_visible
-    
-    for x in _mono__iter_float_range(ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)):
+
+    for x in _mono__iter_float_range(
+        ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)
+    ):
         frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.15)
         visible = bool(red_stats["visible_by_pixels"])
         if visible:
@@ -2430,7 +2842,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         else:
             far_first_not_visible_fine = (float(x), frame, red_pixels)
             break
-    
+
     far_x = float(far_last_visible_fine[0])
     metrics["x_far_m"] = far_x
     metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
@@ -2438,7 +2850,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         "last_visible_x_m": float(far_last_visible_fine[0]),
         "first_not_visible_x_m": float(far_first_not_visible_fine[0]),
     }
-    
+
     near_ok = abs(near_x - float(near_target)) <= float(near_tol)
     far_ok = abs(far_x - float(far_target)) <= float(far_tol)
     metrics["checks"] = {
@@ -2447,13 +2859,19 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         "near_ok": bool(near_ok),
         "far_ok": bool(far_ok),
     }
-    
+
     near_after_stats = _mono__red_stats(ctx, near_after[1])
     far_before_stats = _mono__red_stats(ctx, far_last_visible_fine[1])
     far_after_stats = _mono__red_stats(ctx, far_first_not_visible_fine[1])
     metrics["visibility_debug"] = {
-        "near_before_red_pixels": int(near_before[2]) if near_before is not None else None,
-        "near_before_pixel_ratio": float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"]) if near_before is not None else None,
+        "near_before_red_pixels": (
+            int(near_before[2]) if near_before is not None else None
+        ),
+        "near_before_pixel_ratio": (
+            float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"])
+            if near_before is not None
+            else None
+        ),
         "near_after_red_pixels": int(near_after[2]),
         "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
         "far_before_red_pixels": int(far_last_visible_fine[2]),
@@ -2461,9 +2879,10 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         "far_after_red_pixels": int(far_first_not_visible_fine[2]),
         "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
     }
-    
+
     if near_before is not None:
-        dbg = _mono__annotate(ctx, 
+        dbg = _mono__annotate(
+            ctx,
             near_before[1],
             [
                 f"near_before x={near_before[0]:.2f}",
@@ -2473,8 +2892,9 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
                 f"topic={resolved_topic}",
             ],
         )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         near_after[1],
         [
             f"near_after x={near_after[0]:.2f}",
@@ -2484,8 +2904,9 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             f"topic={resolved_topic}",
         ],
     )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         far_last_visible_fine[1],
         [
             f"far_before x={far_last_visible_fine[0]:.2f}",
@@ -2495,8 +2916,9 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             f"topic={resolved_topic}",
         ],
     )
-    
-    dbg = _mono__annotate(ctx, 
+
+    dbg = _mono__annotate(
+        ctx,
         far_first_not_visible_fine[1],
         [
             f"far_after x={far_first_not_visible_fine[0]:.2f}",
@@ -2506,7 +2928,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             f"topic={resolved_topic}",
         ],
     )
-    
+
     metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
     if not (near_ok and far_ok):
         metrics["error_reason"] = (
@@ -2519,7 +2941,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
             f"far={far_x:.3f} (target {far_target:.3f}, tol={far_tol:.3f})"
         )
-    
+
     if progress_cb:
         try:
             progress_cb(100)

@@ -3,61 +3,61 @@ from PyQt5.QtCore import QSize
 
 ICON_DIR = "./front/icon"
 IMAGE_DIR = "./front/img"
-QT_DIR   = "./front/qt"
+QT_DIR = "./front/qt"
 
 
 class Colors:
-    BG_APP        = "#111111"
-    BG_TITLEBAR   = "#161616"
-    BG_COLUMN     = "#161616"
-    BG_TOOLBAR    = "#1c1c1c"
-    BG_CARD       = "#1e1e1e"
+    BG_APP = "#111111"
+    BG_TITLEBAR = "#161616"
+    BG_COLUMN = "#161616"
+    BG_TOOLBAR = "#1c1c1c"
+    BG_CARD = "#1e1e1e"
     BG_CARD_HOVER = "#272727"
-    BG_CARD_SEL   = "#2e2e2e"
-    BG_INPUT      = "#1a1a1a"
-    BG_LOG        = "#0d0d0d"
-    BG_IMAGE      = "#000000"
-    SPLITTER      = "#2a2a2a"
-    BORDER        = "#252525"
-    BORDER_LIGHT  = "#333333"
-    DIVIDER       = "#1e1e1e"
-    TEXT_PRIMARY   = "#e0e0e0"
+    BG_CARD_SEL = "#2e2e2e"
+    BG_INPUT = "#1a1a1a"
+    BG_LOG = "#0d0d0d"
+    BG_IMAGE = "#000000"
+    SPLITTER = "#2a2a2a"
+    BORDER = "#252525"
+    BORDER_LIGHT = "#333333"
+    DIVIDER = "#1e1e1e"
+    TEXT_PRIMARY = "#e0e0e0"
     TEXT_SECONDARY = "#888888"
-    TEXT_MUTED     = "#484848"
-    TEXT_WHITE     = "#ffffff"
-    TEXT_BLACK     = "#111111"
-    ACCENT         = "#4fc3f7"
-    ACCENT_DIM     = "#193040"
-    ACCENT_HOVER   = "#29b6f6"
-    STATUS_GREEN   = "#4caf50"
-    STATUS_GRAY    = "#757575"
-    STATUS_RED     = "#ef5350"
-    STATUS_BLUE    = "#42a5f5"
-    STATUS_RUNNING = "#ec27ab"   # magenta
-    STATUS_QUEUED  = "#7c4dff"   # purple
-    STATUS_YELLOW  = "#ffb300"   # kept for back-compat
+    TEXT_MUTED = "#484848"
+    TEXT_WHITE = "#ffffff"
+    TEXT_BLACK = "#111111"
+    ACCENT = "#4fc3f7"
+    ACCENT_DIM = "#193040"
+    ACCENT_HOVER = "#29b6f6"
+    STATUS_GREEN = "#4caf50"
+    STATUS_GRAY = "#757575"
+    STATUS_RED = "#ef5350"
+    STATUS_BLUE = "#42a5f5"
+    STATUS_RUNNING = "#ec27ab"  # magenta
+    STATUS_QUEUED = "#7c4dff"  # purple
+    STATUS_YELLOW = "#ffb300"  # kept for back-compat
     # back-compat
-    BG_WINDOW     = BG_APP
-    BG_SIDEBAR    = BG_COLUMN
-    BG_MAIN       = BG_COLUMN
-    BG_PRIMARY    = BG_CARD
-    BG_SECONDARY  = BG_CARD
-    BG_ELEVATED   = BG_CARD_HOVER
-    BG_HOVER      = BG_CARD_HOVER
-    BG_SELECTED   = BG_CARD_SEL
-    BORDER_FOCUS  = BORDER_LIGHT
-    ACCENT_BLUE          = ACCENT
-    ACCENT_BLUE_BG       = ACCENT_DIM
-    ACCENT_BLUE_BG_HVR   = "#1e3d50"
-    ACCENT_BLUE_TEXT     = "#7dd3f7"
-    ACCENT_GREEN         = STATUS_GREEN
-    ACCENT_GREEN_DARK    = "#388e3c"
-    ACCENT_GREEN_BG      = "#1a2e1a"
-    ACCENT_GREEN_BG_HVR  = "#1f371f"
-    ACCENT_RED           = STATUS_RED
-    STATUS_PASS          = STATUS_GREEN
-    STATUS_FAIL          = STATUS_RED
-    STATUS_PENDING       = STATUS_YELLOW
+    BG_WINDOW = BG_APP
+    BG_SIDEBAR = BG_COLUMN
+    BG_MAIN = BG_COLUMN
+    BG_PRIMARY = BG_CARD
+    BG_SECONDARY = BG_CARD
+    BG_ELEVATED = BG_CARD_HOVER
+    BG_HOVER = BG_CARD_HOVER
+    BG_SELECTED = BG_CARD_SEL
+    BORDER_FOCUS = BORDER_LIGHT
+    ACCENT_BLUE = ACCENT
+    ACCENT_BLUE_BG = ACCENT_DIM
+    ACCENT_BLUE_BG_HVR = "#1e3d50"
+    ACCENT_BLUE_TEXT = "#7dd3f7"
+    ACCENT_GREEN = STATUS_GREEN
+    ACCENT_GREEN_DARK = "#388e3c"
+    ACCENT_GREEN_BG = "#1a2e1a"
+    ACCENT_GREEN_BG_HVR = "#1f371f"
+    ACCENT_RED = STATUS_RED
+    STATUS_PASS = STATUS_GREEN
+    STATUS_FAIL = STATUS_RED
+    STATUS_PENDING = STATUS_YELLOW
 
 
 class Styles:
@@ -177,12 +177,12 @@ class Styles:
     ) + SCROLLBAR
 
     # legacy aliases
-    BUTTON_BLUE  = BUTTON_ACCENT
+    BUTTON_BLUE = BUTTON_ACCENT
     BUTTON_GREEN = BUTTON_DEFAULT
-    LINE_EDIT    = ""
+    LINE_EDIT = ""
     FILTER_FRAME = ""
     FILTER_BUTTON = BUTTON_DEFAULT
-    CARD_NAME_LABEL  = ""
+    CARD_NAME_LABEL = ""
     CARD_IMAGE_LABEL = ""
 
 
@@ -196,61 +196,113 @@ class Icons:
         return cls._cache[f]
 
     @classmethod
-    def MINIMIZE(cls):  return cls.get("minimize.png")
+    def MINIMIZE(cls):
+        return cls.get("minimize.png")
+
     @classmethod
-    def MAXIMIZE(cls):  return cls.get("maximize.png")
+    def MAXIMIZE(cls):
+        return cls.get("maximize.png")
+
     @classmethod
-    def CLOSE(cls):     return cls.get("close.png")
+    def CLOSE(cls):
+        return cls.get("close.png")
+
     @classmethod
-    def MENU(cls):      return cls.get("menu.png")
+    def MENU(cls):
+        return cls.get("menu.png")
+
     @classmethod
-    def SENSOR(cls):    return cls.get("sensor.png")
+    def SENSOR(cls):
+        return cls.get("sensor.png")
+
     @classmethod
-    def TEST_MENU(cls): return cls.get("test_menu.png")
+    def TEST_MENU(cls):
+        return cls.get("test_menu.png")
+
     @classmethod
-    def RUN(cls):       return cls.get("run.png")
+    def RUN(cls):
+        return cls.get("run.png")
+
     @classmethod
-    def STOP(cls):      return cls.get("stop.png")
+    def STOP(cls):
+        return cls.get("stop.png")
+
     @classmethod
-    def RUN_ALL(cls):   return cls.get("run_all.png")
+    def RUN_ALL(cls):
+        return cls.get("run_all.png")
+
     @classmethod
-    def EXPORT(cls):    return cls.get("export.png")
+    def EXPORT(cls):
+        return cls.get("export.png")
+
     @classmethod
-    def FILTER(cls):    return cls.get("filter.png")
+    def FILTER(cls):
+        return cls.get("filter.png")
+
     @classmethod
-    def CLOSE_BLK(cls): return cls.get("close_black.png")
+    def CLOSE_BLK(cls):
+        return cls.get("close_black.png")
+
     @classmethod
-    def CLEAR(cls):     return cls.get("clear.png")
+    def CLEAR(cls):
+        return cls.get("clear.png")
+
     @classmethod
-    def COPY(cls):      return cls.get("copy.png")
+    def COPY(cls):
+        return cls.get("copy.png")
+
     @classmethod
-    def SAVE(cls):      return cls.get("save.png")
+    def SAVE(cls):
+        return cls.get("save.png")
+
     @classmethod
-    def ADD(cls):       return cls.get("add.png")
+    def ADD(cls):
+        return cls.get("add.png")
+
     @classmethod
-    def EDIT(cls):      return cls.get("edit.png")
+    def EDIT(cls):
+        return cls.get("edit.png")
+
     @classmethod
-    def SUCCESS(cls):   return cls.get("success.png")
+    def SUCCESS(cls):
+        return cls.get("success.png")
+
     @classmethod
-    def FAIL(cls):      return cls.get("fail.png")
+    def FAIL(cls):
+        return cls.get("fail.png")
+
     @classmethod
-    def PENDING(cls):   return cls.get("pending.png")
+    def PENDING(cls):
+        return cls.get("pending.png")
+
     @classmethod
-    def RUNNING(cls):   return cls.get("running.png")
+    def RUNNING(cls):
+        return cls.get("running.png")
+
     @classmethod
-    def UNKNOWN(cls):        return cls.get("unknown_status.png")
+    def UNKNOWN(cls):
+        return cls.get("unknown_status.png")
+
     @classmethod
-    def TARGET_SENSOR(cls):  return cls.get("target_sensor.png")
+    def TARGET_SENSOR(cls):
+        return cls.get("target_sensor.png")
+
     @classmethod
-    def OBSERVER(cls):       return cls.get("observer.png")
+    def OBSERVER(cls):
+        return cls.get("observer.png")
+
     @classmethod
-    def LOCK(cls):       return cls.get("lock.png")
+    def LOCK(cls):
+        return cls.get("lock.png")
+
     @classmethod
-    def STEP(cls):       return cls.get("step.png")
+    def STEP(cls):
+        return cls.get("step.png")
 
     @classmethod
     def RUNNING_MOVIE(cls, label=None):
         from PyQt5.QtGui import QMovie
+
         movie = QMovie(f"{ICON_DIR}/pending.gif")
         if label is not None:
             movie.setScaledSize(label.size())
@@ -260,6 +312,7 @@ class Icons:
     def QUEUED(cls, label=None):
         """Returns a QMovie for the queued spinning animation."""
         from PyQt5.QtGui import QMovie
+
         movie = QMovie(f"{ICON_DIR}/pending.gif")
         if label is not None:
             movie.setScaledSize(Layout.ICON_SIZE_MD)
@@ -267,11 +320,16 @@ class Icons:
 
     @classmethod
     def for_status(cls, status: str, is_running: bool = False) -> QIcon:
-        if is_running:           return cls.RUNNING()
-        if status == "Passed":   return cls.SUCCESS()
-        if status == "Failed":   return cls.FAIL()
-        if status == "Idle":     return cls.PENDING()
-        if status == "Stopped":  return cls.UNKNOWN()
+        if is_running:
+            return cls.RUNNING()
+        if status == "Passed":
+            return cls.SUCCESS()
+        if status == "Failed":
+            return cls.FAIL()
+        if status == "Idle":
+            return cls.PENDING()
+        if status == "Stopped":
+            return cls.UNKNOWN()
         return cls.UNKNOWN()
 
 
@@ -280,32 +338,34 @@ class Layout:
     ICON_SIZE_MD = QSize(20, 20)
     ICON_SIZE_LG = QSize(28, 28)
     # Column shared heights
-    IMAGE_H   = 200
+    IMAGE_H = 200
     TOOLBAR_H = 44
-    NAME_H    = 36
-    DESC_H    = 100
+    NAME_H = 36
+    DESC_H = 100
     SENSOR_CELL_HEIGHT = 52
-    TEST_ITEM_HEIGHT   = 64
-    TEST_LIST_MAX_H    = 9999
-    CARD_WIDTH  = 350
+    TEST_ITEM_HEIGHT = 64
+    TEST_LIST_MAX_H = 9999
+    CARD_WIDTH = 350
     CARD_HEIGHT = 300
-    CARD_H_GAP  = 10
-    CARD_V_GAP  = 30
+    CARD_H_GAP = 10
+    CARD_V_GAP = 30
+
 
 class LightColors:
     """Light-theme palette used by modal dialogs."""
-    BG_PANEL   = "#f0f0f0"
-    BG         = "#ffffff"
-    BG_INPUT   = "#fafafa"
-    BG_HOVER   = "#e8e8e8"
-    BORDER     = "#cccccc"
-    TEXT       = "#1a1a1a"
-    TEXT_SEC   = "#555555"
+
+    BG_PANEL = "#f0f0f0"
+    BG = "#ffffff"
+    BG_INPUT = "#fafafa"
+    BG_HOVER = "#e8e8e8"
+    BORDER = "#cccccc"
+    TEXT = "#1a1a1a"
+    TEXT_SEC = "#555555"
     TEXT_MUTED = "#999999"
-    ACCENT     = "#0078d4"
+    ACCENT = "#0078d4"
     ACCENT_HVR = "#106ebe"
     ACCENT_DIM = "#cce4f7"
-    ERROR      = "#d32f2f"
+    ERROR = "#d32f2f"
 
 
 class LightStyles:

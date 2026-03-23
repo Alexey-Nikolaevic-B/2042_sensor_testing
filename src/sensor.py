@@ -16,74 +16,86 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
 
     seen = set()
     topics = []
-    
+
     namespace = ""
     namespace_match = re.search(r"<namespace>\s*(/[^<\s]+)\s*</namespace>", content)
     if namespace_match:
-        namespace = namespace_match.group(1).rstrip('/')
-    
+        namespace = namespace_match.group(1).rstrip("/")
+
     for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
         t = m.group(1).strip()
         if t and t not in seen:
             seen.add(t)
             topics.append(t)
-    
+
     for m in re.finditer(r"<argument>\s*([^<]+?)\s*</argument>", content):
         arg = m.group(1).strip()
-        
+
         if ":= " in arg or ":=" in arg:
             parts = re.split(r":=\s*", arg)
             if len(parts) == 2:
                 remapped = parts[1].strip()
-                if not remapped.startswith('/') and namespace:
+                if not remapped.startswith("/") and namespace:
                     topic = f"{namespace}/{remapped}"
-                elif remapped.startswith('/'):
+                elif remapped.startswith("/"):
                     topic = remapped
                 else:
                     topic = remapped
-                
+
                 if topic and topic not in seen:
                     seen.add(topic)
                     topics.append(topic)
         else:
-            if not arg.startswith('/') and namespace:
+            if not arg.startswith("/") and namespace:
                 topic = f"{namespace}/{arg}"
-            elif arg.startswith('/'):
+            elif arg.startswith("/"):
                 topic = arg
             else:
                 topic = arg
-            
-            if topic and topic not in seen and not topic.startswith('--') and not topic.startswith('-'):
+
+            if (
+                topic
+                and topic not in seen
+                and not topic.startswith("--")
+                and not topic.startswith("-")
+            ):
                 seen.add(topic)
                 topics.append(topic)
-    
+
     for m in re.finditer(r"<(\w*[Tt]opic\w*)>\s*([^<\s]+)\s*</\1>", content):
         topic_name = m.group(2).strip()
-        if not topic_name.startswith('/') and namespace:
+        if not topic_name.startswith("/") and namespace:
             topic = f"{namespace}/{topic_name}"
-        elif topic_name.startswith('/'):
+        elif topic_name.startswith("/"):
             topic = topic_name
         else:
             topic = topic_name
-            
-        if topic and topic not in seen and not topic.startswith('--'):
+
+        if topic and topic not in seen and not topic.startswith("--"):
             seen.add(topic)
             topics.append(topic)
-    
+
     return topics
 
 
 class Sensor:
-    def __init__(self, sensor_type: str, sensor_name: str, sdf_path: str,
-                 topics: list = None, description: str = "",
-                 image_path: str = "", params: dict = None):
+    def __init__(
+        self,
+        sensor_type: str,
+        sensor_name: str,
+        sdf_path: str,
+        topics: list = None,
+        description: str = "",
+        image_path: str = "",
+        params: dict = None,
+    ):
         self.sensor_type = sensor_type
         self.sensor_name = sensor_name
-        self.sdf_path    = sdf_path
-        self.topics      = list(topics or [])
+        self.sdf_path = sdf_path
+        self.topics = list(topics or [])
         self.description = description
-        self.image_path  = image_path
-        self.params      = params or {}
+        self.image_path = image_path
+        self.params = params or {}
 
     @property
     def topic(self) -> str:
@@ -133,7 +145,8 @@ class Sensor:
                 for seg in path.split("/"):
                     seg_m = re.search(
                         rf"<{re.escape(seg)}>(.*?)</{re.escape(seg)}>",
-                        search_in, re.DOTALL
+                        search_in,
+                        re.DOTALL,
                     )
                     if seg_m:
                         search_in = seg_m.group(1)
@@ -145,11 +158,12 @@ class Sensor:
 
             m = re.search(
                 rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
-                search_in, re.DOTALL
+                search_in,
+                re.DOTALL,
             )
             if m:
                 value_str = m.group(1).strip()
-                
+
                 # Auto-detect and convert numeric values
                 if value_str:
                     parts = value_str.split()
@@ -178,30 +192,40 @@ class Sensor:
                 content = f.read()
         except OSError as e:
             raise OSError(f"Cannot read SDF: {e}") from e
-        
+
         for name, value in params.items():
             if isinstance(value, list):
-                value_str = ' '.join(str(v) for v in value)
+                value_str = " ".join(str(v) for v in value)
             elif isinstance(value, (int, float)):
                 value_str = str(value)
             else:
                 value_str = str(value)
-            
+
             content, n = re.subn(
                 rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)",
                 rf"\g<1>{value_str}\g<2>",
-                content, count=1, flags=re.DOTALL,
+                content,
+                count=1,
+                flags=re.DOTALL,
             )
             if n == 0:
-                logger.warning("write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path)
-        
+                logger.warning(
+                    "write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path
+                )
+
         with open(self.sdf_path, "w", encoding="utf-8") as f:
             f.write(content)
         self.params.update(params)
 
-    def capture_data(self, msg_type, topic: str = "", window: float = 2.0,
-                     timeout: float = 0.25, warmup: float = 0.0,
-                     simulator=None) -> list:
+    def capture_data(
+        self,
+        msg_type,
+        topic: str = "",
+        window: float = 2.0,
+        timeout: float = 0.25,
+        warmup: float = 0.0,
+        simulator=None,
+    ) -> list:
         """
         Read messages from a ROS topic for `window` seconds.
         Uses `topic` if given, otherwise falls back to self.topic (first in list).
@@ -214,8 +238,9 @@ class Sensor:
         After capture: fires simulator.notify_capture and respects step-mode.
         """
         import rospy
-        t        = topic or self.topic
-        results  = []
+
+        t = topic or self.topic
+        results = []
         if warmup > 0:
             time.sleep(warmup)
         deadline = time.time() + window
@@ -230,43 +255,41 @@ class Sensor:
             sensor_data = {
                 "sensor_type": self.sensor_type,
                 "sensor_name": self.sensor_name,
-                "topic":       t,
-                "count":       len(results),
-                "image_path":  self.image_path,
-                "messages":    results,   # raw ROS messages for rendering
+                "topic": t,
+                "count": len(results),
+                "image_path": self.image_path,
+                "messages": results,  # raw ROS messages for rendering
             }
-            obs_img = simulator.capture_observer_frame() if simulator.gazebo_is_running else None
+            obs_img = (
+                simulator.capture_observer_frame()
+                if simulator.gazebo_is_running
+                else None
+            )
             simulator.notify_capture(sensor_data, obs_img)
             simulator.wait_for_step()
 
         return results
 
-    def capture_frames(self, msg_type, topic: str = "", window: float = 2.0,
-                       timeout: float = 0.25,
-                       simulator=None) -> dict:
+    def capture_frames(
+        self,
+        msg_type,
+        topic: str = "",
+        window: float = 2.0,
+        timeout: float = 0.25,
+        simulator=None,
+    ) -> dict:
         """
         RFID-style capture: returns {frame_id: pose} deduplicating by frame_id.
         Wraps capture_data — keeps RFID tests unchanged.
         """
-        msgs = self.capture_data(msg_type, topic=topic, window=window,
-                                 timeout=timeout, simulator=simulator)
-        return {msg.header.frame_id: msg.pose for msg in msgs
-                if hasattr(msg, "header") and hasattr(msg, "pose")}
+        msgs = self.capture_data(
+            msg_type, topic=topic, window=window, timeout=timeout, simulator=simulator
+        )
+        return {
+            msg.header.frame_id: msg.pose
+            for msg in msgs
+            if hasattr(msg, "header") and hasattr(msg, "pose")
+        }
 
     def __repr__(self):
         return f"<Sensor {self.sensor_type!r} name={self.sensor_name!r}>"
-
-
-# ── Legacy REGISTRY (used by rfid.py, core.py, widget_col_3.py) ───────────────
-from typing import Dict, Type as _Type
-
-REGISTRY: Dict[str, _Type] = {}
-
-
-def register_sensor(sensor_type: str):
-    """Decorator to register a concrete sensor class by type string."""
-    def deco(cls):
-        cls.sensor_type = sensor_type
-        REGISTRY[sensor_type] = cls
-        return cls
-    return deco

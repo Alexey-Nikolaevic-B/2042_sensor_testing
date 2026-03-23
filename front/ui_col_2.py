@@ -24,16 +24,16 @@ DESCRIPTION_STYLE = f"""
     {Styles.SCROLLBAR}
 """
 
-IMAGE_H   = 200
+IMAGE_H = 200
 TOOLBAR_H = 44
-NAME_H    = 36
-DESC_H    = 72
+NAME_H = 36
+DESC_H = 72
 
 
 class ColDetails(QWidget):
-    save_requested    = pyqtSignal(dict)
+    save_requested = pyqtSignal(dict)
     save_as_requested = pyqtSignal(dict)
-    sensor_updated    = pyqtSignal(dict)   # emitted after edit dialog saves
+    sensor_updated = pyqtSignal(dict)  # emitted after edit dialog saves
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -162,7 +162,7 @@ class ColDetails(QWidget):
         """)
         self.scroll_description.setStyleSheet(DESCRIPTION_STYLE)
         for btn, icon, style in [
-            (self.btn_edit,    Icons.EDIT(), Styles.BUTTON_ICON),
+            (self.btn_edit, Icons.EDIT(), Styles.BUTTON_ICON),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)

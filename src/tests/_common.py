@@ -32,32 +32,33 @@ logger = logging.getLogger(__name__)
 class Worlds(str, Enum):
     path = f"{CONFIG['ROOT_PATH']}/assets/worlds"
 
-    #BASIC
-    BASIC                 = f"{path}/_basic_.world"
+    # BASIC
+    BASIC = f"{path}/_basic_.world"
 
     # RFID
-    RFID_CHANGE_DISTANCE  = f"{path}/rfid_change_distance.world"
-    RFID_MASS_READ        = f"{path}/rfid_mass_read.world"
-    RFID_OVERLAP_TAGS     = f"{path}/rfid_overlap_tags.world"
+    RFID_CHANGE_DISTANCE = f"{path}/rfid_change_distance.world"
+    RFID_MASS_READ = f"{path}/rfid_mass_read.world"
+    RFID_OVERLAP_TAGS = f"{path}/rfid_overlap_tags.world"
     RFID_ANGLE_DEPENDENCE = f"{path}/rfid_angle_dependence.world"
-    RFID_MOVE_TAGS        = f"{path}/rfid_move_tags.world"
+    RFID_MOVE_TAGS = f"{path}/rfid_move_tags.world"
     RFID_ANTENNA_ROTATION = f"{path}/rfid_antenna_rotation.world"
 
     # Camera
-    CAMERA_SMOKE          = f"{path}/camera_c1_single_cube.world"
+    CAMERA_SMOKE = f"{path}/camera_c1_single_cube.world"
     CAMERA_DEPTH_ACCURACY = f"{path}/camera_depth_perception.world"
-    CAMERA_RESOLUTION     = f"{path}/camera_c2_resolution.world"
-    c1                    = f"{path}/camera_c1_single_cube.world"
+    CAMERA_RESOLUTION = f"{path}/camera_c2_resolution.world"
+    c1 = f"{path}/camera_c1_single_cube.world"
 
     # TACTILE
-    TACTILE_FORCE         = f"{path}/tactile_force.world"
-    TACTILE_UNIFORMITY    = f"{path}/tactile_uniformity.world"
-    TACTILE_STABILITY     = f"{path}/tactile_force.world"
-    TACTILE_PEAK          = f"{path}/tactile_force.world"
+    TACTILE_FORCE = f"{path}/tactile_force.world"
+    TACTILE_UNIFORMITY = f"{path}/tactile_uniformity.world"
+    TACTILE_STABILITY = f"{path}/tactile_force.world"
+    TACTILE_PEAK = f"{path}/tactile_force.world"
 
 
 def _PoseStamped():
     from geometry_msgs.msg import PoseStamped
+
     return PoseStamped
 
 
@@ -67,8 +68,9 @@ def _world_from_db(sensor, func_name: str) -> str:
     Falls back to the Worlds enum value whose name matches func_name (upper-cased).
     """
     import src.sensor_storage as db
+
     tests = {t["func_name"]: t for t in db.get_type_tests(sensor.sensor_type)}
-    path  = tests.get(func_name, {}).get("world_path", "")
+    path = tests.get(func_name, {}).get("world_path", "")
     if path:
         return path
     # Fallback: try to match by name convention
@@ -97,7 +99,8 @@ def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
             else:
                 logger.warning(
                     "get_tests_for_type: %r assigned to type %r but not in TESTS",
-                    test["func_name"], sensor_type,
+                    test["func_name"],
+                    sensor_type,
                 )
         return result
     except Exception as exc:
@@ -108,15 +111,18 @@ def get_tests_for_type(sensor_type: str) -> dict[str, callable]:
 def _img_to_numpy(msg):
     """Convert a sensor_msgs/Image to a numpy array."""
     import numpy as np
+
     dtype = np.float32 if "32FC" in msg.encoding else np.uint8
-    ch    = 1 if msg.encoding in ("32FC1", "mono8", "8UC1") else 3
+    ch = 1 if msg.encoding in ("32FC1", "mono8", "8UC1") else 3
     return np.frombuffer(msg.data, dtype=dtype).reshape(msg.height, msg.width, ch)
 
 
 def _camera_worlds_root() -> Path:
     root = Path(str(CONFIG["ROOT_PATH"]))
     assets_worlds = root / "assets" / "worlds"
-    print(f"[DEBUG _camera_worlds_root] ROOT_PATH={root}, assets_worlds={assets_worlds}, exists={assets_worlds.exists()}")
+    print(
+        f"[DEBUG _camera_worlds_root] ROOT_PATH={root}, assets_worlds={assets_worlds}, exists={assets_worlds.exists()}"
+    )
     if assets_worlds.exists():
         return assets_worlds
 
@@ -258,8 +264,14 @@ def _sensor_payload(sensor_node: ET.Element) -> Dict[str, Any]:
         "noise_type": _text(sensor_node, "camera/noise/type"),
         "noise_mean": _to_float(_text(sensor_node, "camera/noise/mean"), None),
         "noise_stddev": _to_float(_text(sensor_node, "camera/noise/stddev"), None),
-        "update_rate": _plugin_update_rate(plugin, sensor_node) if plugin is not None else _to_int(_text(sensor_node, "update_rate"), None),
-        "plugin_filename": str(plugin.get("filename", "")).strip() if plugin is not None else "",
+        "update_rate": (
+            _plugin_update_rate(plugin, sensor_node)
+            if plugin is not None
+            else _to_int(_text(sensor_node, "update_rate"), None)
+        ),
+        "plugin_filename": (
+            str(plugin.get("filename", "")).strip() if plugin is not None else ""
+        ),
         "namespace": _plugin_namespace(plugin) if plugin is not None else "",
         "image_topic": _plugin_topic(
             plugin,
@@ -292,9 +304,13 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
     sensors = [_sensor_payload(node) for node in root.findall(".//sensor")]
     camera_sensors = [item for item in sensors if item["sensor_type"] == "camera"]
     depth_sensors = [item for item in sensors if item["sensor_type"] == "depth"]
-    print(f"[DEBUG _camera_load_sensor_profile] found {len(sensors)} sensors total: {len(camera_sensors)} camera, {len(depth_sensors)} depth")
+    print(
+        f"[DEBUG _camera_load_sensor_profile] found {len(sensors)} sensors total: {len(camera_sensors)} camera, {len(depth_sensors)} depth"
+    )
     for i, s in enumerate(sensors):
-        print(f"[DEBUG _camera_load_sensor_profile]   sensor[{i}]: type={s.get('sensor_type')}, name={s.get('name')}, image_topic={s.get('image_topic', 'N/A')}, depth_topic={s.get('depth_topic', 'N/A')}")
+        print(
+            f"[DEBUG _camera_load_sensor_profile]   sensor[{i}]: type={s.get('sensor_type')}, name={s.get('name')}, image_topic={s.get('image_topic', 'N/A')}, depth_topic={s.get('depth_topic', 'N/A')}"
+        )
 
     family = "mono"
     if depth_sensors:
@@ -330,11 +346,17 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
     }
 
     if family == "depth":
-        primary = depth_sensors[0] if depth_sensors else (camera_sensors[0] if camera_sensors else {})
+        primary = (
+            depth_sensors[0]
+            if depth_sensors
+            else (camera_sensors[0] if camera_sensors else {})
+        )
         color = camera_sensors[0] if camera_sensors else primary
         profile.update(
             {
-                "image_topic": str(color.get("image_topic", "") or primary.get("image_topic", "") or "").strip(),
+                "image_topic": str(
+                    color.get("image_topic", "") or primary.get("image_topic", "") or ""
+                ).strip(),
                 "depth_topic": str(primary.get("depth_topic", "") or "").strip(),
                 "image_width": primary.get("image_width"),
                 "image_height": primary.get("image_height"),
@@ -348,13 +370,16 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
                 "update_rate": primary.get("update_rate"),
             }
         )
-        print(f"[DEBUG _camera_load_sensor_profile] depth profile: image_topic={profile['image_topic']}, depth_topic={profile['depth_topic']}, {profile.get('image_width')}x{profile.get('image_height')}")
+        print(
+            f"[DEBUG _camera_load_sensor_profile] depth profile: image_topic={profile['image_topic']}, depth_topic={profile['depth_topic']}, {profile.get('image_width')}x{profile.get('image_height')}"
+        )
         return profile
 
     if family == "stereo":
         left = next(
             (
-                item for item in camera_sensors
+                item
+                for item in camera_sensors
                 if "left" in str(item.get("name", "")).lower()
                 or "left" in str(item.get("namespace", "")).lower()
                 or "left" in str(item.get("image_topic", "")).lower()
@@ -363,8 +388,10 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
         )
         right = next(
             (
-                item for item in camera_sensors
-                if item is not left and (
+                item
+                for item in camera_sensors
+                if item is not left
+                and (
                     "right" in str(item.get("name", "")).lower()
                     or "right" in str(item.get("namespace", "")).lower()
                     or "right" in str(item.get("image_topic", "")).lower()
@@ -392,10 +419,16 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
                 "baseline": baseline,
             }
         )
-        print(f"[DEBUG _camera_load_sensor_profile] stereo profile: left={profile['left_topic']}, right={profile['right_topic']}, baseline={baseline}, {profile.get('image_width')}x{profile.get('image_height')}")
+        print(
+            f"[DEBUG _camera_load_sensor_profile] stereo profile: left={profile['left_topic']}, right={profile['right_topic']}, baseline={baseline}, {profile.get('image_width')}x{profile.get('image_height')}"
+        )
         return profile
 
-    primary = camera_sensors[0] if camera_sensors else (depth_sensors[0] if depth_sensors else {})
+    primary = (
+        camera_sensors[0]
+        if camera_sensors
+        else (depth_sensors[0] if depth_sensors else {})
+    )
     profile.update(
         {
             "image_topic": str(primary.get("image_topic", "") or "").strip(),
@@ -411,7 +444,9 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
             "update_rate": primary.get("update_rate"),
         }
     )
-    print(f"[DEBUG _camera_load_sensor_profile] mono profile: image_topic={profile['image_topic']}, {profile.get('image_width')}x{profile.get('image_height')}")
+    print(
+        f"[DEBUG _camera_load_sensor_profile] mono profile: image_topic={profile['image_topic']}, {profile.get('image_width')}x{profile.get('image_height')}"
+    )
     return profile
 
 
@@ -431,11 +466,9 @@ from .scam_tests import *
 
 from .tactile_tests import *
 
-
 TESTS: dict[str, callable] = {
     # Basic sensor test
     "__basic__": sensor_capture_basic,
-    
     # RFID tests
     "rfid_max_stable_read_distance": rfid_max_stable_read_distance,
     "rfid_min_stable_read_distance": rfid_min_stable_read_distance,
@@ -444,7 +477,6 @@ TESTS: dict[str, callable] = {
     "rfid_angle_dependence": rfid_angle_dependence,
     "rfid_move_tags": rfid_move_tags,
     "rfid_antenna_rotation": rfid_antenna_rotation,
-    
     # Mono camera tests (mcam_ prefix, no numbers)
     "mcam_check": camera_check,
     "mcam_size_order_test": c1_size_order_test,
@@ -457,17 +489,14 @@ TESTS: dict[str, callable] = {
     "mcam_fov_test": c9_fov_test,
     "mcam_clipping_test": c10_clipping_test,
     "mcam_fps_stability_test": c11_fps_stability_test,
-    
     # Depth camera tests (dcam_ prefix)
     "dcam_depth_perception_test": depth_perception_test,
-    
     # Stereo camera tests (scam_ prefix)
     "scam_stereo_topics_presence_test": stereo_topics_presence_test,
     "scam_stereo_disparity_test": stereo_disparity_test,
     "scam_stereo_occlusion_test": stereo_occlusion_test,
     "scam_1_stereo_accuracy_test": s1_stereo_accuracy_test,
     "scam_2_texture_vs_smooth_stability_test": s2_texture_vs_smooth_stability_test,
-    
     # Tactile tests
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,

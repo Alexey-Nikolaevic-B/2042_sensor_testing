@@ -14,16 +14,19 @@ import json
 from datetime import datetime
 from typing import Optional
 
+
 def _get_db_path() -> str:
     """DB path resolved relative to project root via CONFIG ROOT_PATH."""
     try:
         from config import CONFIG
+
         custom = CONFIG.get("DB_PATH", "")
         if custom:
             return custom
         root = CONFIG.get("ROOT_PATH", "")
         if root:
             import os
+
             return os.path.join(root, "sensor_storage.db")
     except Exception:
         pass
@@ -59,6 +62,7 @@ CREATE TABLE IF NOT EXISTS TestResults (
 
 # ── Internal helpers (defined first so all functions below can use them) ──────
 
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_get_db_path())
     conn.row_factory = sqlite3.Row
@@ -86,15 +90,15 @@ def _row_to_sensor_dict(row: sqlite3.Row) -> dict:
         pass
 
     return {
-        "id":          str(row["id"]),
-        "name":        row["sensor_name"],
-        "type":        row["sensor_type"],
-        "sdf_path":    row["sdf_path"],
+        "id": str(row["id"]),
+        "name": row["sensor_name"],
+        "type": row["sensor_type"],
+        "sdf_path": row["sdf_path"],
         "description": row["description"] or "",
-        "image_path":  row["image_path"]  or "",
-        "params":      params,
-        "topics":      topics,
-        "tests":       [],
+        "image_path": row["image_path"] or "",
+        "params": params,
+        "topics": topics,
+        "tests": [],
     }
 
 
@@ -107,31 +111,36 @@ def _row_to_test_dict(row: sqlite3.Row) -> dict:
 
     keys = row.keys()
     return {
-        "name":         row["test_name"],
-        "display_name": (row["display_name"] if "display_name" in keys else None) or row["test_name"],
-        "status":       row["status"],
-        "result":       result,
-        "description":  (row["meta_description"] if "meta_description" in keys else None) or "",
-        "image_path":   (row["image_path"] if "image_path" in keys else "") or "",
-        "date":         row["date"],
-        "duration":     row["duration"],
+        "name": row["test_name"],
+        "display_name": (row["display_name"] if "display_name" in keys else None)
+        or row["test_name"],
+        "status": row["status"],
+        "result": result,
+        "description": (row["meta_description"] if "meta_description" in keys else None)
+        or "",
+        "image_path": (row["image_path"] if "image_path" in keys else "") or "",
+        "date": row["date"],
+        "duration": row["duration"],
     }
 
 
-def _meta_stub_dict(func_name: str, display_name: str, description: str, image_path: str) -> dict:
+def _meta_stub_dict(
+    func_name: str, display_name: str, description: str, image_path: str
+) -> dict:
     return {
-        "name":         func_name,
+        "name": func_name,
         "display_name": display_name or func_name,
-        "status":       "Pending",
-        "result":       "",
-        "description":  description or "",
-        "image_path":   image_path or "",
-        "date":         "",
-        "duration":     0.0,
+        "status": "Pending",
+        "result": "",
+        "description": description or "",
+        "image_path": image_path or "",
+        "date": "",
+        "duration": 0.0,
     }
 
 
 # ── Init ──────────────────────────────────────────────────────────────────────
+
 
 def init_db() -> None:
     """Create tables if they don't exist. Safe to call multiple times."""
@@ -147,13 +156,13 @@ def _migrate(conn) -> None:
         rows = conn.execute("SELECT id, params FROM Sensors").fetchall()
         for row in rows:
             try:
-                val = json.loads(row[1] or '{}')
+                val = json.loads(row[1] or "{}")
                 if not isinstance(val, dict):
-                    conn.execute("UPDATE Sensors SET params = '{}' WHERE id = ?",
-                                 (row[0],))
+                    conn.execute(
+                        "UPDATE Sensors SET params = '{}' WHERE id = ?", (row[0],)
+                    )
             except Exception:
-                conn.execute("UPDATE Sensors SET params = '{}' WHERE id = ?",
-                             (row[0],))
+                conn.execute("UPDATE Sensors SET params = '{}' WHERE id = ?", (row[0],))
     except Exception:
         pass
 
@@ -167,9 +176,13 @@ def _migrate(conn) -> None:
     conn.executescript(_SCHEMA_SENSOR_TYPE_TESTS)
 
     # Add image_path column to SensorTypeTests if missing (created before this column existed)
-    stt_cols = {r[1] for r in conn.execute("PRAGMA table_info(SensorTypeTests)").fetchall()}
+    stt_cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(SensorTypeTests)").fetchall()
+    }
     if "image_path" not in stt_cols:
-        conn.execute("ALTER TABLE SensorTypeTests ADD COLUMN image_path TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            "ALTER TABLE SensorTypeTests ADD COLUMN image_path TEXT NOT NULL DEFAULT ''"
+        )
 
     # Add topics column if missing
     cols = {r[1] for r in conn.execute("PRAGMA table_info(Sensors)").fetchall()}
@@ -185,6 +198,7 @@ def _migrate(conn) -> None:
 
 
 # ── Sensors ───────────────────────────────────────────────────────────────────
+
 
 def add_sensor(
     sensor_name: str,
@@ -211,7 +225,15 @@ def add_sensor(
             INSERT INTO Sensors (sensor_name, sensor_type, sdf_path, description, image_path, params, topics)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (sensor_name, sensor_type, sdf_path, description, image_path, params_json, topics_json),
+            (
+                sensor_name,
+                sensor_type,
+                sdf_path,
+                description,
+                image_path,
+                params_json,
+                topics_json,
+            ),
         )
         return cursor.lastrowid
 
@@ -240,10 +262,14 @@ def update_sensor(
             """,
             (
                 description if description is not None else row["description"],
-                image_path  if image_path  is not None else row["image_path"],
-                sdf_path    if sdf_path    is not None else row["sdf_path"],
-                json.dumps(params)  if params  is not None else row["params"],
-                json.dumps(topics)  if topics  is not None else (row["topics"] if "topics" in row.keys() else "[]"),
+                image_path if image_path is not None else row["image_path"],
+                sdf_path if sdf_path is not None else row["sdf_path"],
+                json.dumps(params) if params is not None else row["params"],
+                (
+                    json.dumps(topics)
+                    if topics is not None
+                    else (row["topics"] if "topics" in row.keys() else "[]")
+                ),
                 sensor_name,
             ),
         )
@@ -294,6 +320,7 @@ def get_sensor_types() -> list[str]:
 
 
 # ── Test results ──────────────────────────────────────────────────────────────
+
 
 def save_test_result(
     sensor_name: str,
@@ -379,10 +406,14 @@ def get_latest_test_results(sensor_id) -> list[dict]:
     tests = [_row_to_test_dict(r) for r in result_rows]
     for m in meta_only:
         if m["func_name"] not in ran_names:
-            tests.append(_meta_stub_dict(
-                m["func_name"], m["display_name"],
-                m["description"], m["image_path"],
-            ))
+            tests.append(
+                _meta_stub_dict(
+                    m["func_name"],
+                    m["display_name"],
+                    m["description"],
+                    m["image_path"],
+                )
+            )
     return tests
 
 
@@ -407,6 +438,7 @@ def get_test_history(sensor_name: str, test_name: str) -> list[dict]:
 
 
 # ── Backwards-compatible alias ────────────────────────────────────────────────
+
 
 def get_sensors() -> list[tuple]:
     """Original API: returns (id, sensor_name, sensor_type, sdf_path) tuples."""
@@ -468,17 +500,18 @@ def get_test_meta(sensor_id: str) -> list[dict]:
         ).fetchall()
     return [
         {
-            "func_name":    r["func_name"],
+            "func_name": r["func_name"],
             "display_name": r["display_name"] or r["func_name"],
-            "description":  r["description"] or "",
-            "image_path":   r["image_path"]  or "",
+            "description": r["description"] or "",
+            "image_path": r["image_path"] or "",
         }
         for r in rows
     ]
 
 
-def save_test_meta(sensor_id: str, func_name: str, display_name: str,
-                   description: str, image_path: str) -> None:
+def save_test_meta(
+    sensor_id: str, func_name: str, display_name: str, description: str, image_path: str
+) -> None:
     """Write display metadata to SensorTypeTests (shared across all sensors of same type)."""
     with _connect() as conn:
         sensor_row = conn.execute(
@@ -495,8 +528,15 @@ def save_test_meta(sensor_id: str, func_name: str, display_name: str,
                 description  = excluded.description,
                 image_path   = excluded.image_path
             """,
-            (sensor_row["sensor_type"], func_name, display_name, description, image_path),
+            (
+                sensor_row["sensor_type"],
+                func_name,
+                display_name,
+                description,
+                image_path,
+            ),
         )
+
 
 def init_sensor_type_tests_table() -> None:
     """Create SensorTypeTests table. Safe to call multiple times."""
@@ -513,18 +553,23 @@ def get_type_tests(sensor_type: str) -> list[dict]:
         ).fetchall()
     return [
         {
-            "func_name":    r["func_name"],
+            "func_name": r["func_name"],
             "display_name": r["display_name"] or r["func_name"],
-            "description":  r["description"] or "",
-            "image_path":   r["image_path"] or "",
+            "description": r["description"] or "",
+            "image_path": r["image_path"] or "",
         }
         for r in rows
     ]
 
 
-def upsert_type_test(sensor_type: str, func_name: str, display_name: str,
-                     description: str, image_path: str = "",
-                     world_path: str = "") -> None:
+def upsert_type_test(
+    sensor_type: str,
+    func_name: str,
+    display_name: str,
+    description: str,
+    image_path: str = "",
+    world_path: str = "",
+) -> None:
     """Upsert a canonical test definition for a sensor type."""
     with _connect() as conn:
         conn.execute(
@@ -596,7 +641,13 @@ def sync_type_tests_to_sensor(sensor_id: str, sensor_type: str) -> None:
                 INSERT OR IGNORE INTO SensorTests (sensor_id, func_name, display_name, description, image_path)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (int(sensor_id), t["func_name"], t["display_name"], t["description"], t["image_path"]),
+                (
+                    int(sensor_id),
+                    t["func_name"],
+                    t["display_name"],
+                    t["description"],
+                    t["image_path"],
+                ),
             )
 
 
@@ -616,8 +667,13 @@ def sync_type_tests_to_sensor_by_type(sensor_type: str, func_name: str) -> None:
                     (sensor_id, func_name, display_name, description, image_path)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (int(s["id"]), t["func_name"], t["display_name"],
-                 t["description"], t["image_path"]),
+                (
+                    int(s["id"]),
+                    t["func_name"],
+                    t["display_name"],
+                    t["description"],
+                    t["image_path"],
+                ),
             )
 
 
@@ -630,9 +686,13 @@ def get_sensors_by_type(sensor_type: str) -> list[dict]:
     return [_row_to_sensor_dict(r) for r in rows]
 
 
-def propagate_type_test_to_sensors(sensor_type: str, func_name: str,
-                                   display_name: str, description: str,
-                                   image_path: str) -> None:
+def propagate_type_test_to_sensors(
+    sensor_type: str,
+    func_name: str,
+    display_name: str,
+    description: str,
+    image_path: str,
+) -> None:
     """After editing a type-level test, push display_name and description to all
     sensors of that type. image_path is NOT propagated — each sensor keeps its own."""
     sensors = get_sensors_by_type(sensor_type)
@@ -646,6 +706,7 @@ def propagate_type_test_to_sensors(sensor_type: str, func_name: str,
                 """,
                 (display_name, description, int(s["id"]), func_name),
             )
+
 
 # ── SensorTypes table ─────────────────────────────────────────────────────────
 # Stores type-level metadata: description, expected params, detection config.
@@ -664,8 +725,9 @@ def _ensure_sensor_types_table(conn) -> None:
     conn.executescript(_SCHEMA_SENSOR_TYPES)
 
 
-def upsert_sensor_type(sensor_type: str, description: str = "",
-                       params: list = None, detection: dict = None) -> None:
+def upsert_sensor_type(
+    sensor_type: str, description: str = "", params: list = None, detection: dict = None
+) -> None:
     """Insert or update a sensor type definition."""
     init_db()
     with _connect() as conn:
@@ -679,9 +741,12 @@ def upsert_sensor_type(sensor_type: str, description: str = "",
                 params      = excluded.params,
                 detection   = excluded.detection
             """,
-            (sensor_type, description,
-             json.dumps(params or []),
-             json.dumps(detection or {})),
+            (
+                sensor_type,
+                description,
+                json.dumps(params or []),
+                json.dumps(detection or {}),
+            ),
         )
 
 
@@ -703,9 +768,7 @@ def get_all_sensor_types() -> list:
     init_db()
     with _connect() as conn:
         _ensure_sensor_types_table(conn)
-        rows = conn.execute(
-            "SELECT * FROM SensorTypes ORDER BY sensor_type"
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM SensorTypes ORDER BY sensor_type").fetchall()
     return [_sensor_type_row(r) for r in rows]
 
 
@@ -725,9 +788,7 @@ def delete_sensor_type(sensor_type: str) -> None:
     init_db()
     with _connect() as conn:
         _ensure_sensor_types_table(conn)
-        conn.execute(
-            "DELETE FROM SensorTypes WHERE sensor_type = ?", (sensor_type,)
-        )
+        conn.execute("DELETE FROM SensorTypes WHERE sensor_type = ?", (sensor_type,))
 
 
 def _sensor_type_row(row) -> dict:
@@ -736,12 +797,14 @@ def _sensor_type_row(row) -> dict:
             return json.loads(val) if val else default
         except (json.JSONDecodeError, TypeError):
             return default
+
     return {
         "sensor_type": row["sensor_type"],
         "description": row["description"] or "",
-        "params":      _j(row["params"], []),
-        "detection":   _j(row["detection"], {}),
+        "params": _j(row["params"], []),
+        "detection": _j(row["detection"], {}),
     }
+
 
 # ── AppConfig table ───────────────────────────────────────────────────────────
 # Generic key-value store for application settings.
