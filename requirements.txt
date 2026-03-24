@@ -1,0 +1,9 @@
+catkin_pkg
+rospkg
+empy
+PyYAML
+numpy
+PyQt5
+PyQt5-sip
+opencv-python
+defusedxml

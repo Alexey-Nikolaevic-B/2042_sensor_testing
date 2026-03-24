@@ -1,119 +1,121 @@
 #!/usr/bin/env bash
-# setup.sh — Python 3.14 enforced version
-
-# Detect if script is being sourced or executed
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo -e "\033[1;33m[setup]\033[0m Run with:  source setup.sh  — to also activate the venv in this shell."
-    SOURCED=0
-else
-    SOURCED=1
-fi
-
-set -e
+# setup.sh — Python 3.14 with ROS Noetic support
+# Run with: ./setup.sh
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_ROOT/venv"
 CATKIN_WS="$PROJECT_ROOT/catkin_ws"
+REQUIREMENTS_FILE="$PROJECT_ROOT/requirements.txt"
+ROS_SETUP="/opt/ros/noetic/setup.bash"
 
-# ── colours ───────────────────────────────────────────────────────────────────
-GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[setup]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[setup]${NC} $*"; }
-error() { echo -e "${RED}[setup]${NC} $*" >&2; }
-
-# ── 1. Force Python 3.14 ──────────────────────────────────────────────────────
-if command -v python3.14 &> /dev/null; then
-    PYTHON=$(command -v python3.14)
-else
-    error "python3.14 not found. Install it first."
-    if [ "$SOURCED" -eq 1 ]; then
-        return 1
-    else
-        exit 1
-    fi
+# ── 1. Check ROS Noetic ──────────────────────────────────────────────────────
+if [ ! -f "$ROS_SETUP" ]; then
+    echo "[setup] ERROR: ROS Noetic not found at $ROS_SETUP" >&2
+    echo "[setup] Install ROS Noetic first: http://wiki.ros.org/noetic/Installation" >&2
+    exit 1
 fi
 
-PY_VERSION=$($PYTHON -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-info "Using $PYTHON  (Python $PY_VERSION)"
+# ── 2. Check Python 3.14 and venv support ──────────────────────────────────────
+if ! command -v python3.14 &> /dev/null; then
+    echo "[setup] ERROR: python3.14 not found." >&2
+    echo "[setup] Install with: sudo apt install python3.14 python3.14-venv python3.14-dev" >&2
+    exit 1
+fi
 
-# ── 2. Create virtual environment ─────────────────────────────────────────────
+if ! python3.14 -m venv --help &> /dev/null; then
+    echo "[setup] ERROR: python3.14-venv package not installed." >&2
+    echo "[setup] Install with: sudo apt install python3.14-venv" >&2
+    exit 1
+fi
+
+PYTHON=$(command -v python3.14)
+
+# ── 3. Install ROS dependencies for the workspace ─────────────────────────────
+if [ -d "$CATKIN_WS" ]; then
+    echo "[setup] Installing ROS dependencies..."
+    source "$ROS_SETUP"
+    
+    # Check if rosdep is installed
+    if ! command -v rosdep &> /dev/null; then
+        echo "[setup] Installing rosdep..."
+        sudo apt update
+        sudo apt install python3-rosdep
+        sudo rosdep init
+        rosdep update
+    fi
+    
+    # Install missing ROS packages that rosdep can't resolve
+    echo "[setup] Installing MAVROS packages..."
+    sudo apt install -y ros-noetic-mavros ros-noetic-mavros-msgs ros-noetic-libmavconn ros-noetic-mavlink
+    
+    echo "[setup] Installing Gazebo packages..."
+    sudo apt install -y ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control ros-noetic-gazebo-plugins
+    
+    # Install dependencies from the workspace (for packages that are resolvable)
+    cd "$CATKIN_WS"
+    rosdep install --from-paths src --ignore-src -r -y || true
+    
+    cd "$PROJECT_ROOT"
+fi
+
+# ── 4. Create virtual environment ─────────────────────────────────────────────
 if [ -d "$VENV_DIR" ]; then
-    warn "venv already exists at $VENV_DIR — recreating for Python 3.14"
     rm -rf "$VENV_DIR"
 fi
 
-info "Creating venv at $VENV_DIR ..."
-$PYTHON -m venv --system-site-packages "$VENV_DIR"
-info "venv created"
+$PYTHON -m venv "$VENV_DIR"
 
-# Activate
-source "$VENV_DIR/bin/activate"
-info "venv activated: $(which python)"
+if [ $? -ne 0 ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
+    echo "[setup] ERROR: Failed to create virtual environment" >&2
+    exit 1
+fi
 
-# ── 3. Upgrade pip ────────────────────────────────────────────────────────────
-info "Upgrading pip ..."
-pip install --upgrade pip --quiet
+# ── 5. Install Python packages ────────────────────────────────────────────────
+"$VENV_DIR/bin/pip" install --upgrade pip
 
-# ── 4. Install Python requirements ────────────────────────────────────────────
-info "Installing Python packages ..."
-pip install \
-    PyQt5 \
-    PyQt5-sip \
-    opencv-python \
-    numpy \
-    PyYAML \
-    rospkg \
-    catkin_pkg \
-    defusedxml \
-    empy \
-    --quiet
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    echo "[setup] ERROR: requirements.txt not found" >&2
+    exit 1
+fi
 
-info "All Python packages installed"
+"$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+if [ $? -ne 0 ]; then
+    echo "[setup] ERROR: Failed to install requirements" >&2
+    exit 1
+fi
 
-# ── 5. catkin_make ────────────────────────────────────────────────────────────
-if [ ! -d "$CATKIN_WS" ]; then
-    warn "catkin_ws not found at $CATKIN_WS — skipping catkin_make"
-else
-    ROS_SETUP=""
-    for candidate in \
-        /opt/ros/noetic/setup.bash \
-        /opt/ros/melodic/setup.bash \
-        /opt/ros/kinetic/setup.bash; do
-        if [ -f "$candidate" ]; then
-            ROS_SETUP="$candidate"
-            break
-        fi
-    done
-
-    if [ -z "$ROS_SETUP" ]; then
-        warn "No ROS installation found — skipping catkin_make"
-    else
-        info "Sourcing ROS from $ROS_SETUP ..."
-        source "$ROS_SETUP"
-        info "Running catkin_make in $CATKIN_WS ..."
-        cd "$CATKIN_WS"
-        catkin_make
-        cd "$PROJECT_ROOT"
-        info "catkin_make complete"
+# ── 6. Build catkin workspace ─────────────────────────────────────────────────
+if [ -d "$CATKIN_WS" ]; then
+    source "$ROS_SETUP"
+    
+    if [ -z "$ROS_DISTRO" ]; then
+        echo "[setup] ERROR: ROS environment not properly sourced" >&2
+        exit 1
     fi
+    
+    export PATH="$VENV_DIR/bin:$PATH"
+    export PYTHONPATH="/opt/ros/noetic/lib/python3/dist-packages:$PYTHONPATH"
+    
+    cd "$CATKIN_WS"
+    
+    if [ -f "build/CMakeCache.txt" ]; then
+        rm -rf build devel
+    fi
+    
+    catkin_make -DPYTHON_EXECUTABLE="$VENV_DIR/bin/python"
+    if [ $? -ne 0 ]; then
+        echo "[setup] ERROR: catkin_make failed" >&2
+        exit 1
+    fi
+    
+    cd "$PROJECT_ROOT"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-info "Setup complete."
-
-# ── 6. Activate in current shell ──────────────────────────────────────────────
-if [ "$SOURCED" -eq 1 ]; then
-    source "$VENV_DIR/bin/activate"
-    info "venv activated in current shell: $(which python)"
-    if [ -n "$ROS_SETUP" ]; then
-        source "$ROS_SETUP"
-        info "ROS sourced: $ROS_SETUP"
-    fi
-    cd "$PROJECT_ROOT"
-else
-    info "To activate the venv in this shell run:"
-    echo ""
-    echo "    source $VENV_DIR/bin/activate"
-    echo ""
-fi
+echo "Setup complete"
+echo ""
+echo "Activate environment:"
+echo "    source venv/bin/activate"
+echo "Start program:"
+echo "    python3 __main__.py"
