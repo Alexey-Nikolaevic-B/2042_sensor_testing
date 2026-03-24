@@ -2,6 +2,7 @@ import sys
 import traceback
 
 from front.logic_log_bridge import setup_logging
+
 setup_logging()
 
 from PyQt5.QtWidgets import QApplication
@@ -11,15 +12,14 @@ from front.logic_test_runner import TestRunner
 from front.logic_queue_manager import QueueManager
 from front.main import Main_UI
 
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    core          = Core()
-    repo          = SensorRepository()
-    runner        = TestRunner(core)
+    core = Core()
+    repo = SensorRepository()
+    runner = TestRunner(core)
     queue_manager = QueueManager(runner)
-    window        = Main_UI()
+    window = Main_UI()
 
     window.set_core(core)
     window.test_page._runner_log_forward = window.col_4.append_log
@@ -37,9 +37,13 @@ if __name__ == "__main__":
     def on_sim_ready():
         core.simulator.launch_node()
         if core.simulator.node_is_running:
-            window.col_4.append_log("info", "simulator", "Simulator ready, you can now run tests.")
+            window.col_4.append_log(
+                "info", "simulator", "Simulator ready, you can now run tests."
+            )
         else:
-            window.col_4.append_log("error", "simulator", "ROS node failed to initialise.")
+            window.col_4.append_log(
+                "error", "simulator", "ROS node failed to initialise."
+            )
 
     core.simulator.on_log = on_sim_log
 
@@ -47,24 +51,24 @@ if __name__ == "__main__":
     import logging as _logging
 
     _LEVEL_MAP = {
-        _logging.DEBUG:    "debug",
-        _logging.INFO:     "info",
-        _logging.WARNING:  "warning",
-        _logging.ERROR:    "error",
+        _logging.DEBUG: "debug",
+        _logging.INFO: "info",
+        _logging.WARNING: "warning",
+        _logging.ERROR: "error",
         _logging.CRITICAL: "critical",
     }
 
     def _on_log_record(record: _logging.LogRecord):
-        level  = _LEVEL_MAP.get(record.levelno, "info")
+        level = _LEVEL_MAP.get(record.levelno, "info")
         source = record.name.split(".")[-1]
         window.col_4.append_log(level, source, record.getMessage())
 
     _log_bridge.new_record.connect(_on_log_record)
 
     core.simulator.start_async(
-        on_ready = on_sim_ready,
-        on_log   = on_sim_log,
-        on_error = on_sim_error,
+        on_ready=on_sim_ready,
+        on_log=on_sim_log,
+        on_error=on_sim_error,
     )
 
     runner.test_started.connect(window.col_4.clear_capture)

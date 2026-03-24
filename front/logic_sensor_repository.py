@@ -19,29 +19,54 @@ class Sensor:
         self._data = copy.deepcopy(data)
         self._data.setdefault("tests", [])
 
-    def __getitem__(self, key):        return self._data[key]
-    def __setitem__(self, key, value): self._data[key] = value
-    def __contains__(self, key):       return key in self._data
-    def get(self, key, default=None):  return self._data.get(key, default)
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
 
     @property
-    def id(self)          -> str:  return self._data["id"]
+    def id(self) -> str:
+        return self._data["id"]
+
     @property
-    def name(self)        -> str:  return self._data["name"]
+    def name(self) -> str:
+        return self._data["name"]
+
     @property
-    def sensor_type(self) -> str:  return self._data["type"]
+    def sensor_type(self) -> str:
+        return self._data["type"]
+
     @property
-    def description(self) -> str:  return self._data.get("description", "")
+    def description(self) -> str:
+        return self._data.get("description", "")
+
     @property
-    def image_path(self)  -> str:  return self._data.get("image_path", "")
+    def image_path(self) -> str:
+        return self._data.get("image_path", "")
+
     @property
-    def params(self)      -> dict: return self._data.get("params", {})
+    def params(self) -> dict:
+        return self._data.get("params", {})
+
     @property
-    def topics(self)      -> list: return self._data.get("topics", [])
+    def topics(self) -> list:
+        return self._data.get("topics", [])
+
     @property
-    def topic(self)       -> str:  return self.topics[0] if self.topics else ""
+    def topic(self) -> str:
+        return self.topics[0] if self.topics else ""
+
     @property
-    def tests(self)       -> list: return self._data["tests"]
+    def tests(self) -> list:
+        return self._data["tests"]
+
     @property
     def last_update(self):
         return self._data.get("last_update", datetime.min)
@@ -76,11 +101,11 @@ class Sensor:
 
 class SensorRepository(QObject):
 
-    sensor_added   = pyqtSignal(dict)
+    sensor_added = pyqtSignal(dict)
     sensor_updated = pyqtSignal(dict)
     sensor_deleted = pyqtSignal(str)
     sensors_loaded = pyqtSignal()
-    test_updated   = pyqtSignal(str, dict)
+    test_updated = pyqtSignal(str, dict)
 
     _instance: "SensorRepository | None" = None
 
@@ -130,14 +155,15 @@ class SensorRepository(QObject):
 
     def add_sensor(self, data: dict) -> dict:
         import inspect as _inspect
+
         _add_sig = _inspect.signature(db.add_sensor).parameters
         _kwargs = dict(
-            sensor_name = data["name"],
-            sensor_type = data["type"],
-            sdf_path    = data.get("sdf_path", ""),
-            description = data.get("description", ""),
-            image_path  = data.get("image_path", ""),
-            params      = data.get("params", {}),
+            sensor_name=data["name"],
+            sensor_type=data["type"],
+            sdf_path=data.get("sdf_path", ""),
+            description=data.get("description", ""),
+            image_path=data.get("image_path", ""),
+            params=data.get("params", {}),
         )
         if "topics" in _add_sig:
             _kwargs["topics"] = data.get("topics", [])
@@ -202,13 +228,14 @@ class SensorRepository(QObject):
             raise KeyError(f"No sensor with id {sensor_id!r}")
         # Build kwargs — only pass topics if db.update_sensor supports it
         import inspect as _inspect
+
         _upd_sig = _inspect.signature(db.update_sensor).parameters
         _kwargs = dict(
-            sensor_name = s.name,
-            description = fields.get("description"),
-            image_path  = fields.get("image_path"),
-            params      = fields.get("params"),
-            sdf_path    = fields.get("sdf_path"),
+            sensor_name=s.name,
+            description=fields.get("description"),
+            image_path=fields.get("image_path"),
+            params=fields.get("params"),
+            sdf_path=fields.get("sdf_path"),
         )
         if "topics" in _upd_sig:
             _kwargs["topics"] = fields.get("topics")
@@ -239,24 +266,28 @@ class SensorRepository(QObject):
             raise KeyError(f"No sensor with id {sensor_id!r}")
 
         db.save_test_result(
-            sensor_name = s.name,
-            test_name   = test_name,
-            status      = status,
-            result      = result,
-            description = description,
-            duration    = duration,
+            sensor_name=s.name,
+            test_name=test_name,
+            status=status,
+            result=result,
+            description=description,
+            duration=duration,
         )
 
         from datetime import datetime as _dt
+
         today = _dt.now().strftime("%Y-%m-%d")
 
         result_str = str(result) if not isinstance(result, str) else result
-        s.update_test(test_name, {
-            "status":   status,
-            "result":   result_str,
-            "duration": duration,
-            "date":     today,
-        })
+        s.update_test(
+            test_name,
+            {
+                "status": status,
+                "result": result_str,
+                "duration": duration,
+                "date": today,
+            },
+        )
 
         updated_test = s.get_test(test_name)
         self.test_updated.emit(sensor_id, copy.deepcopy(updated_test))
@@ -266,28 +297,43 @@ class SensorRepository(QObject):
         rows = db.get_test_meta(sensor_id)
         return {r["func_name"]: r for r in rows}
 
-    def save_test_meta(self, sensor_id: str, func_name: str,
-                       display_name: str, description: str,
-                       image_path: str) -> None:
+    def save_test_meta(
+        self,
+        sensor_id: str,
+        func_name: str,
+        display_name: str,
+        description: str,
+        image_path: str,
+    ) -> None:
         db.save_test_meta(sensor_id, func_name, display_name, description, image_path)
 
         s = self._sensors.get(sensor_id)
         if s is None:
             return
 
-        db.upsert_type_test(s.sensor_type, func_name, display_name, description, image_path)
-        db.propagate_type_test_to_sensors(s.sensor_type, func_name, display_name, description, image_path)
+        db.upsert_type_test(
+            s.sensor_type, func_name, display_name, description, image_path
+        )
+        db.propagate_type_test_to_sensors(
+            s.sensor_type, func_name, display_name, description, image_path
+        )
 
-        s.update_test(func_name, {
-            "display_name": display_name,
-            "description":  description,
-            "image_path":   image_path,
-        })
+        s.update_test(
+            func_name,
+            {
+                "display_name": display_name,
+                "description": description,
+                "image_path": image_path,
+            },
+        )
 
         for sibling in self._sensors.values():
             if sibling.id != sensor_id and sibling.sensor_type == s.sensor_type:
-                sibling.update_test(func_name, {
-                    "display_name": display_name,
-                    "description":  description,
-                    "image_path":   image_path,
-                })
+                sibling.update_test(
+                    func_name,
+                    {
+                        "display_name": display_name,
+                        "description": description,
+                        "image_path": image_path,
+                    },
+                )

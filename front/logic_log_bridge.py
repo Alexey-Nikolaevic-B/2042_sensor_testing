@@ -12,16 +12,18 @@ import logging
 import logging.config
 from PyQt5.QtCore import QObject, pyqtSignal
 
-
 # ── Qt signal carrier ─────────────────────────────────────────────────────────
+
 
 class _LogBridge(QObject):
     new_record = pyqtSignal(logging.LogRecord)
+
 
 log_bridge = _LogBridge()
 
 
 # ── Custom handler ────────────────────────────────────────────────────────────
+
 
 class _QtHandler(logging.Handler):
     def emit(self, record: logging.LogRecord):
@@ -29,6 +31,7 @@ class _QtHandler(logging.Handler):
             log_bridge.new_record.emit(record)
         except Exception:
             self.handleError(record)
+
 
 _qt_handler = _QtHandler()
 _qt_handler.setLevel(logging.DEBUG)
@@ -45,8 +48,8 @@ def _attach_to_logger(name: str):
 
 def _attach_all():
     """Attach Qt handler to root and every logger that has propagate=False."""
-    _attach_to_logger("")        # root
-    _attach_to_logger("src")     # src.* loggers (propagate=False in log_config)
+    _attach_to_logger("")  # root
+    _attach_to_logger("src")  # src.* loggers (propagate=False in log_config)
     # Also catch any other non-propagating loggers that may exist
     for name, lgr in logging.Logger.manager.loggerDict.items():
         if isinstance(lgr, logging.Logger) and not lgr.propagate:
@@ -57,14 +60,17 @@ def _attach_all():
 
 _original_dictConfig = logging.config.dictConfig
 
+
 def _patched_dictConfig(config):
     _original_dictConfig(config)
-    _attach_all()   # re-attach after dictConfig installs its own handlers
+    _attach_all()  # re-attach after dictConfig installs its own handlers
+
 
 logging.config.dictConfig = _patched_dictConfig
 
 
 # ── Public helpers ────────────────────────────────────────────────────────────
+
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
@@ -85,8 +91,10 @@ def setup_logging(level: int = logging.DEBUG) -> None:
     ):
         console = logging.StreamHandler()
         console.setLevel(logging.DEBUG)
-        console.setFormatter(logging.Formatter(
-            "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-            datefmt="%H:%M:%S",
-        ))
+        console.setFormatter(
+            logging.Formatter(
+                "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+                datefmt="%H:%M:%S",
+            )
+        )
         root.addHandler(console)

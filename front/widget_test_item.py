@@ -8,22 +8,22 @@ from .logic_queue_manager import TestStatus
 
 
 class TestItem(QWidget):
-    run_requested   = pyqtSignal(str)
-    stop_requested  = pyqtSignal(str)
-    selected        = pyqtSignal(str)
+    run_requested = pyqtSignal(str)
+    stop_requested = pyqtSignal(str)
+    selected = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(os.path.join(QT_DIR, "test_item.ui"), self)
 
-        self.func_name        = ""
-        self.test_name        = ""
+        self.func_name = ""
+        self.test_name = ""
         self.test_description = ""
-        self._image_path      = ""
-        self._progress        = 0
-        self._movie           = None
-        self.is_selected      = False
-        self.test_status      = TestStatus.IDLE
+        self._image_path = ""
+        self._progress = 0
+        self._movie = None
+        self.is_selected = False
+        self.test_status = TestStatus.IDLE
         self.setObjectName("TestItem")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
@@ -32,23 +32,23 @@ class TestItem(QWidget):
         self.btn_run_stop.clicked.connect(self._on_run_stop_clicked)
 
     _DB_STATUS_MAP = {
-        "Passed":  TestStatus.PASSED,
-        "Failed":  TestStatus.FAILED,
+        "Passed": TestStatus.PASSED,
+        "Failed": TestStatus.FAILED,
         "Stopped": TestStatus.IDLE,
         "Pending": TestStatus.IDLE,
-        "Idle":    TestStatus.IDLE,
+        "Idle": TestStatus.IDLE,
     }
 
     def load(self, test_data: dict):
         self._stop_movie()
-        self.func_name        = test_data.get("name", "")
-        self.test_name        = test_data.get("display_name") or self.func_name
+        self.func_name = test_data.get("name", "")
+        self.test_name = test_data.get("display_name") or self.func_name
         self.test_description = test_data.get("description", "")
-        self._image_path      = test_data.get("image_path", "")
-        self._progress        = 0
-        self.is_selected      = False
+        self._image_path = test_data.get("image_path", "")
+        self._progress = 0
+        self.is_selected = False
 
-        db_status        = test_data.get("status", "Pending")
+        db_status = test_data.get("status", "Pending")
         self.test_status = self._DB_STATUS_MAP.get(db_status, TestStatus.IDLE)
 
         self._refresh_all()
@@ -98,9 +98,6 @@ class TestItem(QWidget):
             self.setStyleSheet(self._bg_style(Colors.BG_CARD))
         super().leaveEvent(event)
 
-
-
-
     def _on_run_stop_clicked(self):
         if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
             self.stop_requested.emit(self.func_name)
@@ -133,11 +130,11 @@ class TestItem(QWidget):
 
     def _refresh_status_bar(self):
         color = {
-            TestStatus.IDLE:    Colors.STATUS_GRAY,
-            TestStatus.QUEUED:  Colors.STATUS_QUEUED,
+            TestStatus.IDLE: Colors.STATUS_GRAY,
+            TestStatus.QUEUED: Colors.STATUS_QUEUED,
             TestStatus.RUNNING: Colors.STATUS_RUNNING,
-            TestStatus.PASSED:  Colors.STATUS_GREEN,
-            TestStatus.FAILED:  Colors.STATUS_RED,
+            TestStatus.PASSED: Colors.STATUS_GREEN,
+            TestStatus.FAILED: Colors.STATUS_RED,
         }.get(self.test_status, Colors.STATUS_BLUE)
         self.frm_status_bar.setStyleSheet(
             f"QFrame {{ background-color: {color}; border: none; }}"
@@ -160,8 +157,7 @@ class TestItem(QWidget):
         if self.test_status in (TestStatus.QUEUED, TestStatus.RUNNING):
             return  # movie owns the label
         self.status_icon.setPixmap(
-            Icons.for_status(self.test_status.value, False)
-            .pixmap(Layout.ICON_SIZE_MD)
+            Icons.for_status(self.test_status.value, False).pixmap(Layout.ICON_SIZE_MD)
         )
 
     @staticmethod
@@ -173,7 +169,9 @@ class TestItem(QWidget):
 
     def _setup_button_icons(self):
         from PyQt5.QtGui import QIcon
+
         icon_dir = os.path.join(os.path.dirname(__file__), "icon")
+
         def _ico(name):
             p = os.path.join(icon_dir, name)
             return QIcon(p) if os.path.exists(p) else QIcon()

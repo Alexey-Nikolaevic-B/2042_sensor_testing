@@ -1,4 +1,5 @@
 """Depth camera (dcam) tests — C3, C5, C6, depth_perception."""
+
 import copy
 import logging
 import math
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 #  Helpers
 # ---------------------------------------------------------------------------
 
+
 def _camera_method_passed(result: dict) -> bool:
     if not isinstance(result, dict):
         return True
@@ -43,28 +45,45 @@ def _camera_method_passed(result: dict) -> bool:
     return True
 
 
-def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, progress_cb=None) -> dict:
+def _run_camera_context_test(
+    context_cls, method_name: str, simulator, sensor, progress_cb=None
+) -> dict:
     print(f"\n[DEBUG _run_camera_context_test] ═══════════════════════════════════════")
-    print(f"[DEBUG _run_camera_context_test] context_cls={context_cls.__name__}, method={method_name}")
-    print(f"[DEBUG _run_camera_context_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}")
-    print(f"[DEBUG _run_camera_context_test] sdf_path={getattr(sensor, 'sdf_path', '?')}")
+    print(
+        f"[DEBUG _run_camera_context_test] context_cls={context_cls.__name__}, method={method_name}"
+    )
+    print(
+        f"[DEBUG _run_camera_context_test] sensor_name={getattr(sensor, 'sensor_name', '?')}, sensor_type={getattr(sensor, 'sensor_type', '?')}"
+    )
+    print(
+        f"[DEBUG _run_camera_context_test] sdf_path={getattr(sensor, 'sdf_path', '?')}"
+    )
     print(f"[DEBUG _run_camera_context_test] topic={getattr(sensor, 'topic', '?')}")
     try:
         ctx = context_cls(sensor)
         print(f"[DEBUG _run_camera_context_test] context created OK")
     except Exception as e:
         import traceback
+
         print(f"[DEBUG _run_camera_context_test] FAILED to create context: {e}")
         print(traceback.format_exc())
         raise
 
-    if context_cls.__name__ == "_DepthProfileTestContext" and not getattr(ctx, "DEPTH_TOPIC", ""):
-        msg = (f"Test {method_name} requires a depth camera, but sensor "
-               f"'{getattr(sensor, 'sensor_name', '?')}' has no depth topic configured. "
-               f"This test is not applicable to mono/RGB cameras.")
+    if context_cls.__name__ == "_DepthProfileTestContext" and not getattr(
+        ctx, "DEPTH_TOPIC", ""
+    ):
+        msg = (
+            f"Test {method_name} requires a depth camera, but sensor "
+            f"'{getattr(sensor, 'sensor_name', '?')}' has no depth topic configured. "
+            f"This test is not applicable to mono/RGB cameras."
+        )
         print(f"[DEBUG _run_camera_context_test] SKIP: {msg}")
-        return {"passed": False, "skipped": True, "error": msg,
-                "metrics": {"status": "SKIP", "error_reason": msg}}
+        return {
+            "passed": False,
+            "skipped": True,
+            "error": msg,
+            "metrics": {"status": "SKIP", "error_reason": msg},
+        }
 
     method = getattr(ctx, method_name)
     if progress_cb:
@@ -73,12 +92,19 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
         except Exception:
             pass
     try:
-        print(f"[DEBUG _run_camera_context_test] calling ctx.{method_name}(simulator)...")
+        print(
+            f"[DEBUG _run_camera_context_test] calling ctx.{method_name}(simulator)..."
+        )
         result = method(simulator)
-        print(f"[DEBUG _run_camera_context_test] method returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        print(
+            f"[DEBUG _run_camera_context_test] method returned: type={type(result).__name__}, keys={list(result.keys()) if isinstance(result, dict) else 'N/A'}"
+        )
     except Exception as e:
         import traceback
-        print(f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}")
+
+        print(
+            f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}"
+        )
         print(traceback.format_exc())
         raise
     if not isinstance(result, dict):
@@ -98,6 +124,7 @@ def _run_camera_context_test(context_cls, method_name: str, simulator, sensor, p
 # ---------------------------------------------------------------------------
 #  _DepthProfileTestContext
 # ---------------------------------------------------------------------------
+
 
 class _DepthProfileTestContext:
     DEPTH_TOPIC = ""
@@ -149,7 +176,9 @@ class _DepthProfileTestContext:
     C3_MAX_ABS_ERROR_M = 0.15
 
     def __init__(self, sensor):
-        print(f"[DEBUG DepthCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}")
+        print(
+            f"[DEBUG DepthCtx.__init__] sensor_name={getattr(sensor, 'sensor_name', '?')}, sdf={getattr(sensor, 'sdf_path', '?')}"
+        )
         self.sensor = sensor
         self.sensor_name = str(getattr(sensor, "sensor_name", ""))
         self.sensor_type = str(getattr(sensor, "sensor_type", ""))
@@ -157,29 +186,53 @@ class _DepthProfileTestContext:
         self.CONFIG = {"ROOT_PATH": str(CONFIG["ROOT_PATH"])}
         self._last_test_diagnostics: Dict[str, Any] = {}
 
-        profile = _camera_load_sensor_profile(self.sensor_sdf_path) if self.sensor_sdf_path else {}
-        print(f"[DEBUG DepthCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}")
-        print(f"[DEBUG DepthCtx.__init__] profile.depth_topic={profile.get('depth_topic', 'N/A')}, profile.image_topic={profile.get('image_topic', 'N/A')}")
+        profile = (
+            _camera_load_sensor_profile(self.sensor_sdf_path)
+            if self.sensor_sdf_path
+            else {}
+        )
+        print(
+            f"[DEBUG DepthCtx.__init__] SDF profile: {list(profile.keys()) if profile else 'EMPTY'}"
+        )
+        print(
+            f"[DEBUG DepthCtx.__init__] profile.depth_topic={profile.get('depth_topic', 'N/A')}, profile.image_topic={profile.get('image_topic', 'N/A')}"
+        )
         self.DEPTH_TOPIC = str(profile.get("depth_topic", "") or self.DEPTH_TOPIC)
-        self.IMAGE_TOPIC = str(profile.get("image_topic", "") or getattr(sensor, "topic", "") or self.IMAGE_TOPIC)
+        self.IMAGE_TOPIC = str(
+            profile.get("image_topic", "")
+            or getattr(sensor, "topic", "")
+            or self.IMAGE_TOPIC
+        )
         self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
         self.image_height = int(profile.get("image_height") or self.IMAGE_HEIGHT)
-        self.horizontal_fov = float(profile.get("horizontal_fov") or self.HORIZONTAL_FOV_RAD)
+        self.horizontal_fov = float(
+            profile.get("horizontal_fov") or self.HORIZONTAL_FOV_RAD
+        )
         self.clip_near = float(profile.get("clip_near") or self.CLIP_NEAR)
         self.clip_far = float(profile.get("clip_far") or self.CLIP_FAR)
         self.update_rate = int(profile.get("update_rate") or self.UPDATE_RATE)
-        print(f"[DEBUG DepthCtx.__init__] resolved: DEPTH_TOPIC={self.DEPTH_TOPIC}, IMAGE_TOPIC={self.IMAGE_TOPIC}")
-        print(f"[DEBUG DepthCtx.__init__] {self.image_width}x{self.image_height}, clip=[{self.clip_near}, {self.clip_far}], rate={self.update_rate}")
+        print(
+            f"[DEBUG DepthCtx.__init__] resolved: DEPTH_TOPIC={self.DEPTH_TOPIC}, IMAGE_TOPIC={self.IMAGE_TOPIC}"
+        )
+        print(
+            f"[DEBUG DepthCtx.__init__] {self.image_width}x{self.image_height}, clip=[{self.clip_near}, {self.clip_far}], rate={self.update_rate}"
+        )
 
         worlds_root = _camera_worlds_root()
         self.test_to_world = {
             "depth_perception_test": str(worlds_root / "camera_depth_perception.world"),
-            "c3_view_angle_stability_test": str(worlds_root / "camera_c3_view_angle.world"),
+            "c3_view_angle_stability_test": str(
+                worlds_root / "camera_c3_view_angle.world"
+            ),
             "c5_working_range_test": str(worlds_root / "camera_c5_working_range.world"),
-            "c6_small_displacement_sensitivity_test": str(worlds_root / "camera_c6_small_shifts.world"),
+            "c6_small_displacement_sensitivity_test": str(
+                worlds_root / "camera_c6_small_shifts.world"
+            ),
         }
         for test_name, wpath in self.test_to_world.items():
-            print(f"[DEBUG DepthCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}")
+            print(
+                f"[DEBUG DepthCtx.__init__] world {test_name}: {wpath}, exists={os.path.exists(wpath)}"
+            )
         self.camera_model_name = self._read_camera_model_name()
         print(f"[DEBUG DepthCtx.__init__] camera_model_name={self.camera_model_name}")
         self._resolved_depth_topic = ""
@@ -200,8 +253,12 @@ class _DepthProfileTestContext:
         self._resolved_depth_topic = ""
         self._resolved_image_topic = ""
         world = self.test_to_world[test_name]
-        print(f"[DEBUG DepthCtx._open_test_scene] world={world}, exists={os.path.exists(world)}")
-        print(f"[DEBUG DepthCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}")
+        print(
+            f"[DEBUG DepthCtx._open_test_scene] world={world}, exists={os.path.exists(world)}"
+        )
+        print(
+            f"[DEBUG DepthCtx._open_test_scene] sdf={self.sensor_sdf_path}, exists={os.path.exists(self.sensor_sdf_path) if self.sensor_sdf_path else False}"
+        )
         display_env = self._ensure_render_display_env()
         if display_env:
             print(f"[DEBUG DepthCtx._open_test_scene] display_env={display_env}")
@@ -209,19 +266,27 @@ class _DepthProfileTestContext:
         print(f"[DEBUG DepthCtx._open_test_scene] calling simulator.open_scene()...")
         if not simulator.open_scene(world, self.sensor_sdf_path):
             diag = self._scene_diag(simulator)
-            reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            reason = (
+                diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
+            )
             print(f"[DEBUG DepthCtx._open_test_scene] FAILED: reason={reason}")
-            raise RuntimeError(f"Failed to open scene for {test_name}: {world} (reason={reason})")
+            raise RuntimeError(
+                f"Failed to open scene for {test_name}: {world} (reason={reason})"
+            )
         print(f"[DEBUG DepthCtx._open_test_scene] scene opened OK, resolving topics...")
         self._update_resolved_topics(simulator)
-        print(f"[DEBUG DepthCtx._open_test_scene] resolved_depth={self._resolved_depth_topic}, resolved_image={self._resolved_image_topic}")
+        print(
+            f"[DEBUG DepthCtx._open_test_scene] resolved_depth={self._resolved_depth_topic}, resolved_image={self._resolved_image_topic}"
+        )
         self._set_test_diagnostics(
             scene_open_success=True,
             world_file=str(world),
             expected_depth_topic=str(self.DEPTH_TOPIC),
             expected_image_topic=str(self.IMAGE_TOPIC or ""),
             resolved_depth_topic=str(self._resolved_depth_topic or self.DEPTH_TOPIC),
-            resolved_image_topic=str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+            resolved_image_topic=str(
+                self._resolved_image_topic or self.IMAGE_TOPIC or ""
+            ),
         )
         print(f"[DEBUG DepthCtx._open_test_scene] waiting for services...")
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
@@ -317,10 +382,14 @@ class _DepthProfileTestContext:
         if color not in ranges:
             raise ValueError(f"Unsupported color: {color}")
         lower, upper = ranges[color]
-        mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+        mask = cv2.inRange(
+            hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8)
+        )
         return self._clean_mask(mask)
 
-    def _find_centroid(self, bgr: np.ndarray, color: str, min_area: float = 120.0) -> Optional[Tuple[int, int]]:
+    def _find_centroid(
+        self, bgr: np.ndarray, color: str, min_area: float = 120.0
+    ) -> Optional[Tuple[int, int]]:
         mask = self._color_mask(bgr, color)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
@@ -336,7 +405,9 @@ class _DepthProfileTestContext:
         return cx, cy
 
     @staticmethod
-    def _depth_at_pixel_with_meta(depth_m: np.ndarray, x: int, y: int, half_window: int = 2) -> Tuple[Optional[float], Dict[str, Any]]:
+    def _depth_at_pixel_with_meta(
+        depth_m: np.ndarray, x: int, y: int, half_window: int = 2
+    ) -> Tuple[Optional[float], Dict[str, Any]]:
         h, w = depth_m.shape[:2]
         x0 = max(0, int(x) - int(half_window))
         y0 = max(0, int(y) - int(half_window))
@@ -355,13 +426,19 @@ class _DepthProfileTestContext:
             return None, meta
         return float(np.mean(valid)), meta
 
-    def _depth_at_pixel(self, depth_m: np.ndarray, x: int, y: int, window: int = 2) -> Optional[float]:
+    def _depth_at_pixel(
+        self, depth_m: np.ndarray, x: int, y: int, window: int = 2
+    ) -> Optional[float]:
         z, _ = self._depth_at_pixel_with_meta(depth_m, x=x, y=y, half_window=window)
         return z
 
-    def _depth_frame_stats(self, depth_msg: Image, depth_m: np.ndarray) -> Dict[str, Any]:
+    def _depth_frame_stats(
+        self, depth_msg: Image, depth_m: np.ndarray
+    ) -> Dict[str, Any]:
         finite = depth_m[np.isfinite(depth_m)]
-        positive = finite[finite > 0.0] if finite.size > 0 else np.array([], dtype=np.float32)
+        positive = (
+            finite[finite > 0.0] if finite.size > 0 else np.array([], dtype=np.float32)
+        )
         stats: Dict[str, Any] = {
             "encoding": str(depth_msg.encoding),
             "dtype": str(depth_m.dtype),
@@ -394,7 +471,13 @@ class _DepthProfileTestContext:
     @staticmethod
     def _roi_depth_stats(depth_m: np.ndarray, roi_xyxy: List[int]) -> Dict[str, Any]:
         if not roi_xyxy or len(roi_xyxy) != 4:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
+            return {
+                "valid_count": 0,
+                "min_m": None,
+                "max_m": None,
+                "mean_m": None,
+                "median_m": None,
+            }
         x0, y0, x1, y1 = [int(v) for v in roi_xyxy]
         h, w = depth_m.shape[:2]
         x0 = max(0, min(w, x0))
@@ -402,11 +485,23 @@ class _DepthProfileTestContext:
         y0 = max(0, min(h, y0))
         y1 = max(0, min(h, y1))
         if x1 <= x0 or y1 <= y0:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
+            return {
+                "valid_count": 0,
+                "min_m": None,
+                "max_m": None,
+                "mean_m": None,
+                "median_m": None,
+            }
         roi = depth_m[y0:y1, x0:x1]
         valid = roi[np.isfinite(roi) & (roi > 0.0)]
         if valid.size == 0:
-            return {"valid_count": 0, "min_m": None, "max_m": None, "mean_m": None, "median_m": None}
+            return {
+                "valid_count": 0,
+                "min_m": None,
+                "max_m": None,
+                "mean_m": None,
+                "median_m": None,
+            }
         return {
             "valid_count": int(valid.size),
             "min_m": float(np.min(valid)),
@@ -416,7 +511,9 @@ class _DepthProfileTestContext:
         }
 
     @staticmethod
-    def _fallback_point_from_finite_depth(depth_m: np.ndarray) -> Tuple[Optional[Tuple[int, int]], Dict[str, Any]]:
+    def _fallback_point_from_finite_depth(
+        depth_m: np.ndarray,
+    ) -> Tuple[Optional[Tuple[int, int]], Dict[str, Any]]:
         h, w = depth_m.shape[:2]
         y0 = int(h * 0.2)
         y1 = int(h * 0.8)
@@ -505,7 +602,9 @@ class _DepthProfileTestContext:
         bgr: Optional[np.ndarray] = None,
         color_hint: Optional[str] = None,
     ) -> Tuple[Optional[float], Tuple[int, int]]:
-        z, point, _ = self._measure_depth_with_meta(depth_m=depth_m, bgr=bgr, color_hint=color_hint)
+        z, point, _ = self._measure_depth_with_meta(
+            depth_m=depth_m, bgr=bgr, color_hint=color_hint
+        )
         return z, point
 
     @staticmethod
@@ -521,7 +620,9 @@ class _DepthProfileTestContext:
             dm = depth_m.copy()
             finite = dm[np.isfinite(dm) & (dm > 0)]
             if finite.size == 0:
-                debug = np.zeros((depth_m.shape[0], depth_m.shape[1], 3), dtype=np.uint8)
+                debug = np.zeros(
+                    (depth_m.shape[0], depth_m.shape[1], 3), dtype=np.uint8
+                )
             else:
                 dmin = float(np.percentile(finite, 5))
                 dmax = float(np.percentile(finite, 95))
@@ -534,7 +635,16 @@ class _DepthProfileTestContext:
         cv2.circle(debug, point, 5, (255, 255, 255), 2)
         y = 30
         for line in lines:
-            cv2.putText(debug, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(
+                debug,
+                line,
+                (10, y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
             y += 28
         return debug
 
@@ -590,11 +700,19 @@ class _DepthProfileTestContext:
         scene_diag = self._scene_diag(simulator)
         self._resolved_depth_topic = str(self.DEPTH_TOPIC)
         self._resolved_image_topic = str(self.IMAGE_TOPIC or "")
-        print(f"[DEBUG DepthCtx._update_resolved_topics] depth={self._resolved_depth_topic}, image={self._resolved_image_topic}")
+        print(
+            f"[DEBUG DepthCtx._update_resolved_topics] depth={self._resolved_depth_topic}, image={self._resolved_image_topic}"
+        )
         try:
             topics = rospy.get_published_topics()
-            img_topics = [t for t, _ in topics if 'image' in t.lower() or 'depth' in t.lower() or 'camera' in t.lower()]
-            print(f"[DEBUG DepthCtx._update_resolved_topics] active image/depth/camera topics: {img_topics[:20]}")
+            img_topics = [
+                t
+                for t, _ in topics
+                if "image" in t.lower() or "depth" in t.lower() or "camera" in t.lower()
+            ]
+            print(
+                f"[DEBUG DepthCtx._update_resolved_topics] active image/depth/camera topics: {img_topics[:20]}"
+            )
         except Exception:
             pass
         return scene_diag
@@ -621,7 +739,9 @@ class _DepthProfileTestContext:
             print(f"[DEBUG DepthCtx._wait_message_after] NO TOPIC for stage={stage}")
             raise RuntimeError(f"No topic configured for stage={stage}")
 
-        print(f"[DEBUG DepthCtx._wait_message_after] topic={target_topic}, stage={stage}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s")
+        print(
+            f"[DEBUG DepthCtx._wait_message_after] topic={target_topic}, stage={stage}, prev_stamp={prev_stamp_s}, timeout={timeout:.1f}s"
+        )
         start = time.time()
         saw_message = False
         attempt = 0
@@ -629,36 +749,56 @@ class _DepthProfileTestContext:
             remaining = max(0.2, float(timeout) - (time.time() - start))
             attempt += 1
             try:
-                msg = rospy.wait_for_message(target_topic, Image, timeout=min(1.0, remaining))
+                msg = rospy.wait_for_message(
+                    target_topic, Image, timeout=min(1.0, remaining)
+                )
             except rospy.ROSException:
                 if attempt <= 3:
-                    print(f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: timeout on {target_topic}")
+                    print(
+                        f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: timeout on {target_topic}"
+                    )
                 continue
 
             saw_message = True
             stamp_s = self._msg_stamp_s(msg)
             if prev_stamp_s is None or stamp_s > (float(prev_stamp_s) + 1e-6):
-                print(f"[DEBUG DepthCtx._wait_message_after] GOT fresh frame: {msg.width}x{msg.height}, enc={msg.encoding}, stamp={stamp_s:.6f}, stage={stage}")
+                print(
+                    f"[DEBUG DepthCtx._wait_message_after] GOT fresh frame: {msg.width}x{msg.height}, enc={msg.encoding}, stamp={stamp_s:.6f}, stage={stage}"
+                )
                 return msg
             elif attempt <= 3:
-                print(f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: stamp={stamp_s:.6f} not fresh (need > {prev_stamp_s:.6f})")
+                print(
+                    f"[DEBUG DepthCtx._wait_message_after] attempt {attempt}: stamp={stamp_s:.6f} not fresh (need > {prev_stamp_s:.6f})"
+                )
 
         if saw_message:
-            print(f"[DEBUG DepthCtx._wait_message_after] FAIL: no fresh frame for stage={stage}")
+            print(
+                f"[DEBUG DepthCtx._wait_message_after] FAIL: no fresh frame for stage={stage}"
+            )
             raise RuntimeError(
                 f"No fresh frame on topic={target_topic} after stage={stage}; prev_stamp_s={prev_stamp_s}"
             )
-        print(f"[DEBUG DepthCtx._wait_message_after] FAIL: no frame at all on {target_topic} for stage={stage}")
+        print(
+            f"[DEBUG DepthCtx._wait_message_after] FAIL: no frame at all on {target_topic} for stage={stage}"
+        )
         try:
             topics = rospy.get_published_topics()
-            img_topics = [t for t, _ in topics if 'image' in t.lower() or 'depth' in t.lower()]
-            print(f"[DEBUG DepthCtx._wait_message_after] available image/depth topics: {img_topics[:15]}")
+            img_topics = [
+                t for t, _ in topics if "image" in t.lower() or "depth" in t.lower()
+            ]
+            print(
+                f"[DEBUG DepthCtx._wait_message_after] available image/depth topics: {img_topics[:15]}"
+            )
         except Exception:
             pass
-        raise RuntimeError(f"No frame received on topic={target_topic} during stage={stage}")
+        raise RuntimeError(
+            f"No frame received on topic={target_topic} during stage={stage}"
+        )
 
     @staticmethod
-    def _move_and_settle(simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.35) -> None:
+    def _move_and_settle(
+        simulator, model_name: str, x: float, y: float, z: float, settle_s: float = 0.35
+    ) -> None:
         simulator.set_pose(model_name, x=float(x), y=float(y), z=float(z))
         time.sleep(settle_s)
 
@@ -685,7 +825,9 @@ class _DepthProfileTestContext:
         )
         response = set_state(state)
         if not response.success:
-            raise RuntimeError(f"Failed to set model state for {model_name}: {response.status_message}")
+            raise RuntimeError(
+                f"Failed to set model state for {model_name}: {response.status_message}"
+            )
         time.sleep(settle_s)
 
     @staticmethod
@@ -694,7 +836,9 @@ class _DepthProfileTestContext:
             published = rospy.get_published_topics()
         except Exception:
             return []
-        return sorted([name for name, msg_type in published if msg_type == "sensor_msgs/Image"])
+        return sorted(
+            [name for name, msg_type in published if msg_type == "sensor_msgs/Image"]
+        )
 
     @staticmethod
     def _choose_depth_topic(candidates: List[str]) -> str:
@@ -746,11 +890,16 @@ class _DepthProfileTestContext:
 
         token = sensor_name
         generic = [
-            t for t in last_topics
+            t
+            for t in last_topics
             if ("depth" in t and ("image_raw" in t or t.endswith("/image")))
         ]
         in_namespace = [t for t in generic if token in t]
-        selected = self._choose_depth_topic(in_namespace) or self._choose_depth_topic(generic) or expected
+        selected = (
+            self._choose_depth_topic(in_namespace)
+            or self._choose_depth_topic(generic)
+            or expected
+        )
         diag = {
             "expected_depth_topic": expected,
             "selected_depth_topic": selected,
@@ -760,11 +909,18 @@ class _DepthProfileTestContext:
         }
         return selected, diag
 
-    def _wait_depth_after(self, prev_stamp_s: Optional[float], timeout: Optional[float] = None, stage: str = "") -> Image:
+    def _wait_depth_after(
+        self,
+        prev_stamp_s: Optional[float],
+        timeout: Optional[float] = None,
+        stage: str = "",
+    ) -> Image:
         if not self.DEPTH_TOPIC:
             raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
         if not self._resolved_depth_topic:
-            selected, diag = self._resolve_depth_topic(self.DEPTH_TOPIC_WARMUP_TIMEOUT_S)
+            selected, diag = self._resolve_depth_topic(
+                self.DEPTH_TOPIC_WARMUP_TIMEOUT_S
+            )
             self._resolved_depth_topic = selected or self.DEPTH_TOPIC
             self._set_test_diagnostics(depth_topic_resolution=diag)
         return self._wait_message_after(
@@ -774,7 +930,12 @@ class _DepthProfileTestContext:
             stage=str(stage or "depth_wait_after"),
         )
 
-    def _wait_color_after(self, prev_stamp_s: Optional[float], timeout: Optional[float] = None, stage: str = "") -> Optional[Image]:
+    def _wait_color_after(
+        self,
+        prev_stamp_s: Optional[float],
+        timeout: Optional[float] = None,
+        stage: str = "",
+    ) -> Optional[Image]:
         target_topic = self._resolved_color_topic()
         if not target_topic:
             return None
@@ -785,7 +946,9 @@ class _DepthProfileTestContext:
             stage=str(stage or "color_wait_after"),
         )
 
-    def _is_far_clip_saturated(self, z: Optional[float], roi_stats: Dict[str, Any]) -> bool:
+    def _is_far_clip_saturated(
+        self, z: Optional[float], roi_stats: Dict[str, Any]
+    ) -> bool:
         if z is None or not np.isfinite(z):
             return False
         far_threshold = float(self.clip_far) - float(self.CLIP_SATURATION_EPS_M)
@@ -798,7 +961,9 @@ class _DepthProfileTestContext:
             roi_stats.get("mean_m"),
             roi_stats.get("median_m"),
         ]
-        finite_values = [float(v) for v in roi_values if v is not None and np.isfinite(v)]
+        finite_values = [
+            float(v) for v in roi_values if v is not None and np.isfinite(v)
+        ]
         if not finite_values:
             return True
         return all(value >= far_threshold for value in finite_values)
@@ -837,7 +1002,9 @@ class _DepthProfileTestContext:
         if not self.DEPTH_TOPIC:
             raise RuntimeError("DEPTH_TOPIC is not configured for this depth profile")
         if not self._resolved_depth_topic:
-            selected, diag = self._resolve_depth_topic(self.DEPTH_TOPIC_WARMUP_TIMEOUT_S)
+            selected, diag = self._resolve_depth_topic(
+                self.DEPTH_TOPIC_WARMUP_TIMEOUT_S
+            )
             self._resolved_depth_topic = selected or self.DEPTH_TOPIC
             self._set_test_diagnostics(depth_topic_resolution=diag)
 
@@ -853,7 +1020,9 @@ class _DepthProfileTestContext:
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{topic}: {exc}")
                 continue
-        raise RuntimeError(f"Failed to receive depth frame. candidates={candidates}, errors={errors}")
+        raise RuntimeError(
+            f"Failed to receive depth frame. candidates={candidates}, errors={errors}"
+        )
 
     def _try_wait_color(self, timeout: float = 1.0) -> Optional[Image]:
         target_topic = self._resolved_color_topic()
@@ -890,7 +1059,9 @@ class _DepthProfileTestContext:
             "expected_depth_topic": str(self.DEPTH_TOPIC),
             "expected_image_topic": str(self.IMAGE_TOPIC or ""),
             "resolved_depth_topic": str(self._resolved_depth_topic or self.DEPTH_TOPIC),
-            "resolved_image_topic": str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+            "resolved_image_topic": str(
+                self._resolved_image_topic or self.IMAGE_TOPIC or ""
+            ),
             "distances_m": list(self.TEST_DISTANCES),
             "max_abs_error_m": float(self.MAX_ABS_ERROR_M),
             "clip_near_m": float(self.clip_near),
@@ -902,17 +1073,27 @@ class _DepthProfileTestContext:
             metrics_payload["status"] = str(status)
             metrics_payload["error_reason"] = str(error_reason)
             metrics_payload["first_frame_diagnostics"] = first_frame_diagnostics or {}
-            metrics_payload["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
-            metrics_payload["selected_depth_topic"] = str(self._resolved_depth_topic or self.DEPTH_TOPIC)
-            metrics_payload["selected_image_topic"] = str(self._resolved_image_topic or self.IMAGE_TOPIC or "")
+            metrics_payload["topic_diagnostics"] = self.get_last_test_diagnostics().get(
+                "depth_topic_resolution", {}
+            )
+            metrics_payload["selected_depth_topic"] = str(
+                self._resolved_depth_topic or self.DEPTH_TOPIC
+            )
+            metrics_payload["selected_image_topic"] = str(
+                self._resolved_image_topic or self.IMAGE_TOPIC or ""
+            )
             self._set_test_diagnostics(depth_perception_metrics=metrics_payload)
 
         for d in self.TEST_DISTANCES:
             sample: Dict[str, Any] = {
                 "distance_m": float(d),
                 "status": "RUNNING",
-                "resolved_depth_topic": str(self._resolved_depth_topic or self.DEPTH_TOPIC),
-                "resolved_image_topic": str(self._resolved_image_topic or self.IMAGE_TOPIC or ""),
+                "resolved_depth_topic": str(
+                    self._resolved_depth_topic or self.DEPTH_TOPIC
+                ),
+                "resolved_image_topic": str(
+                    self._resolved_image_topic or self.IMAGE_TOPIC or ""
+                ),
             }
             try:
                 if last_depth_stamp_s is None:
@@ -937,35 +1118,56 @@ class _DepthProfileTestContext:
                 depth_stamp_s = self._msg_stamp_s(depth_msg)
                 last_depth_stamp_s = depth_stamp_s
                 sample["depth_frame_stamp_s"] = float(depth_stamp_s)
-                sample["post_move_depth_frame_stamps_s"] = [float(v) for v in confirmation_stamps]
+                sample["post_move_depth_frame_stamps_s"] = [
+                    float(v) for v in confirmation_stamps
+                ]
 
-                self._set_test_diagnostics(depth_topic_selected=self._resolved_depth_topic)
+                self._set_test_diagnostics(
+                    depth_topic_selected=self._resolved_depth_topic
+                )
                 depth_m = self._depth_msg_to_meters(depth_msg)
                 color_msg = self._wait_color_after(
                     prev_stamp_s=depth_stamp_s - 1e-6,
                     timeout=2.0,
                     stage=f"depth_perception_color_d_{str(d).replace('.', '_')}",
                 )
-                bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                bgr = (
+                    self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                )
                 if color_msg is not None:
                     sample["color_frame_stamp_s"] = float(self._msg_stamp_s(color_msg))
 
-                z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr=bgr, color_hint="green")
+                z, point, roi_meta = self._measure_depth_with_meta(
+                    depth_m, bgr=bgr, color_hint="green"
+                )
                 sample["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
                 sample["measurement_roi"] = roi_meta
                 sample["measurement_source"] = str(roi_meta.get("source", ""))
                 if z is None or np.isnan(z) or z <= 0.0:
                     sample["status"] = "FAIL"
                     sample["error_reason"] = "invalid_measurement"
-                    self._set_test_diagnostics(depth_perception_failure={"reason": "invalid_measurement"})
-                    _update_depth_metrics(status="FAIL", error_reason="invalid_measurement")
-                    raise RuntimeError(f"Invalid depth measurement at distance={d}: {z}")
+                    self._set_test_diagnostics(
+                        depth_perception_failure={"reason": "invalid_measurement"}
+                    )
+                    _update_depth_metrics(
+                        status="FAIL", error_reason="invalid_measurement"
+                    )
+                    raise RuntimeError(
+                        f"Invalid depth measurement at distance={d}: {z}"
+                    )
 
                 if first_frame_diagnostics is None:
-                    first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
-                    first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                    first_frame_diagnostics = self._depth_frame_stats(
+                        depth_msg, depth_m
+                    )
+                    first_frame_diagnostics["measurement_pixel"] = {
+                        "x": int(point[0]),
+                        "y": int(point[1]),
+                    }
                     first_frame_diagnostics["measurement_roi"] = roi_meta
-                    self._set_test_diagnostics(depth_perception_first_frame=first_frame_diagnostics)
+                    self._set_test_diagnostics(
+                        depth_perception_first_frame=first_frame_diagnostics
+                    )
 
                 roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
                 far_clip_saturated = self._is_far_clip_saturated(z, roi_stats)
@@ -976,8 +1178,12 @@ class _DepthProfileTestContext:
                 if far_clip_saturated:
                     sample["status"] = "FAIL"
                     sample["error_reason"] = "far_clip_saturation"
-                    self._set_test_diagnostics(depth_perception_failure={"reason": "far_clip_saturation"})
-                    _update_depth_metrics(status="FAIL", error_reason="far_clip_saturation")
+                    self._set_test_diagnostics(
+                        depth_perception_failure={"reason": "far_clip_saturation"}
+                    )
+                    _update_depth_metrics(
+                        status="FAIL", error_reason="far_clip_saturation"
+                    )
                     raise AssertionError(
                         f"Depth measurement saturated at far clip at distance={d}: z={z}, clip_far={self.clip_far}"
                     )
@@ -985,7 +1191,9 @@ class _DepthProfileTestContext:
                 if not (self.clip_near <= float(z) <= (self.clip_far + 0.5)):
                     sample["status"] = "FAIL"
                     sample["error_reason"] = "clip_range"
-                    self._set_test_diagnostics(depth_perception_failure={"reason": "clip_range"})
+                    self._set_test_diagnostics(
+                        depth_perception_failure={"reason": "clip_range"}
+                    )
                     _update_depth_metrics(status="FAIL", error_reason="clip_range")
                     raise AssertionError(
                         f"Depth out of clip range at distance={d}: z={z}, clip=({self.clip_near}, {self.clip_far})"
@@ -999,7 +1207,9 @@ class _DepthProfileTestContext:
                 if abs_err > float(self.MAX_ABS_ERROR_M):
                     sample["status"] = "FAIL"
                     sample["error_reason"] = "abs_error"
-                    self._set_test_diagnostics(depth_perception_failure={"reason": "abs_error"})
+                    self._set_test_diagnostics(
+                        depth_perception_failure={"reason": "abs_error"}
+                    )
                     _update_depth_metrics(status="FAIL", error_reason="abs_error")
                     raise AssertionError(
                         f"Depth absolute error too high at distance={d}: abs_err={abs_err:.4f}, max={self.MAX_ABS_ERROR_M}"
@@ -1013,7 +1223,10 @@ class _DepthProfileTestContext:
                     results.append(sample)
                 raise
 
-        monotonic_ok = all(measured_values[i] < measured_values[i + 1] for i in range(len(measured_values) - 1))
+        monotonic_ok = all(
+            measured_values[i] < measured_values[i + 1]
+            for i in range(len(measured_values) - 1)
+        )
         if not monotonic_ok:
             _update_depth_metrics(status="FAIL", error_reason="monotonicity")
             raise AssertionError(f"Depth monotonicity failed: {measured_values}")
@@ -1027,7 +1240,9 @@ class _DepthProfileTestContext:
                 "measurements": results,
                 "monotonic_increasing": True,
                 "first_frame_diagnostics": first_frame_diagnostics or {},
-                "topic_diagnostics": self.get_last_test_diagnostics().get("depth_topic_resolution", {}),
+                "topic_diagnostics": self.get_last_test_diagnostics().get(
+                    "depth_topic_resolution", {}
+                ),
                 "selected_depth_topic": self._resolved_depth_topic,
                 "selected_image_topic": self._resolved_image_topic,
             },
@@ -1053,7 +1268,9 @@ class _DepthProfileTestContext:
             raise RuntimeError(f"Model not spawned: {self.C3_TARGET_CUBE_NAME}")
 
         samples: List[Dict[str, Any]] = []
-        use_camera_orbit = simulator.wait_for_model_spawn(self.camera_model_name, timeout=10)
+        use_camera_orbit = simulator.wait_for_model_spawn(
+            self.camera_model_name, timeout=10
+        )
         last_depth_stamp_s: Optional[float] = None
 
         if use_camera_orbit:
@@ -1066,7 +1283,14 @@ class _DepthProfileTestContext:
                     cam_x = cube_x + self.C3_RADIUS_M * cos(theta)
                     cam_y = cube_y + self.C3_RADIUS_M * sin(theta)
                     yaw = atan2(cube_y - cam_y, cube_x - cam_x)
-                    self._set_model_pose_6d(self.camera_model_name, x=cam_x, y=cam_y, z=cam_z, yaw=yaw, settle_s=0.35)
+                    self._set_model_pose_6d(
+                        self.camera_model_name,
+                        x=cam_x,
+                        y=cam_y,
+                        z=cam_z,
+                        yaw=yaw,
+                        settle_s=0.35,
+                    )
 
                     depth_msg = self._wait_depth_after(
                         prev_stamp_s=last_depth_stamp_s,
@@ -1080,13 +1304,18 @@ class _DepthProfileTestContext:
                         timeout=2.0,
                         stage=f"c3_camera_orbit_color_{i}",
                     )
-                    bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                    bgr = (
+                        self._color_msg_to_bgr(color_msg)
+                        if color_msg is not None
+                        else None
+                    )
                     z, point = self._measure_depth(depth_m, bgr, color_hint="blue")
                     if z is None or np.isnan(z) or np.isinf(z):
                         continue
                     expected_depth = max(
                         0.0,
-                        float(self.C3_RADIUS_M) - (float(self.C3_TARGET_SIZE_X_M) * 0.5),
+                        float(self.C3_RADIUS_M)
+                        - (float(self.C3_TARGET_SIZE_X_M) * 0.5),
                     )
                     abs_err = abs(float(z) - expected_depth)
                     samples.append(
@@ -1102,7 +1331,9 @@ class _DepthProfileTestContext:
                     )
 
                 if len(samples) < max(10, int(0.6 * self.C3_SAMPLES)):
-                    raise RuntimeError(f"Too few valid measurements in camera orbit mode: {len(samples)}")
+                    raise RuntimeError(
+                        f"Too few valid measurements in camera orbit mode: {len(samples)}"
+                    )
             except Exception as exc:
                 metrics["mode_error"] = str(exc)
                 samples.clear()
@@ -1114,11 +1345,17 @@ class _DepthProfileTestContext:
                 "Camera orbit is replaced with equivalent target_cube motion relative to static camera "
                 "using /gazebo/set_model_state."
             )
-            angles = np.linspace(-self.C3_FALLBACK_HALF_ANGLE_RAD, self.C3_FALLBACK_HALF_ANGLE_RAD, self.C3_SAMPLES)
+            angles = np.linspace(
+                -self.C3_FALLBACK_HALF_ANGLE_RAD,
+                self.C3_FALLBACK_HALF_ANGLE_RAD,
+                self.C3_SAMPLES,
+            )
             for i, theta in enumerate(angles):
                 x = self.C3_RADIUS_M * cos(float(theta))
                 y = self.C3_RADIUS_M * sin(float(theta))
-                self._move_and_settle(simulator, self.C3_TARGET_CUBE_NAME, x=x, y=y, z=0.25, settle_s=0.25)
+                self._move_and_settle(
+                    simulator, self.C3_TARGET_CUBE_NAME, x=x, y=y, z=0.25, settle_s=0.25
+                )
 
                 depth_msg = self._wait_depth_after(
                     prev_stamp_s=last_depth_stamp_s,
@@ -1132,11 +1369,15 @@ class _DepthProfileTestContext:
                     timeout=2.0,
                     stage=f"c3_target_orbit_color_{i}",
                 )
-                bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                bgr = (
+                    self._color_msg_to_bgr(color_msg) if color_msg is not None else None
+                )
                 z, point = self._measure_depth(depth_m, bgr, color_hint="blue")
                 if z is None or np.isnan(z) or np.isinf(z):
                     continue
-                expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C3_TARGET_SIZE_X_M))
+                expected_depth = self._front_face_depth(
+                    center_x_m=float(x), size_x_m=float(self.C3_TARGET_SIZE_X_M)
+                )
                 abs_err = abs(float(z) - expected_depth)
                 samples.append(
                     {
@@ -1152,7 +1393,9 @@ class _DepthProfileTestContext:
 
         if len(samples) < 10:
             metrics["samples"] = samples
-            raise RuntimeError(f"C3 failed: too few valid depth samples ({len(samples)})")
+            raise RuntimeError(
+                f"C3 failed: too few valid depth samples ({len(samples)})"
+            )
 
         abs_errors = [float(sample["abs_error_m"]) for sample in samples]
         measured_depths = [float(sample["measured_depth_m"]) for sample in samples]
@@ -1184,7 +1427,9 @@ class _DepthProfileTestContext:
 
     def c5_working_range_test(self, simulator) -> Dict[str, Any]:
         metrics: Dict[str, Any] = {
-            "x_values_m": self._iter_float_range(self.C5_START_X, self.C5_END_X, self.C5_STEP),
+            "x_values_m": self._iter_float_range(
+                self.C5_START_X, self.C5_END_X, self.C5_STEP
+            ),
             "tolerance_m": float(self.C5_DEPTH_TOLERANCE_M),
             "clip_margin_m": float(self.C5_CLIP_MARGIN_M),
             "coverage_tolerance_m": float(self.C5_STEP),
@@ -1200,7 +1445,14 @@ class _DepthProfileTestContext:
         first_frame_diagnostics: Optional[Dict[str, Any]] = None
         last_depth_stamp_s: Optional[float] = None
         for x in metrics["x_values_m"]:
-            self._move_and_settle(simulator, self.C5_RANGE_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.3)
+            self._move_and_settle(
+                simulator,
+                self.C5_RANGE_CUBE_NAME,
+                x=float(x),
+                y=0.0,
+                z=0.25,
+                settle_s=0.3,
+            )
             depth_msg = self._wait_depth_after(
                 prev_stamp_s=last_depth_stamp_s,
                 timeout=3.0,
@@ -1215,21 +1467,38 @@ class _DepthProfileTestContext:
                 stage=f"c5_color_x_{str(x).replace('.', '_')}",
             )
             bgr = self._color_msg_to_bgr(color_msg) if color_msg is not None else None
-            z, point, roi_meta = self._measure_depth_with_meta(depth_m, bgr, color_hint="green")
+            z, point, roi_meta = self._measure_depth_with_meta(
+                depth_m, bgr, color_hint="green"
+            )
 
             if first_frame_diagnostics is None:
                 first_frame_diagnostics = self._depth_frame_stats(depth_msg, depth_m)
-                first_frame_diagnostics["measurement_pixel"] = {"x": int(point[0]), "y": int(point[1])}
+                first_frame_diagnostics["measurement_pixel"] = {
+                    "x": int(point[0]),
+                    "y": int(point[1]),
+                }
                 first_frame_diagnostics["measurement_roi"] = roi_meta
                 self._set_test_diagnostics(c5_first_frame=first_frame_diagnostics)
 
             roi_stats = self._roi_depth_stats(depth_m, roi_meta.get("roi_xyxy", []))
-            expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M))
-            expected_in_sensor_range = self._c5_expected_in_contract_range(expected_depth)
+            expected_depth = self._front_face_depth(
+                center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M)
+            )
+            expected_in_sensor_range = self._c5_expected_in_contract_range(
+                expected_depth
+            )
 
             finite_ok = bool(z is not None and np.isfinite(z))
-            abs_err = float(abs(float(z) - float(expected_depth))) if finite_ok else float("inf")
-            sample_ok = bool(finite_ok and expected_in_sensor_range and abs_err <= self.C5_DEPTH_TOLERANCE_M)
+            abs_err = (
+                float(abs(float(z) - float(expected_depth)))
+                if finite_ok
+                else float("inf")
+            )
+            sample_ok = bool(
+                finite_ok
+                and expected_in_sensor_range
+                and abs_err <= self.C5_DEPTH_TOLERANCE_M
+            )
 
             metrics["samples"].append(
                 {
@@ -1252,7 +1521,9 @@ class _DepthProfileTestContext:
             float(x)
             for x in metrics["x_values_m"]
             if self._c5_expected_in_contract_range(
-                self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M))
+                self._front_face_depth(
+                    center_x_m=float(x), size_x_m=float(self.C5_TARGET_SIZE_X_M)
+                )
             )
         ]
         best_start = None
@@ -1267,7 +1538,9 @@ class _DepthProfileTestContext:
                 cur_end = float(sample["x_m"])
             else:
                 if cur_start is not None:
-                    if best_start is None or (cur_end - cur_start) > (best_end - best_start):
+                    if best_start is None or (cur_end - cur_start) > (
+                        best_end - best_start
+                    ):
                         best_start, best_end = cur_start, cur_end
                     cur_start, cur_end = None, None
 
@@ -1276,24 +1549,38 @@ class _DepthProfileTestContext:
                 best_start, best_end = cur_start, cur_end
 
         metrics["expected_ok_x_values_m"] = expected_ok_x_values
-        metrics["expected_x_min_ok_m"] = expected_ok_x_values[0] if expected_ok_x_values else None
-        metrics["expected_x_max_ok_m"] = expected_ok_x_values[-1] if expected_ok_x_values else None
+        metrics["expected_x_min_ok_m"] = (
+            expected_ok_x_values[0] if expected_ok_x_values else None
+        )
+        metrics["expected_x_max_ok_m"] = (
+            expected_ok_x_values[-1] if expected_ok_x_values else None
+        )
 
         if not expected_ok_x_values:
-            raise AssertionError("C5 failed: no sampled positions fall inside the sensor clip range")
+            raise AssertionError(
+                "C5 failed: no sampled positions fall inside the sensor clip range"
+            )
 
         if best_start is None or best_end is None:
             raise AssertionError("C5 failed: no stable depth interval found")
 
         metrics["x_min_ok_m"] = float(best_start)
         metrics["x_max_ok_m"] = float(best_end)
-        metrics["topic_diagnostics"] = self.get_last_test_diagnostics().get("depth_topic_resolution", {})
+        metrics["topic_diagnostics"] = self.get_last_test_diagnostics().get(
+            "depth_topic_resolution", {}
+        )
         metrics["selected_depth_topic"] = self._resolved_depth_topic
         metrics["selected_image_topic"] = self._resolved_image_topic
         coverage_tolerance = float(self.C5_STEP)
         metrics["checks"] = {
-            "x_min_ok_covers_expected": bool(float(best_start) <= float(expected_ok_x_values[0]) + coverage_tolerance + 1e-6),
-            "x_max_ok_covers_expected": bool(float(best_end) >= float(expected_ok_x_values[-1]) - coverage_tolerance - 1e-6),
+            "x_min_ok_covers_expected": bool(
+                float(best_start)
+                <= float(expected_ok_x_values[0]) + coverage_tolerance + 1e-6
+            ),
+            "x_max_ok_covers_expected": bool(
+                float(best_end)
+                >= float(expected_ok_x_values[-1]) - coverage_tolerance - 1e-6
+            ),
         }
 
         if not all(metrics["checks"].values()):
@@ -1310,7 +1597,9 @@ class _DepthProfileTestContext:
     # ------------------------------------------------------------------
 
     def c6_small_displacement_sensitivity_test(self, simulator) -> Dict[str, Any]:
-        x_values = self._iter_float_range_desc(self.C6_START_X, self.C6_END_X, self.C6_STEP)
+        x_values = self._iter_float_range_desc(
+            self.C6_START_X, self.C6_END_X, self.C6_STEP
+        )
         metrics: Dict[str, Any] = {
             "x_values_m": x_values,
             "eps_m": float(self.C6_DEPTH_CHANGE_EPS_M),
@@ -1329,7 +1618,14 @@ class _DepthProfileTestContext:
         depths: List[Optional[float]] = []
         last_depth_stamp_s: Optional[float] = None
         for x in x_values:
-            self._move_and_settle(simulator, self.C6_SHIFT_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=0.16)
+            self._move_and_settle(
+                simulator,
+                self.C6_SHIFT_CUBE_NAME,
+                x=float(x),
+                y=0.0,
+                z=0.25,
+                settle_s=0.16,
+            )
             depth_msg = self._wait_depth_after(
                 prev_stamp_s=last_depth_stamp_s,
                 timeout=3.0,
@@ -1346,7 +1642,9 @@ class _DepthProfileTestContext:
             z, point = self._measure_depth(depth_m, bgr, color_hint="yellow")
             z_valid = bool(z is not None and np.isfinite(z))
             depths.append(float(z) if z_valid else None)
-            expected_depth = self._front_face_depth(center_x_m=float(x), size_x_m=float(self.C6_TARGET_SIZE_X_M))
+            expected_depth = self._front_face_depth(
+                center_x_m=float(x), size_x_m=float(self.C6_TARGET_SIZE_X_M)
+            )
             abs_err = abs(float(z) - expected_depth) if z_valid else None
             metrics["samples"].append(
                 {
@@ -1399,7 +1697,9 @@ class _DepthProfileTestContext:
         metrics["checks"] = {
             "changed_ratio_ge_0_8": bool(changed_ratio >= self.C6_MIN_CHANGED_RATIO),
             "monotonic_nonincreasing": bool(monotonic_violations == 0),
-            "median_delta_matches_step": bool(abs(median_delta - expected_step_m) <= self.C6_DELTA_TOLERANCE_M),
+            "median_delta_matches_step": bool(
+                abs(median_delta - expected_step_m) <= self.C6_DELTA_TOLERANCE_M
+            ),
             "mean_abs_error_ok": bool(mean_abs_error <= self.C6_ABS_ERROR_TOLERANCE_M),
         }
 
@@ -1416,21 +1716,54 @@ class _DepthProfileTestContext:
 #  Entry-point functions
 # ---------------------------------------------------------------------------
 
+
 def c3_view_angle_stability_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG c3_view_angle_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_DepthProfileTestContext, "c3_view_angle_stability_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG c3_view_angle_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _DepthProfileTestContext,
+        "c3_view_angle_stability_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def c5_working_range_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG c5_working_range_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_DepthProfileTestContext, "c5_working_range_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG c5_working_range_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _DepthProfileTestContext,
+        "c5_working_range_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def c6_small_displacement_sensitivity_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG c6_small_displacement_sensitivity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_DepthProfileTestContext, "c6_small_displacement_sensitivity_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG c6_small_displacement_sensitivity_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _DepthProfileTestContext,
+        "c6_small_displacement_sensitivity_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
 
 
 def depth_perception_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG depth_perception_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(_DepthProfileTestContext, "depth_perception_test", simulator, sensor, progress_cb)
+    print(
+        f"\n[DEBUG depth_perception_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}"
+    )
+    return _run_camera_context_test(
+        _DepthProfileTestContext,
+        "depth_perception_test",
+        simulator,
+        sensor,
+        progress_cb,
+    )
