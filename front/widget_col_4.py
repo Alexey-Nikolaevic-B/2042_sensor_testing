@@ -1,6 +1,13 @@
 import os
 
-from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QFrame, QHBoxLayout, QSizePolicy
+from PyQt5.QtWidgets import (
+    QWidget,
+    QApplication,
+    QLabel,
+    QFrame,
+    QHBoxLayout,
+    QSizePolicy,
+)
 from PyQt5.QtCore import Qt, QMetaObject, Q_ARG, pyqtSlot, pyqtSignal
 from PyQt5.QtGui import QColor, QTextCharFormat, QTextCursor, QPixmap, QImage
 from PyQt5 import uic
@@ -8,10 +15,10 @@ from PyQt5 import uic
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 
 _LEVEL_FMT: dict[str, tuple[str, str]] = {
-    "debug":    ("[DEBG]", "#6b7280"),
-    "info":     ("[INFO]", "#9ca3af"),
-    "warning":  ("[WARN]", "#f59e0b"),
-    "error":    ("[ERRO]", "#ef4444"),
+    "debug": ("[DEBG]", "#6b7280"),
+    "info": ("[INFO]", "#9ca3af"),
+    "warning": ("[WARN]", "#f59e0b"),
+    "error": ("[ERRO]", "#ef4444"),
     "critical": ("[CRIT]", "#dc2626"),
 }
 
@@ -22,18 +29,18 @@ _fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) els
 class ColCapture(QWidget):
 
     _capture_arrived = pyqtSignal(dict, bytes)
-    _log_arrived     = pyqtSignal(str, str, str)   # level, source, message
-    _sep_arrived     = pyqtSignal(str)              # separator label
+    _log_arrived = pyqtSignal(str, str, str)  # level, source, message
+    _sep_arrived = pyqtSignal(str)  # separator label
 
     def __init__(self, parent=None):
         super().__init__(parent)
         uic.loadUi(f"{QT_DIR}/col_4.ui", self)
 
-        self._simulator         = None
-        self._show_observer     = False
-        self._last_sensor_data: dict       = {}
-        self._last_obs_img:     bytes|None = None
-        self._last_sensor_img:  bytes|None = None
+        self._simulator = None
+        self._show_observer = False
+        self._last_sensor_data: dict = {}
+        self._last_obs_img: bytes | None = None
+        self._last_sensor_img: bytes | None = None
 
         self._setup_heights()
         self._setup_styles()
@@ -52,8 +59,8 @@ class ColCapture(QWidget):
     def clear_capture(self) -> None:
         """Called when a new test starts — reset the image area."""
         self._last_sensor_data = {}
-        self._last_obs_img     = None
-        self._last_sensor_img  = None
+        self._last_obs_img = None
+        self._last_sensor_img = None
         self._clear_display()
 
     def load_test_result(self, func_name: str, result: dict) -> None:
@@ -117,7 +124,6 @@ class ColCapture(QWidget):
         # When the simulator blocks on wait_for_step, it calls this to enable btn_step
         simulator.on_waiting_for_step = self._on_sim_waiting_for_step
 
-
     # ── lock / step ───────────────────────────────────────────────────────────
 
     def _on_lock_toggled(self, checked: bool) -> None:
@@ -152,9 +158,9 @@ class ColCapture(QWidget):
     def _on_capture_main(self, sensor_data: dict, obs_img: bytes) -> None:
         """Runs on main thread — safe to update widgets."""
         self._last_sensor_data = sensor_data
-        self._last_obs_img     = obs_img if obs_img else None
+        self._last_obs_img = obs_img if obs_img else None
         # Render sensor image from messages on capture arrival
-        self._last_sensor_img  = self._render_sensor_image(sensor_data)
+        self._last_sensor_img = self._render_sensor_image(sensor_data)
         self._refresh_display()
 
     # ── display ───────────────────────────────────────────────────────────────
@@ -173,67 +179,112 @@ class ColCapture(QWidget):
     def _render_sensor_image(self, data: dict) -> bytes | None:
         """Convert raw ROS messages to JPEG bytes for display."""
         import logging as _log
+
         _dbg = _log.getLogger(__name__)
 
         msgs = data.get("messages", [])
-        _dbg.warning("[col4] render: sensor_type=%s msgs=%d image_path=%r",
-                   data.get("sensor_type"), len(msgs), data.get("image_path"))
+        _dbg.warning(
+            "[col4] render: sensor_type=%s msgs=%d image_path=%r",
+            data.get("sensor_type"),
+            len(msgs),
+            data.get("image_path"),
+        )
         if not msgs:
             _dbg.warning("[col4] render: no messages — returning None")
             return None
         msg = msgs[-1]
 
-        _dbg.warning("[col4] render: msg type=%s attrs=%s",
-                   type(msg).__name__,
-                   [a for a in ("encoding","height","width","data","states")
-                    if hasattr(msg, a)])
+        _dbg.warning(
+            "[col4] render: msg type=%s attrs=%s",
+            type(msg).__name__,
+            [
+                a
+                for a in ("encoding", "height", "width", "data", "states")
+                if hasattr(msg, a)
+            ],
+        )
 
         try:
             # ── Camera: sensor_msgs/Image ─────────────────────────────────
             if hasattr(msg, "encoding") and hasattr(msg, "height"):
                 import numpy as np, cv2
+
                 enc = msg.encoding.upper()
-                _dbg.warning("[col4] render: camera enc=%s h=%s w=%s data_len=%s",
-                           enc, getattr(msg,"height","?"), getattr(msg,"width","?"),
-                           len(msg.data) if hasattr(msg,"data") else "?")
+                _dbg.warning(
+                    "[col4] render: camera enc=%s h=%s w=%s data_len=%s",
+                    enc,
+                    getattr(msg, "height", "?"),
+                    getattr(msg, "width", "?"),
+                    len(msg.data) if hasattr(msg, "data") else "?",
+                )
                 if "32FC" in enc:
                     # Depth float32 — normalise to 0-255 and apply colormap
-                    arr = np.frombuffer(msg.data, dtype=np.float32).reshape(msg.height, msg.width)
+                    arr = np.frombuffer(msg.data, dtype=np.float32).reshape(
+                        msg.height, msg.width
+                    )
                     fin = arr[np.isfinite(arr)]
                     if fin.size and fin.max() > fin.min():
-                        norm = ((arr - fin.min()) / (fin.max() - fin.min()) * 255).clip(0, 255).astype(np.uint8)
+                        norm = (
+                            ((arr - fin.min()) / (fin.max() - fin.min()) * 255)
+                            .clip(0, 255)
+                            .astype(np.uint8)
+                        )
                     else:
                         norm = np.zeros((msg.height, msg.width), dtype=np.uint8)
                     bgr = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
                 elif "16UC" in enc:
-                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(
+                        msg.height, msg.width
+                    )
                     norm = (arr / 65535.0 * 255).astype(np.uint8)
                     bgr = cv2.applyColorMap(norm, cv2.COLORMAP_JET)
                 elif enc in ("MONO8", "8UC1"):
-                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width
+                    )
                     bgr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
                 elif enc in ("MONO16",):
-                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(msg.height, msg.width)
+                    arr = np.frombuffer(msg.data, dtype=np.uint16).reshape(
+                        msg.height, msg.width
+                    )
                     bgr = cv2.cvtColor((arr >> 8).astype(np.uint8), cv2.COLOR_GRAY2BGR)
                 elif enc in ("RGB8",):
-                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width, 3
+                    )
                     bgr = arr[:, :, ::-1].copy()
                 elif enc in ("BGR8",):
-                    bgr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
+                    bgr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width, 3
+                    )
                 elif enc in ("RGBA8",):
-                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width, 4
+                    )
                     bgr = arr[:, :, 2::-1].copy()
                 elif enc in ("BGRA8",):
-                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 4)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width, 4
+                    )
                     bgr = arr[:, :, :3].copy()
                 else:
                     # Unknown encoding — try generic reshape
                     total = len(msg.data)
                     channels = total // (msg.height * msg.width)
-                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, channels)
-                    bgr = arr[:, :, :3][:, :, ::-1].copy() if channels >= 3 else                           cv2.cvtColor(arr[:, :, 0], cv2.COLOR_GRAY2BGR)
+                    arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
+                        msg.height, msg.width, channels
+                    )
+                    bgr = (
+                        arr[:, :, :3][:, :, ::-1].copy()
+                        if channels >= 3
+                        else cv2.cvtColor(arr[:, :, 0], cv2.COLOR_GRAY2BGR)
+                    )
                 ok, buf = cv2.imencode(".jpg", bgr)
-                _dbg.warning("[col4] render: imencode ok=%s buf_len=%s", ok, len(buf) if ok else 0)
+                _dbg.warning(
+                    "[col4] render: imencode ok=%s buf_len=%s",
+                    ok,
+                    len(buf) if ok else 0,
+                )
                 return bytes(buf) if ok else None
 
             # ── Tactile: gazebo_msgs/ContactsState → force heatmap ────────
@@ -243,7 +294,12 @@ class ColCapture(QWidget):
 
         except Exception as e:
             import traceback
-            _dbg.error("[col4] render_sensor_image EXCEPTION: %s\n%s", e, traceback.format_exc())
+
+            _dbg.error(
+                "[col4] render_sensor_image EXCEPTION: %s\n%s",
+                e,
+                traceback.format_exc(),
+            )
         _dbg.warning("[col4] render: fell through — returning None")
         return None
 
@@ -255,7 +311,7 @@ class ColCapture(QWidget):
             # Collect contact points (x, y, force_magnitude)
             points = []
             for msg in msgs:
-                for state in (msg.states or []):
+                for state in msg.states or []:
                     f = state.total_wrench.force
                     mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
                     # Use contact position from normals if available
@@ -269,9 +325,9 @@ class ColCapture(QWidget):
             if not points:
                 canvas = np.zeros((H, W), dtype=np.uint8)
             else:
-                xs  = np.array([p[0] for p in points])
-                ys  = np.array([p[1] for p in points])
-                fs  = np.array([p[2] for p in points])
+                xs = np.array([p[0] for p in points])
+                ys = np.array([p[1] for p in points])
+                fs = np.array([p[2] for p in points])
                 # Normalise coordinates to pixel space
                 x_range = xs.max() - xs.min() or 1.0
                 y_range = ys.max() - ys.min() or 1.0
@@ -279,8 +335,13 @@ class ColCapture(QWidget):
                 pys = ((ys - ys.min()) / y_range * (H - 20) + 10).astype(int)
                 canvas = np.zeros((H, W), dtype=np.float32)
                 for px, py, fv in zip(pxs, pys, fs):
-                    cv2.circle(canvas, (int(px), int(py)),
-                               radius=15, color=float(fv), thickness=-1)
+                    cv2.circle(
+                        canvas,
+                        (int(px), int(py)),
+                        radius=15,
+                        color=float(fv),
+                        thickness=-1,
+                    )
                 # Gaussian blur for smooth heatmap
                 canvas = cv2.GaussianBlur(canvas, (31, 31), 0)
                 if canvas.max() > 0:
@@ -302,7 +363,8 @@ class ColCapture(QWidget):
                 scaled = px.scaled(
                     self.lbl_capture_image.width(),
                     self.lbl_capture_image.height(),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
                 )
                 self.lbl_capture_image.setPixmap(scaled)
                 self.lbl_capture_image.setText("")
@@ -316,7 +378,8 @@ class ColCapture(QWidget):
                 px = QPixmap.fromImage(img).scaled(
                     self.lbl_capture_image.width(),
                     self.lbl_capture_image.height(),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
                 )
                 self.lbl_capture_image.setPixmap(px)
                 self.lbl_capture_image.setText("")
@@ -476,27 +539,24 @@ class ColCapture(QWidget):
             {Styles.SCROLLBAR}
         """)
         for btn, icon in [
-            (self.btn_lock,          Icons.LOCK()),
-            (self.btn_step,          Icons.STEP()),
-            (self.btn_view_sensor,   Icons.TARGET_SENSOR()),
+            (self.btn_lock, Icons.LOCK()),
+            (self.btn_step, Icons.STEP()),
+            (self.btn_view_sensor, Icons.TARGET_SENSOR()),
             (self.btn_view_observer, Icons.OBSERVER()),
-            (self.btn_clear_log,     Icons.CLEAR()),
-            (self.btn_copy_log,      Icons.COPY()),
+            (self.btn_clear_log, Icons.CLEAR()),
+            (self.btn_copy_log, Icons.COPY()),
         ]:
             btn.setIcon(icon)
             btn.setIconSize(Layout.ICON_SIZE_MD)
             btn.setStyleSheet(Styles.BUTTON_ICON)
 
-        _checked_style = (
-            Styles.BUTTON_ICON
-            + f"""
+        _checked_style = Styles.BUTTON_ICON + f"""
             QPushButton:checked {{
                 background-color: {Colors.ACCENT_DIM};
                 border: 1px solid {Colors.ACCENT};
                 border-radius: 4px;
             }}
         """
-        )
         # Lock and view-toggle buttons all need the checked highlight
         for btn in (self.btn_lock, self.btn_view_sensor, self.btn_view_observer):
             btn.setStyleSheet(_checked_style)

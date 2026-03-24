@@ -4,9 +4,18 @@ import os
 from PyQt5.QtCore import pyqtSignal, Qt, QObject, QEvent, QRect
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
-    QDialog, QWidget, QHBoxLayout, QVBoxLayout,
-    QLabel, QLineEdit, QPushButton, QPlainTextEdit,
-    QSizePolicy, QListWidgetItem, QListWidget, QApplication,
+    QDialog,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QPlainTextEdit,
+    QSizePolicy,
+    QListWidgetItem,
+    QListWidget,
+    QApplication,
 )
 from PyQt5 import uic
 
@@ -97,26 +106,40 @@ def _lay_remove(layout, widget):
 
 _EDGE = 6
 _CURSOR_MAP = {
-    "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor,
-    "tr": Qt.SizeBDiagCursor, "bl": Qt.SizeBDiagCursor,
-    "l":  Qt.SizeHorCursor,   "r":  Qt.SizeHorCursor,
-    "t":  Qt.SizeVerCursor,   "b":  Qt.SizeVerCursor,
+    "tl": Qt.SizeFDiagCursor,
+    "br": Qt.SizeFDiagCursor,
+    "tr": Qt.SizeBDiagCursor,
+    "bl": Qt.SizeBDiagCursor,
+    "l": Qt.SizeHorCursor,
+    "r": Qt.SizeHorCursor,
+    "t": Qt.SizeVerCursor,
+    "b": Qt.SizeVerCursor,
 }
 
 
 def _edge_at(win, global_pos):
     pos = win.mapFromGlobal(global_pos)
     x, y, w, h = pos.x(), pos.y(), win.width(), win.height()
-    on_l = x <= _EDGE;  on_r = x >= w - _EDGE
-    on_t = y <= _EDGE;  on_b = y >= h - _EDGE
-    if on_t and on_l: return "tl"
-    if on_t and on_r: return "tr"
-    if on_b and on_l: return "bl"
-    if on_b and on_r: return "br"
-    if on_l: return "l"
-    if on_r: return "r"
-    if on_t: return "t"
-    if on_b: return "b"
+    on_l = x <= _EDGE
+    on_r = x >= w - _EDGE
+    on_t = y <= _EDGE
+    on_b = y >= h - _EDGE
+    if on_t and on_l:
+        return "tl"
+    if on_t and on_r:
+        return "tr"
+    if on_b and on_l:
+        return "bl"
+    if on_b and on_r:
+        return "br"
+    if on_l:
+        return "l"
+    if on_r:
+        return "r"
+    if on_t:
+        return "t"
+    if on_b:
+        return "b"
     return None
 
 
@@ -126,11 +149,11 @@ class _WinFilter(QObject):
 
     def __init__(self, win, title_bar_attr="title_bar", resizable=True):
         super().__init__(win)
-        self._win            = win
-        self._tb_attr        = title_bar_attr
-        self._resizable      = resizable
-        self._drag_pos       = None
-        self._resize_edge    = None
+        self._win = win
+        self._tb_attr = title_bar_attr
+        self._resizable = resizable
+        self._drag_pos = None
+        self._resize_edge = None
         self._resize_start_p = None
         self._resize_start_g = None
 
@@ -138,6 +161,7 @@ class _WinFilter(QObject):
         win = self._win
         try:
             import sip
+
             if sip.isdeleted(win):
                 QApplication.instance().removeEventFilter(self)
                 return False
@@ -150,12 +174,12 @@ class _WinFilter(QObject):
         t = event.type()
 
         # ── guard: ignore events outside our window unless mid-drag/resize ──
-        if t in (QEvent.MouseMove, QEvent.MouseButtonPress,
-                 QEvent.MouseButtonRelease):
+        if t in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.MouseButtonRelease):
             if self._drag_pos is None and self._resize_edge is None:
                 gp = event.globalPos()
-                if not QRect(win.mapToGlobal(win.rect().topLeft()),
-                             win.size()).contains(gp):
+                if not QRect(
+                    win.mapToGlobal(win.rect().topLeft()), win.size()
+                ).contains(gp):
                     return False
 
         # ── cursor shape (no button) ─────────────────────────────────────────
@@ -170,7 +194,7 @@ class _WinFilter(QObject):
             if self._resizable:
                 edge = _edge_at(win, event.globalPos())
                 if edge:
-                    self._resize_edge    = edge
+                    self._resize_edge = edge
                     self._resize_start_p = event.globalPos()
                     self._resize_start_g = win.geometry()
                     return True
@@ -179,8 +203,7 @@ class _WinFilter(QObject):
             if tb:
                 tb_rect = QRect(win.mapToGlobal(tb.pos()), tb.size())
                 if tb_rect.contains(event.globalPos()):
-                    self._drag_pos = (event.globalPos()
-                                      - win.frameGeometry().topLeft())
+                    self._drag_pos = event.globalPos() - win.frameGeometry().topLeft()
 
         # ── move ─────────────────────────────────────────────────────────────
         elif t == QEvent.MouseMove and (event.buttons() & Qt.LeftButton):
@@ -193,35 +216,41 @@ class _WinFilter(QObject):
 
         # ── release ──────────────────────────────────────────────────────────
         elif t == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-            self._resize_edge    = None
+            self._resize_edge = None
             self._resize_start_p = None
             self._resize_start_g = None
-            self._drag_pos       = None
+            self._drag_pos = None
             win.setCursor(Qt.ArrowCursor)
 
         return False
 
     def _do_resize(self, global_pos):
-        delta  = global_pos - self._resize_start_p
+        delta = global_pos - self._resize_start_p
         dx, dy = delta.x(), delta.y()
-        g      = self._resize_start_g
+        g = self._resize_start_g
         x, y, w, h = g.x(), g.y(), g.width(), g.height()
-        min_w  = self._win.minimumWidth()  or 400
-        min_h  = self._win.minimumHeight() or 300
-        edge   = self._resize_edge
-        if "r" in edge: w = max(min_w, w + dx)
-        if "b" in edge: h = max(min_h, h + dy)
+        min_w = self._win.minimumWidth() or 400
+        min_h = self._win.minimumHeight() or 300
+        edge = self._resize_edge
+        if "r" in edge:
+            w = max(min_w, w + dx)
+        if "b" in edge:
+            h = max(min_h, h + dy)
         if "l" in edge:
-            new_w = max(min_w, w - dx); x += w - new_w; w = new_w
+            new_w = max(min_w, w - dx)
+            x += w - new_w
+            w = new_w
         if "t" in edge:
-            new_h = max(min_h, h - dy); y += h - new_h; h = new_h
+            new_h = max(min_h, h - dy)
+            y += h - new_h
+            h = new_h
         self._win.move(x, y)
         self._win.resize(w, h)
 
 
-
 class _PluginRow(QWidget):
     """One plugin .so filename entry."""
+
     remove_requested = pyqtSignal(object)
 
     def __init__(self, value: str = "", parent=None):
@@ -247,18 +276,24 @@ class _PluginRow(QWidget):
     def value(self) -> str:
         return self.inp.text().strip()
 
+
 class AddSensorTypeDialog(QDialog):
     type_saved = pyqtSignal(dict)
 
-    def __init__(self, existing_tests: list = None, mode: str = "add",
-                 prefill: dict = None, parent=None):
+    def __init__(
+        self,
+        existing_tests: list = None,
+        mode: str = "add",
+        prefill: dict = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._existing_tests = existing_tests or []
-        self._mode           = mode
-        self._prefill        = prefill or {}
-        self._param_rows:  list[_ParamRow]  = []
+        self._mode = mode
+        self._prefill = prefill or {}
+        self._param_rows: list[_ParamRow] = []
         self._plugin_rows: list[_PluginRow] = []
-        self._test_rows:   list[_TestRow]   = []
+        self._test_rows: list[_TestRow] = []
 
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -418,8 +453,13 @@ class AddSensorTypeDialog(QDialog):
             f"color: {LC.TEXT_SEC}; font-size: 11px; font-weight: 600;"
             " letter-spacing: 0.5px; background: transparent;"
         )
-        for name in ("lbl_name_section", "lbl_params_section",
-                     "lbl_detect_section", "lbl_tests_section", "lbl_added_tests"):
+        for name in (
+            "lbl_name_section",
+            "lbl_params_section",
+            "lbl_detect_section",
+            "lbl_tests_section",
+            "lbl_added_tests",
+        ):
             w = getattr(self, name, None)
             if w:
                 w.setStyleSheet(_sec)
@@ -440,7 +480,9 @@ class AddSensorTypeDialog(QDialog):
             )
 
         det_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "src", "sensors", "detector.py")
+            os.path.join(
+                os.path.dirname(__file__), "..", "src", "sensors", "detector.py"
+            )
         )
         lbl_d = getattr(self, "lbl_detector_file", None)
         if lbl_d:
@@ -449,8 +491,13 @@ class AddSensorTypeDialog(QDialog):
                 f"color: {LC.TEXT_MUTED}; font-size: 10px; background: transparent;"
             )
 
-        for name in ("lbl_tests_hint", "lbl_params_hint", "lbl_detect_hint",
-                     "lbl_plugin_hint", "lbl_custom_hint"):
+        for name in (
+            "lbl_tests_hint",
+            "lbl_params_hint",
+            "lbl_detect_hint",
+            "lbl_plugin_hint",
+            "lbl_custom_hint",
+        ):
             w = getattr(self, name, None)
             if w:
                 w.setStyleSheet(
@@ -467,8 +514,10 @@ class AddSensorTypeDialog(QDialog):
         if lw_det:
             lw_det.setStyleSheet(LS.LIST_WIDGET)
 
-        _scroll_style = f"background: {LC.BG}; border: 1px solid {LC.BORDER}; border-radius: 4px;"
-        _vp_style     = f"background: {LC.BG};"
+        _scroll_style = (
+            f"background: {LC.BG}; border: 1px solid {LC.BORDER}; border-radius: 4px;"
+        )
+        _vp_style = f"background: {LC.BG};"
         for sa_name in ("scroll_params", "scroll_tests", "scroll_plugins"):
             sa = getattr(self, sa_name, None)
             if sa:
@@ -490,12 +539,12 @@ class AddSensorTypeDialog(QDialog):
                 QPushButton:hover:!checked {{ background: {LC.BG_HOVER}; color: {LC.TEXT}; }}
             """)
         self.btn_mode_simple.setStyleSheet(
-            self.btn_mode_simple.styleSheet() +
-            "QPushButton { border-top-left-radius:4px; border-bottom-left-radius:4px; border-right:none; }"
+            self.btn_mode_simple.styleSheet()
+            + "QPushButton { border-top-left-radius:4px; border-bottom-left-radius:4px; border-right:none; }"
         )
         self.btn_mode_custom.setStyleSheet(
-            self.btn_mode_custom.styleSheet() +
-            "QPushButton { border-top-right-radius:4px; border-bottom-right-radius:4px; }"
+            self.btn_mode_custom.styleSheet()
+            + "QPushButton { border-top-right-radius:4px; border-bottom-right-radius:4px; }"
         )
 
         self.btn_save.setStyleSheet(LS.BUTTON_PRIMARY)
@@ -538,6 +587,7 @@ class AddSensorTypeDialog(QDialog):
         lw.clear()
         try:
             from src.sensors.detector import get_custom_detector_names
+
             for name in get_custom_detector_names():
                 lw.addItem(QListWidgetItem(name))
         except Exception as e:
@@ -559,7 +609,9 @@ class AddSensorTypeDialog(QDialog):
                 lbl.setText(fn)
         else:
             self._set_mode("simple")
-            plugins = det.get("plugins") or ([det["plugin"]] if det.get("plugin") else [])
+            plugins = det.get("plugins") or (
+                [det["plugin"]] if det.get("plugin") else []
+            )
             for p in plugins:
                 self._add_plugin_row(p)
         for t in d.get("tests", []):
@@ -615,7 +667,7 @@ class AddSensorTypeDialog(QDialog):
     # ── detection mode ────────────────────────────────────────────────────────
 
     def _set_mode(self, mode: str):
-        simple = (mode == "simple")
+        simple = mode == "simple"
         self.btn_mode_simple.setChecked(simple)
         self.btn_mode_custom.setChecked(not simple)
         self.widget_simple.setVisible(simple)
@@ -719,10 +771,10 @@ class AddSensorTypeDialog(QDialog):
             detection = {"mode": "custom", "detector_fn": fn_name}
 
         definition = {
-            "name":        name,
-            "params":      [r.data() for r in self._param_rows if r.data()["name"]],
-            "detection":   detection,
-            "tests":       [r.data() for r in self._test_rows],
+            "name": name,
+            "params": [r.data() for r in self._param_rows if r.data()["name"]],
+            "detection": detection,
+            "tests": [r.data() for r in self._test_rows],
         }
 
         try:
@@ -746,15 +798,15 @@ class AddSensorTypeDialog(QDialog):
             db.rename_sensor_type(old_name, new_name)
 
         db.upsert_sensor_type(
-            sensor_type = new_name,
-            description = "",
-            params      = d["params"],
-            detection   = d["detection"],
+            sensor_type=new_name,
+            description="",
+            params=d["params"],
+            detection=d["detection"],
         )
 
         # Sync tests: delete removed ones, upsert kept/new ones
         new_func_names = {t["func_name"] for t in d["tests"]}
-        existing       = {t["func_name"] for t in db.get_type_tests(new_name)}
+        existing = {t["func_name"] for t in db.get_type_tests(new_name)}
 
         for removed in existing - new_func_names:
             db.delete_type_test(new_name, removed)
@@ -762,11 +814,11 @@ class AddSensorTypeDialog(QDialog):
         added = new_func_names - existing
         for t in d["tests"]:
             db.upsert_type_test(
-                sensor_type  = new_name,
-                func_name    = t["func_name"],
-                display_name = t["func_name"],
-                description  = "",
-                world_path   = "",
+                sensor_type=new_name,
+                func_name=t["func_name"],
+                display_name=t["func_name"],
+                description="",
+                world_path="",
             )
             if t["func_name"] in added:
                 db.sync_type_tests_to_sensor_by_type(new_name, t["func_name"])

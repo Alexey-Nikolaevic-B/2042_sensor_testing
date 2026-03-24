@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 
 # ── Legacy class-based detector registry (used by rfid_detector.py) ───────────
 
+
 class SensorDetector(ABC):
     sensor_type: str
     priority: int = 0
@@ -46,17 +47,19 @@ def get_custom_detector_names() -> list:
 
 # ── Main detection entry point ────────────────────────────────────────────────
 
+
 def _load_detector_modules() -> None:
     # Auto-import all *_detector.py files so they self-register into DETECTOR_REGISTRY
     import os, importlib
+
     pkg_dir = os.path.dirname(__file__)
     for fname in os.listdir(pkg_dir):
-        if fname.endswith('_detector.py'):
-            mod_name = f'src.{fname[:-3]}'
+        if fname.endswith("_detector.py"):
+            mod_name = f"src.{fname[:-3]}"
             try:
                 importlib.import_module(mod_name)
             except Exception as e:
-                logger.warning('Could not load detector module %s: %s', mod_name, e)
+                logger.warning("Could not load detector module %s: %s", mod_name, e)
 
 
 _detectors_loaded = False
@@ -65,15 +68,20 @@ _detectors_loaded = False
 def _load_sensor_modules() -> None:
     # Auto-import sensor class modules so they register into REGISTRY via @register_sensor
     import os, importlib
+
     pkg_dir = os.path.dirname(__file__)
-    skip = {'__init__.py', 'sensor.py', 'detector.py'}
+    skip = {"__init__.py", "sensor.py", "detector.py"}
     for fname in os.listdir(pkg_dir):
-        if fname.endswith('.py') and fname not in skip and not fname.endswith('_detector.py'):
-            mod_name = f'src.{fname[:-3]}'
+        if (
+            fname.endswith(".py")
+            and fname not in skip
+            and not fname.endswith("_detector.py")
+        ):
+            mod_name = f"src.{fname[:-3]}"
             try:
                 importlib.import_module(mod_name)
             except Exception as e:
-                logger.warning('Could not load sensor module %s: %s', mod_name, e)
+                logger.warning("Could not load sensor module %s: %s", mod_name, e)
 
 
 def detect_sensor_type(sdf_path: str) -> Optional[str]:
@@ -90,7 +98,9 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
         return None
 
     # 1. Class-based registry (rfid_detector.py etc.)
-    detectors = sorted(DETECTOR_REGISTRY.values(), key=lambda d: d.priority, reverse=True)
+    detectors = sorted(
+        DETECTOR_REGISTRY.values(), key=lambda d: d.priority, reverse=True
+    )
     matches = [d for d in detectors if d.detect(content)]
     if matches:
         return matches[0].sensor_type
@@ -101,6 +111,7 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
             if fn(content):
                 # look up which sensor_type uses this detector fn
                 import src.sensor_storage as db
+
                 for t in db.get_all_sensor_types():
                     det = t.get("detection", {})
                     if det.get("mode") == "custom" and det.get("detector_fn") == name:
@@ -115,6 +126,7 @@ def detect_sensor_type(sdf_path: str) -> Optional[str]:
 def _detect_from_db(content: str) -> Optional[str]:
     try:
         import src.sensor_storage as db
+
         for t in db.get_all_sensor_types():
             det = t.get("detection", {})
             if det.get("mode") == "simple":

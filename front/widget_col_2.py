@@ -6,14 +6,13 @@ from PyQt5 import uic
 from ._theme import Colors, Styles, Icons, Layout, QT_DIR
 from .dialog_add_sensor import AddSensorDialog
 
-
 _fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) else str(v)
 
 
 class ColDetails(QWidget):
-    save_requested    = pyqtSignal(dict)
+    save_requested = pyqtSignal(dict)
     save_as_requested = pyqtSignal(dict)
-    sensor_updated    = pyqtSignal(dict)
+    sensor_updated = pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,7 +29,7 @@ class ColDetails(QWidget):
         self._load_image(sensor_data.get("image_path", ""))
         self.lbl_sensor_name.setText(sensor_data.get("name", ""))
         self.lbl_description.setText(sensor_data.get("description", ""))
-        
+
         # Create params with topics as separate entries
         params_with_topics = self._create_params_with_topics(sensor_data)
         self._load_params(params_with_topics)
@@ -52,21 +51,21 @@ class ColDetails(QWidget):
         """
         topics = sensor_data.get("topics", [])
         original_params = sensor_data.get("params", {})
-        
+
         # Create new dict with topics as separate entries
         params_with_topics = {}
-        
+
         # Add each topic as a separate entry
         for i, topic in enumerate(topics, 1):
             params_with_topics[f"topic_{i}"] = topic
-        
+
         # If no topics, add a placeholder
         if not topics:
             params_with_topics["topics"] = "No topics defined"
-        
+
         # Add all original params
         params_with_topics.update(original_params)
-        
+
         return params_with_topics
 
     # ── slots ─────────────────────────────────────────────────────────────────
@@ -123,7 +122,7 @@ class ColDetails(QWidget):
             lbl_val.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             lbl_val.setWordWrap(True)
             lbl_val.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            
+
             h.addWidget(lbl_key)
             h.addWidget(lbl_val)
             layout.addWidget(row)
@@ -178,9 +177,7 @@ class ColDetails(QWidget):
             }}
             {Styles.SCROLLBAR}
         """)
-        self.scroll_description.setStyleSheet(
-            Styles.DESCRIPTION_AREA
-        )
+        self.scroll_description.setStyleSheet(Styles.DESCRIPTION_AREA)
         self.btn_edit.setIcon(Icons.EDIT())
         self.btn_edit.setIconSize(Layout.ICON_SIZE_MD)
         self.btn_edit.setStyleSheet(Styles.BUTTON_ICON)

@@ -2,17 +2,17 @@ import threading
 import logging
 from enum import Enum
 
-from PyQt5.QtCore import QObject, QTimer, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
 
 class TestStatus(str, Enum):
-    IDLE    = "Idle"
-    QUEUED  = "Queued"
+    IDLE = "Idle"
+    QUEUED = "Queued"
     RUNNING = "Running"
-    PASSED  = "Passed"
-    FAILED  = "Failed"
+    PASSED = "Passed"
+    FAILED = "Failed"
 
 
 class _Entry:
@@ -21,9 +21,9 @@ class _Entry:
     def __init__(self, sensor_id, func_name, backend, func, sensor=None):
         self.sensor_id = str(sensor_id)
         self.func_name = func_name
-        self.backend   = backend
-        self.func      = func
-        self.sensor    = sensor
+        self.backend = backend
+        self.func = func
+        self.sensor = sensor
 
     def matches(self, sensor_id, func_name) -> bool:
         return self.sensor_id == str(sensor_id) and self.func_name == func_name
@@ -34,16 +34,16 @@ class _Entry:
 
 class QueueManager(QObject):
 
-    item_state_changed    = pyqtSignal(str, str, TestStatus)
+    item_state_changed = pyqtSignal(str, str, TestStatus)
     item_progress_changed = pyqtSignal(str, str, int)
-    item_result           = pyqtSignal(str, str, dict)
-    log_line              = pyqtSignal(str)
+    item_result = pyqtSignal(str, str, dict)
+    log_line = pyqtSignal(str)
 
     def __init__(self, runner, parent=None):
         super().__init__(parent)
-        self._runner   = runner
-        self._lock     = threading.Lock()
-        self._queue:   list[_Entry]  = []
+        self._runner = runner
+        self._lock = threading.Lock()
+        self._queue: list[_Entry] = []
         self._running: _Entry | None = None
         self._progress = 0
         self._stop_requested = False  # True after cancel() on running test
@@ -53,13 +53,14 @@ class QueueManager(QObject):
         runner.all_finished.connect(self._on_all_finished)
         runner.log_line.connect(self.log_line)
 
-
     def enqueue(self, sensor_id, func_name, backend, func, sensor=None):
         sensor_id = str(sensor_id)
         with self._lock:
             if self._is_active(sensor_id, func_name):
                 return
-            self._queue.append(_Entry(sensor_id, func_name, backend, func, sensor=sensor))
+            self._queue.append(
+                _Entry(sensor_id, func_name, backend, func, sensor=sensor)
+            )
         self.log_line.emit(f"{func_name}  added to queue")
         self.item_state_changed.emit(sensor_id, func_name, TestStatus.QUEUED)
         self._try_advance()
@@ -129,7 +130,11 @@ class QueueManager(QObject):
     def get_queued_for_sensor(self, sensor_id: str) -> dict[str, TestStatus]:
         sid = str(sensor_id)
         with self._lock:
-            return {e.func_name: TestStatus.QUEUED for e in self._queue if e.sensor_id == sid}
+            return {
+                e.func_name: TestStatus.QUEUED
+                for e in self._queue
+                if e.sensor_id == sid
+            }
 
     def _is_active(self, sensor_id: str, func_name: str) -> bool:
         if self._running and self._running.matches(sensor_id, func_name):
@@ -144,13 +149,16 @@ class QueueManager(QObject):
             self._running = entry
 
         self._progress = 0
-        self.item_state_changed.emit(entry.sensor_id, entry.func_name, TestStatus.RUNNING)
+        self.item_state_changed.emit(
+            entry.sensor_id, entry.func_name, TestStatus.RUNNING
+        )
 
         self.log_line.emit(
             f"[QueueManager] starting {entry.func_name} for sensor {entry.sensor_id}"
         )
-        self._runner.run_one(entry.backend, entry.func_name, entry.func, sensor=entry.sensor)
-
+        self._runner.run_one(
+            entry.backend, entry.func_name, entry.func, sensor=entry.sensor
+        )
 
     def _on_runner_progress(self, func_name: str, value: int):
         with self._lock:
@@ -159,7 +167,9 @@ class QueueManager(QObject):
             self._progress = value
             self.item_progress_changed.emit(running.sensor_id, func_name, value)
 
-    def _on_runner_finished(self, func_name: str, result: dict, status_str: str, duration: float):
+    def _on_runner_finished(
+        self, func_name: str, result: dict, status_str: str, duration: float
+    ):
         with self._lock:
             entry = self._running
 
@@ -169,8 +179,8 @@ class QueueManager(QObject):
         self.item_progress_changed.emit(entry.sensor_id, entry.func_name, 0)
 
         status_map = {
-            "Passed":  TestStatus.PASSED,
-            "Failed":  TestStatus.FAILED,
+            "Passed": TestStatus.PASSED,
+            "Failed": TestStatus.FAILED,
             "Stopped": TestStatus.IDLE,
         }
         ts = status_map.get(status_str, TestStatus.IDLE)
@@ -181,14 +191,19 @@ class QueueManager(QObject):
 
         try:
             from .logic_sensor_repository import SensorRepository
+
             repo = SensorRepository.instance()
-            passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
+            passed = (
+                result.get("passed", False)
+                if isinstance(result, dict)
+                else bool(result)
+            )
             repo.save_test_result(
-                sensor_id   = entry.sensor_id,
-                test_name   = entry.func_name,
-                status      = ts.value,
-                result      = result,
-                duration    = duration,
+                sensor_id=entry.sensor_id,
+                test_name=entry.func_name,
+                status=ts.value,
+                result=result,
+                duration=duration,
             )
         except Exception as exc:
             logger.error("Failed to save test result: %s", exc)

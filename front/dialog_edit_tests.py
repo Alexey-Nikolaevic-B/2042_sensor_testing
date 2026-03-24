@@ -18,7 +18,7 @@ class TestMetaRow(QWidget):
     def __init__(self, test: dict, parent=None):
         super().__init__(parent)
         self.func_name = test["func_name"]
-        self.missing   = test.get("missing", False)
+        self.missing = test.get("missing", False)
         self._selected = False
 
         self.setFixedHeight(54)
@@ -66,8 +66,8 @@ class TestMetaRow(QWidget):
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _refresh_style(self):
-        bar_color = LC.ERROR   if self.missing   else LC.ACCENT
-        bg        = LC.ACCENT_DIM if self._selected else "transparent"
+        bar_color = LC.ERROR if self.missing else LC.ACCENT
+        bg = LC.ACCENT_DIM if self._selected else "transparent"
         self._bar.setStyleSheet(f"background-color: {bar_color};")
         self.setStyleSheet(f"""
             QWidget#TestMetaRow {{
@@ -89,17 +89,18 @@ class EditTestsDialog(QDialog):
 
     tests_saved = pyqtSignal()
 
-    def __init__(self, sensor_id: str, sensor_name: str,
-                 tests: list[dict], parent=None):
+    def __init__(
+        self, sensor_id: str, sensor_name: str, tests: list[dict], parent=None
+    ):
         super().__init__(parent)
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(760, 520)
 
-        self._sensor_id   = sensor_id
+        self._sensor_id = sensor_id
         self._sensor_name = sensor_name
         self._tests: dict[str, dict] = {t["func_name"]: dict(t) for t in tests}
-        self._selected: str | None   = None
+        self._selected: str | None = None
         self._rows: dict[str, TestMetaRow] = {}
 
         uic.loadUi(f"{QT_DIR}/edit_tests_dialog.ui", self)
@@ -126,15 +127,17 @@ class EditTestsDialog(QDialog):
 
     def _on_desc_changed(self):
         if self._selected:
-            self._tests[self._selected]["description"] = self.input_description.toPlainText()
+            self._tests[self._selected][
+                "description"
+            ] = self.input_description.toPlainText()
 
     def _pick_image(self):
         if not self._selected:
             return
         from PyQt5.QtWidgets import QFileDialog
+
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose test image", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+            self, "Choose test image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
         )
         if not path:
             return
@@ -143,18 +146,19 @@ class EditTestsDialog(QDialog):
 
     def _on_save_all(self):
         from .logic_sensor_repository import SensorRepository
+
         repo = SensorRepository.instance()
 
         asset_dir = os.path.join(ASSETS_DIR, self._sensor_name, "tests")
         os.makedirs(asset_dir, exist_ok=True)
 
         for func_name, test in self._tests.items():
-            src    = test.get("image_path", "")
+            src = test.get("image_path", "")
             stored = src
             if src and os.path.isfile(src) and not src.startswith(asset_dir):
-                ext  = os.path.splitext(src)[1].lower() or ".png"
+                ext = os.path.splitext(src)[1].lower() or ".png"
                 dest = os.path.join(asset_dir, f"{func_name}{ext}")
-                px   = QPixmap(src)
+                px = QPixmap(src)
                 if not px.isNull():
                     self._crop(px).save(dest)
                 else:
@@ -162,11 +166,11 @@ class EditTestsDialog(QDialog):
                 stored = dest
 
             repo.save_test_meta(
-                sensor_id    = self._sensor_id,
-                func_name    = func_name,
-                display_name = test.get("display_name") or func_name,
-                description  = test.get("description") or "",
-                image_path   = stored,
+                sensor_id=self._sensor_id,
+                func_name=func_name,
+                display_name=test.get("display_name") or func_name,
+                description=test.get("description") or "",
+                image_path=stored,
             )
 
         self.tests_saved.emit()
@@ -216,9 +220,10 @@ class EditTestsDialog(QDialog):
         self.lbl_image.setText("Click to choose image")
 
     def _crop(self, px: QPixmap) -> QPixmap:
-        scaled = px.scaled(IMAGE_W, IMAGE_H, Qt.KeepAspectRatioByExpanding,
-                           Qt.SmoothTransformation)
-        x = (scaled.width()  - IMAGE_W) // 2
+        scaled = px.scaled(
+            IMAGE_W, IMAGE_H, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation
+        )
+        x = (scaled.width() - IMAGE_W) // 2
         y = (scaled.height() - IMAGE_H) // 2
         return scaled.copy(x, y, IMAGE_W, IMAGE_H)
 

@@ -11,19 +11,19 @@ logger = logging.getLogger(__name__)
 
 class _Worker(QObject):
 
-    log_line      = pyqtSignal(str)
+    log_line = pyqtSignal(str)
     test_finished = pyqtSignal(str, dict, str, float)
-    test_progress = pyqtSignal(str, int)   # func_name, 0-100
-    all_finished  = pyqtSignal()
-    error         = pyqtSignal(str, str)
+    test_progress = pyqtSignal(str, int)  # func_name, 0-100
+    all_finished = pyqtSignal()
+    error = pyqtSignal(str, str)
 
     def __init__(self, core, backend, func_name: str, func, sensor=None):
         super().__init__()
-        self._core           = core
-        self._backend        = backend
-        self._func_name      = func_name
-        self._func           = func
-        self._sensor         = sensor
+        self._core = core
+        self._backend = backend
+        self._func_name = func_name
+        self._func = func
+        self._sensor = sensor
         self._stop_requested = False
         self._thread_id: int | None = None
 
@@ -33,7 +33,9 @@ class _Worker(QObject):
     def raise_in_thread(self, exc_type):
         tid = self._thread_id
         if tid is None:
-            self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: no thread_id")
+            self.log_line.emit(
+                f"[Worker:{self._func_name}] raise_in_thread: no thread_id"
+            )
             return
         try:
             res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
@@ -41,14 +43,22 @@ class _Worker(QObject):
                 ctypes.py_object(exc_type),
             )
             if res == 0:
-                self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: tid {tid} not found")
+                self.log_line.emit(
+                    f"[Worker:{self._func_name}] raise_in_thread: tid {tid} not found"
+                )
             elif res > 1:
                 ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(tid), None)
-                self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread: affected {res} threads — undone")
+                self.log_line.emit(
+                    f"[Worker:{self._func_name}] raise_in_thread: affected {res} threads — undone"
+                )
             else:
-                self.log_line.emit(f"[Worker:{self._func_name}] {exc_type.__name__} injected into tid {tid}")
+                self.log_line.emit(
+                    f"[Worker:{self._func_name}] {exc_type.__name__} injected into tid {tid}"
+                )
         except Exception as exc:
-            self.log_line.emit(f"[Worker:{self._func_name}] raise_in_thread error: {exc}")
+            self.log_line.emit(
+                f"[Worker:{self._func_name}] raise_in_thread error: {exc}"
+            )
 
     @pyqtSlot()
     def run(self):
@@ -68,7 +78,9 @@ class _Worker(QObject):
         t0 = time.time()
         try:
             if self._sensor is not None:
-                result = self._func(self._core.simulator, self._sensor, progress_cb=progress_cb)
+                result = self._func(
+                    self._core.simulator, self._sensor, progress_cb=progress_cb
+                )
             else:
                 result = self._func(self._core.simulator, progress_cb=progress_cb)
             duration = time.time() - t0
@@ -76,7 +88,11 @@ class _Worker(QObject):
             if result is None:
                 result = {}
 
-            passed = result.get("passed", False) if isinstance(result, dict) else bool(result)
+            passed = (
+                result.get("passed", False)
+                if isinstance(result, dict)
+                else bool(result)
+            )
             status = "Passed" if passed else "Failed"
 
             self.log_line.emit(f"{func_name}  {status}  ({duration:.1f}s)")
@@ -109,16 +125,16 @@ class _Worker(QObject):
 
 class TestRunner(QObject):
 
-    log_line      = pyqtSignal(str)
-    test_started  = pyqtSignal(str)
+    log_line = pyqtSignal(str)
+    test_started = pyqtSignal(str)
     test_finished = pyqtSignal(str, dict, str, float)
     test_progress = pyqtSignal(str, int)
-    all_finished  = pyqtSignal()
-    error         = pyqtSignal(str, str)
+    all_finished = pyqtSignal()
+    error = pyqtSignal(str, str)
 
     def __init__(self, core, parent=None):
         super().__init__(parent)
-        self._core        = core
+        self._core = core
         self._worker: _Worker | None = None
         self._worker_lock = threading.Lock()
 
@@ -127,16 +143,16 @@ class TestRunner(QObject):
 
     def run_one(self, backend, func_name: str, func, sensor=None):
         worker = _Worker(
-            core      = self._core,
-            backend   = backend,
-            func_name = func_name,
-            func      = func,
-            sensor    = sensor,
+            core=self._core,
+            backend=backend,
+            func_name=func_name,
+            func=func,
+            sensor=sensor,
         )
         worker.moveToThread(self._thread)
 
         worker.log_line.connect(self.log_line)
-        worker.test_progress.connect(self.test_progress)   # ← forward progress
+        worker.test_progress.connect(self.test_progress)  # ← forward progress
         worker.test_finished.connect(self.test_finished)
         worker.all_finished.connect(self.all_finished)
         worker.error.connect(self.error)

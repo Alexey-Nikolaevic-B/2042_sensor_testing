@@ -2,8 +2,16 @@ import os
 import shutil
 
 from PyQt5.QtWidgets import (
-    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QFileDialog, QFrame, QSizePolicy,
+    QDialog,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QFileDialog,
+    QFrame,
+    QSizePolicy,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QPixmap
@@ -31,11 +39,11 @@ class AddSensorDialog(QDialog):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedSize(880, 520)
 
-        self._edit_mode    = sensor_data is not None
-        self._sensor_data  = sensor_data or {}
-        self._sensor_id    = self._sensor_data.get("id")
+        self._edit_mode = sensor_data is not None
+        self._sensor_data = sensor_data or {}
+        self._sensor_id = self._sensor_data.get("id")
         self._image_source = ""
-        self._sdf_source   = ""
+        self._sdf_source = ""
         self._params: dict = {}
         self._topic_rows: list = []
         self._detected_type: str | None = None
@@ -79,14 +87,16 @@ class AddSensorDialog(QDialog):
         if self._params:
             try:
                 from src.sensor import Sensor as _SensorModel
+
                 _inst = _SensorModel(
-                    sensor_type = self._detected_type or "",
-                    sensor_name = name,
-                    sdf_path    = sdf_dest,
+                    sensor_type=self._detected_type or "",
+                    sensor_name=name,
+                    sdf_path=sdf_dest,
                 )
                 _inst.write_params_to_sdf(self._params)
             except Exception as _e:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "dialog_add_sensor: could not write params to SDF: %s", _e
                 )
@@ -103,13 +113,13 @@ class AddSensorDialog(QDialog):
                     shutil.copy2(self._image_source, image_dest)
 
         result = {
-            "name":        name,
-            "type":        self._detected_type or "unknown",
-            "sdf_path":    sdf_dest,
-            "image_path":  image_dest,
+            "name": name,
+            "type": self._detected_type or "unknown",
+            "sdf_path": sdf_dest,
+            "image_path": image_dest,
             "description": self.input_description.toPlainText().strip(),
-            "params":      dict(self._params),
-            "topics":      self._collect_topics(),
+            "params": dict(self._params),
+            "topics": self._collect_topics(),
         }
         if self._sensor_id:
             result["id"] = self._sensor_id
@@ -119,8 +129,7 @@ class AddSensorDialog(QDialog):
 
     def _pick_image(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose sensor image", "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+            self, "Choose sensor image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
         )
         if not path:
             return
@@ -135,17 +144,14 @@ class AddSensorDialog(QDialog):
             start_dir = os.path.dirname(os.path.abspath(self._sdf_source))
         else:
             start_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        
+
         path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Choose SDF file", 
-            start_dir,
-            "SDF files (*.sdf);;All files (*)"
+            self, "Choose SDF file", start_dir, "SDF files (*.sdf);;All files (*)"
         )
-        
+
         if not path:
             return
-        
+
         self._sdf_source = path
         self.sdf_label.setText(os.path.basename(path))
         self._on_sdf_selected(path)
@@ -221,7 +227,10 @@ class AddSensorDialog(QDialog):
         self._set_detected_type(sensor_type)
         try:
             from src.sensor import Sensor as SensorModel
-            instance = SensorModel(sensor_type=sensor_type, sensor_name="", sdf_path=path)
+
+            instance = SensorModel(
+                sensor_type=sensor_type, sensor_name="", sdf_path=path
+            )
             self._populate_params(self._core.read_sensor_params(instance))
         except Exception:
             self._populate_params({})
@@ -233,18 +242,22 @@ class AddSensorDialog(QDialog):
         except ImportError:
             detect_topics_from_sdf = None
         if detect_topics_from_sdf:
-            for t in (detect_topics_from_sdf(path) or []):
+            for t in detect_topics_from_sdf(path) or []:
                 self._add_topic_row(t)
 
     def _set_detected_type(self, sensor_type: str | None):
         self._detected_type = sensor_type
-        color   = Colors.STATUS_GREEN if sensor_type != "unknown" else Colors.STATUS_YELLOW
+        color = (
+            Colors.STATUS_GREEN if sensor_type != "unknown" else Colors.STATUS_YELLOW
+        )
         display = sensor_type or "unknown"
         dot = getattr(self, "lbl_type_dot", None)
         if dot:
             dot.setStyleSheet(f"color: {color}; background: transparent;")
         self.lbl_detected_type.setText(display)
-        self.lbl_detected_type.setStyleSheet(f"color: {color}; background: transparent;")
+        self.lbl_detected_type.setStyleSheet(
+            f"color: {color}; background: transparent;"
+        )
 
     def _populate_params(self, params: dict):
         while self.params_layout.count() > 1:
@@ -256,10 +269,12 @@ class AddSensorDialog(QDialog):
             for key, value in params.items():
                 self.params_layout.insertWidget(
                     self.params_layout.count() - 1,
-                    self._make_param_row(key, str(value))
+                    self._make_param_row(key, str(value)),
                 )
         else:
-            lbl = QLabel("No parameters detected.\nWill populate after backend SDF validation.")
+            lbl = QLabel(
+                "No parameters detected.\nWill populate after backend SDF validation."
+            )
             lbl.setObjectName("params_placeholder")
             lbl.setWordWrap(True)
             self.params_layout.insertWidget(0, lbl)
@@ -298,7 +313,7 @@ class AddSensorDialog(QDialog):
     @staticmethod
     def _center_crop(px: QPixmap, w: int, h: int) -> QPixmap:
         scaled = px.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-        x = (scaled.width()  - w) // 2
+        x = (scaled.width() - w) // 2
         y = (scaled.height() - h) // 2
         return scaled.copy(x, y, w, h)
 

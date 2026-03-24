@@ -1,4 +1,5 @@
 """Generic and debug sensor tests."""
+
 import logging
 import os
 import time
@@ -21,11 +22,14 @@ from ._common import (
 
 logger = logging.getLogger(__name__)
 
+
 def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     logger.info("=" * 60)
-    logger.info("TESTING SENSOR: %s (%s)", 
-                getattr(sensor, 'sensor_name', 'unknown'), 
-                getattr(sensor, 'sensor_type', 'unknown'))
+    logger.info(
+        "TESTING SENSOR: %s (%s)",
+        getattr(sensor, "sensor_name", "unknown"),
+        getattr(sensor, "sensor_type", "unknown"),
+    )
     logger.info("TOPIC: %s", sensor.topic)
     logger.info("=" * 60)
 
@@ -37,7 +41,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
         "duration": 0,
         "message_type": None,
         "data_received": False,
-        "error": None
+        "error": None,
     }
 
     t0 = time.time()
@@ -51,14 +55,14 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     if not os.path.exists(world_path):
         logger.warning("World file not found, using fallback")
         fallback = "/tmp/default_world.world"
-        with open(fallback, 'w') as f:
-            f.write('''<?xml version="1.0"?>
+        with open(fallback, "w") as f:
+            f.write("""<?xml version="1.0"?>
 <sdf version="1.6">
   <world name="default">
     <include><uri>model://sun</uri></include>
     <include><uri>model://ground_plane</uri></include>
   </world>
-</sdf>''')
+</sdf>""")
         world_path = fallback
         logger.debug("Created fallback world: %s", world_path)
 
@@ -89,7 +93,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
     logger.debug("Available topics:")
     for t, t_type in topics[:15]:
-        if not t.startswith('/rosout'):
+        if not t.startswith("/rosout"):
             logger.debug("        %s -> %s", t, t_type)
 
     topic_exists = any(t == sensor.topic for t, _ in topics)
@@ -97,7 +101,9 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
     if not topic_exists:
         result["error"] = f"Topic {sensor.topic} not found"
-        result["available_topics"] = [t for t, _ in topics[:20] if not t.startswith('/rosout')]
+        result["available_topics"] = [
+            t for t, _ in topics[:20] if not t.startswith("/rosout")
+        ]
         result["duration"] = round(time.time() - t0, 2)
         logger.error("Topic not found!")
         return result
@@ -133,7 +139,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
             "joint": "sensor_msgs/JointState",
             "temperature": "sensor_msgs/Temperature",
             "fluid": "sensor_msgs/FluidPressure",
-            "magnetic": "sensor_msgs/MagneticField"
+            "magnetic": "sensor_msgs/MagneticField",
         }
 
         sensor_type = getattr(sensor, "sensor_type", "").lower()
@@ -143,7 +149,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
         if msg_type_name:
             try:
-                package, msg_name = msg_type_name.split('/')
+                package, msg_name = msg_type_name.split("/")
                 logger.debug("Importing %s.msg.%s", package, msg_name)
                 module = __import__(f"{package}.msg", fromlist=[msg_name])
                 msg_class = getattr(module, msg_name)
@@ -172,14 +178,17 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
     logger.info("Capturing from %s ...", sensor.topic)
     try:
-        msgs = sensor.capture_data(msg_class, topic=sensor.topic,
-                                   window=3.0, timeout=1.0, simulator=simulator)
+        msgs = sensor.capture_data(
+            msg_class, topic=sensor.topic, window=3.0, timeout=1.0, simulator=simulator
+        )
         if not msgs:
             result["error"] = "No messages received within capture window"
             logger.error("No messages received on %s", sensor.topic)
         else:
             msg = msgs[-1]
-            logger.info("Captured %d message(s), type=%s", len(msgs), type(msg).__name__)
+            logger.info(
+                "Captured %d message(s), type=%s", len(msgs), type(msg).__name__
+            )
             result["data_received"] = True
             result["passed"] = True
             result["frames_received"] = len(msgs)
@@ -194,24 +203,29 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
                         "collision2": msg.states[0].collision2_name,
                     }
             elif hasattr(msg, "height") and hasattr(msg, "data"):
-                result["width"]    = msg.width
-                result["height"]   = msg.height
+                result["width"] = msg.width
+                result["height"] = msg.height
                 result["encoding"] = msg.encoding
             elif hasattr(msg, "ranges"):
                 result["num_ranges"] = len(msg.ranges)
-                result["angle_min"]  = msg.angle_min
-                result["angle_max"]  = msg.angle_max
+                result["angle_min"] = msg.angle_min
+                result["angle_max"] = msg.angle_max
             elif hasattr(msg, "angular_velocity"):
-                result["angular_velocity"]    = [msg.angular_velocity.x,
-                                                 msg.angular_velocity.y,
-                                                 msg.angular_velocity.z]
-                result["linear_acceleration"] = [msg.linear_acceleration.x,
-                                                 msg.linear_acceleration.y,
-                                                 msg.linear_acceleration.z]
+                result["angular_velocity"] = [
+                    msg.angular_velocity.x,
+                    msg.angular_velocity.y,
+                    msg.angular_velocity.z,
+                ]
+                result["linear_acceleration"] = [
+                    msg.linear_acceleration.x,
+                    msg.linear_acceleration.y,
+                    msg.linear_acceleration.z,
+                ]
     except Exception as e:
         result["error"] = str(e)
         logger.error("Capture error on %s: %s", sensor.topic, e)
         import traceback
+
         traceback.print_exc()
 
     if progress_cb:
@@ -223,9 +237,9 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
 
     result["duration"] = round(time.time() - t0, 2)
     logger.debug("Test completed in %.2fs", result["duration"])
-    logger.debug("Result: %s", 'PASSED' if result['passed'] else 'FAILED')
-    if result.get('error'):
-        logger.debug("Error: %s", result['error'])
+    logger.debug("Result: %s", "PASSED" if result["passed"] else "FAILED")
+    if result.get("error"):
+        logger.debug("Error: %s", result["error"])
     logger.info("=" * 60)
     logger.info("")  # Empty line for spacing
 
@@ -352,7 +366,9 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
 
     if primary_topic not in all_topic_names:
         result["error"] = f"Topic {primary_topic} not published"
-        result["available_topics"] = [t for t in all_topic_names if not t.startswith("/rosout")][:20]
+        result["available_topics"] = [
+            t for t in all_topic_names if not t.startswith("/rosout")
+        ][:20]
         result["duration"] = round(time.time() - t0, 2)
         logger.error("Topic %s not published", primary_topic)
         return result
@@ -360,7 +376,9 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
     logger.info("Waiting for image on %s (timeout=10s)...", primary_topic)
     try:
         msg = rospy.wait_for_message(primary_topic, Image, timeout=10.0)
-        logger.info("Image received! %dx%d, encoding=%s", msg.width, msg.height, msg.encoding)
+        logger.info(
+            "Image received! %dx%d, encoding=%s", msg.width, msg.height, msg.encoding
+        )
     except Exception as e:
         result["error"] = f"Timeout waiting for Image on {primary_topic}: {e}"
         result["duration"] = round(time.time() - t0, 2)
@@ -397,8 +415,12 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
     result["duration"] = round(time.time() - t0, 2)
     logger.info(
         "camera_check: type=%s passed=%s resolution=%s encoding=%s topics_active=%s duration=%.2fs",
-        result["camera_type"], result["passed"], result["resolution"],
-        result["encoding"], result["topics_active"], result["duration"]
+        result["camera_type"],
+        result["passed"],
+        result["resolution"],
+        result["encoding"],
+        result["topics_active"],
+        result["duration"],
     )
     return result
 
@@ -426,13 +448,20 @@ def _camera_check_to_bgr(msg: Image) -> np.ndarray:
         if valid.size > 0:
             d_min, d_max = float(valid.min()), float(valid.max())
             if d_max > d_min:
-                norm = ((depth - d_min) / (d_max - d_min) * 255).clip(0, 255).astype(np.uint8)
+                norm = (
+                    ((depth - d_min) / (d_max - d_min) * 255)
+                    .clip(0, 255)
+                    .astype(np.uint8)
+                )
             else:
                 norm = np.zeros((h, w), dtype=np.uint8)
         else:
             norm = np.zeros((h, w), dtype=np.uint8)
-        logger.debug("Depth 32fc1: range [%.3f, %.3f]", d_min if valid.size > 0 else 0, 
-                    d_max if valid.size > 0 else 0)
+        logger.debug(
+            "Depth 32fc1: range [%.3f, %.3f]",
+            d_min if valid.size > 0 else 0,
+            d_max if valid.size > 0 else 0,
+        )
         return cv2.applyColorMap(norm, cv2.COLORMAP_JET)
 
     if enc == "16uc1":
@@ -442,14 +471,20 @@ def _camera_check_to_bgr(msg: Image) -> np.ndarray:
         if valid.size > 0:
             d_min, d_max = float(valid.min()), float(valid.max())
             if d_max > d_min:
-                norm = ((depth_m - d_min) / (d_max - d_min) * 255).clip(0, 255).astype(np.uint8)
+                norm = (
+                    ((depth_m - d_min) / (d_max - d_min) * 255)
+                    .clip(0, 255)
+                    .astype(np.uint8)
+                )
             else:
                 norm = np.zeros((h, w), dtype=np.uint8)
         else:
             norm = np.zeros((h, w), dtype=np.uint8)
-        logger.debug("Depth 16uc1: range [%.3f, %.3f] mm", 
-                    raw.min() if raw.size > 0 else 0,
-                    raw.max() if raw.size > 0 else 0)
+        logger.debug(
+            "Depth 16uc1: range [%.3f, %.3f] mm",
+            raw.min() if raw.size > 0 else 0,
+            raw.max() if raw.size > 0 else 0,
+        )
         return cv2.applyColorMap(norm, cv2.COLORMAP_JET)
 
     logger.error("Unsupported encoding for camera_check: %s", enc)
