@@ -2,26 +2,20 @@
 /workspace.xml
 __pycache__/
 .vscode/
+.idea
+.bak
+
+.DS_Store
+**/.DS_Store
+
 /venv
 
 /ros_log
-
-.idea
+log.log\
+log.log
 
 captured_data/*.png
-
 catkin_ws/.catkin_workspace
 catkin_ws/devel/
 catkin_ws/build
 catkin_ws/src/scenario_test_pkg/worlds/base_world.world
-
-<<<<<<< HEAD
-log.log\
-
-.bak
-=======
-log.log
-
-.DS_Store
-**/.DS_Store
->>>>>>> 39d4b9aec0bca330a969dd91af50fbe93bc44f35
