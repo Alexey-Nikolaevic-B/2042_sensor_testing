@@ -71,14 +71,13 @@ if [ $? -ne 0 ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
 fi
 
 # ── 5. Install Python packages ────────────────────────────────────────────────
-"$VENV_DIR/bin/pip" install --upgrade pip
-
+# Skip pip upgrade to avoid network issues
 if [ ! -f "$REQUIREMENTS_FILE" ]; then
     echo "[setup] ERROR: requirements.txt not found" >&2
     exit 1
 fi
 
-"$VENV_DIR/bin/pip" install -r "$REQUIREMENTS_FILE"
+"$VENV_DIR/bin/pip" install --timeout 120 --retries 5 -r "$REQUIREMENTS_FILE"
 if [ $? -ne 0 ]; then
     echo "[setup] ERROR: Failed to install requirements" >&2
     exit 1
