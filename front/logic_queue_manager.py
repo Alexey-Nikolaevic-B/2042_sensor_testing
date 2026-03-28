@@ -186,7 +186,7 @@ class QueueManager(QObject):
         ts = status_map.get(status_str, TestStatus.IDLE)
         self.item_state_changed.emit(entry.sensor_id, entry.func_name, ts)
 
-        if result:
+        if result is not None:
             self.item_result.emit(entry.sensor_id, entry.func_name, result)
 
         try:
