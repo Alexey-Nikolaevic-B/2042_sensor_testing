@@ -156,31 +156,34 @@ class Sensor:
                 if search_in is None:
                     continue
 
-            m = re.search(
+            matches = re.findall(
                 rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
                 search_in,
                 re.DOTALL,
             )
-            if m:
-                value_str = m.group(1).strip()
+            if not matches:
+                continue
 
-                # Auto-detect and convert numeric values
+            for idx, raw_val in enumerate(matches):
+                value_str = raw_val.strip()
+                # If multiple occurrences (e.g. two plugins with same tag),
+                # prefix with "1: ", "2: " to distinguish them.
+                key = name if len(matches) == 1 else f"{idx + 1}: {name}"
+
                 if value_str:
                     parts = value_str.split()
                     if len(parts) == 1:
-                        # Single value - try to convert to float
                         try:
-                            result[name] = float(parts[0])
+                            result[key] = float(parts[0])
                         except ValueError:
-                            result[name] = value_str
+                            result[key] = value_str
                     else:
-                        # Multiple values - try to convert to list of floats
                         try:
-                            result[name] = [float(p) for p in parts]
+                            result[key] = [float(p) for p in parts]
                         except ValueError:
-                            result[name] = value_str
+                            result[key] = value_str
                 else:
-                    result[name] = value_str
+                    result[key] = value_str
 
         return result
 
@@ -193,7 +196,17 @@ class Sensor:
         except OSError as e:
             raise OSError(f"Cannot read SDF: {e}") from e
 
-        for name, value in params.items():
+        for raw_key, value in params.items():
+            # Parse "N: tag_name" format for multi-plugin params;
+            # fall back to plain tag name (occurrence=1).
+            idx_match = re.match(r"^(\d+):\s*(.+)$", raw_key)
+            if idx_match:
+                occurrence = int(idx_match.group(1))  # 1-based
+                name = idx_match.group(2)
+            else:
+                occurrence = 1
+                name = raw_key
+
             if isinstance(value, list):
                 value_str = " ".join(str(v) for v in value)
             elif isinstance(value, (int, float)):
@@ -201,16 +214,34 @@ class Sensor:
             else:
                 value_str = str(value)
 
-            content, n = re.subn(
-                rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)",
-                rf"\g<1>{value_str}\g<2>",
-                content,
-                count=1,
-                flags=re.DOTALL,
-            )
+            if occurrence == 1:
+                # Fast path: replace first occurrence (same as before)
+                content, n = re.subn(
+                    rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)",
+                    rf"\g<1>{value_str}\g<2>",
+                    content,
+                    count=1,
+                    flags=re.DOTALL,
+                )
+            else:
+                # Replace the Nth occurrence
+                pattern = rf"(<{re.escape(name)}>)\s*.*?\s*(</{re.escape(name)}>)"
+                all_matches = list(re.finditer(pattern, content, re.DOTALL))
+                if occurrence <= len(all_matches):
+                    m = all_matches[occurrence - 1]
+                    content = (
+                        content[: m.start()]
+                        + f"<{name}>{value_str}</{name}>"
+                        + content[m.end() :]
+                    )
+                    n = 1
+                else:
+                    n = 0
+
             if n == 0:
                 logger.warning(
-                    "write_params_to_sdf: tag <%s> not found in %s", name, self.sdf_path
+                    "write_params_to_sdf: tag <%s> (occurrence %d) not found in %s",
+                    name, occurrence, self.sdf_path,
                 )
 
         with open(self.sdf_path, "w", encoding="utf-8") as f:

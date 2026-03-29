@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from collections import Counter
 from typing import Dict, List, Optional, Type
 
 logger = logging.getLogger(__name__)
@@ -127,14 +128,31 @@ def _detect_from_db(content: str) -> Optional[str]:
     try:
         import src.sensor_storage as db
 
-        for t in db.get_all_sensor_types():
+        types = db.get_all_sensor_types()
+        # Sort by descending plugin count — more specific types first.
+        # A stereo camera (2 plugins) must be checked before mono (1 plugin),
+        # otherwise mono would match stereo SDFs too.
+        def _plugin_count(t):
+            det = t.get("detection", {})
+            plugins = det.get("plugins") or (
+                [det["plugin"]] if det.get("plugin") else []
+            )
+            return len(plugins)
+
+        types.sort(key=_plugin_count, reverse=True)
+
+        for t in types:
             det = t.get("detection", {})
             if det.get("mode") == "simple":
-                # Support both old single-plugin and new multi-plugin formats
                 plugins = det.get("plugins") or (
                     [det["plugin"]] if det.get("plugin") else []
                 )
-                if plugins and all(p in content for p in plugins):
+                if not plugins:
+                    continue
+                # Count required occurrences of each plugin string.
+                # E.g. stereo camera: ["lib_cam.so", "lib_cam.so"] → need ≥2 occurrences.
+                required = Counter(plugins)
+                if all(content.count(p) >= n for p, n in required.items()):
                     return t["sensor_type"]
     except Exception as e:
         logger.error("_detect_from_db failed: %s", e)
