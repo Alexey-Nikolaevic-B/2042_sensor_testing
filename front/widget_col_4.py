@@ -55,6 +55,8 @@ class ColCapture(QWidget):
         self._last_sensor_data: dict = {}
         self._last_obs_img: bytes | None = None
         self._last_sensor_img: bytes | None = None
+        self._image_too_large = False
+        self._image_too_large_resolution = ""
 
         self._setup_heights()
         self._setup_styles()
@@ -208,10 +210,20 @@ class ColCapture(QWidget):
         else:
             if self._last_sensor_img:
                 self._show_image_bytes(self._last_sensor_img, "no sensor image")
+            elif getattr(self, "_image_too_large", False):
+                res = getattr(self, "_image_too_large_resolution", "?")
+                self._show_placeholder(
+                    f"Изображение {res} слишком большое для отображения в UI.\n"
+                    f"Тест выполняется в фоновом режиме без вывода кадров."
+                )
             elif self._last_sensor_data:
                 self._show_static_image(self._last_sensor_data.get("image_path", ""))
             else:
                 self._clear_display()
+
+    # Max resolution for UI rendering (width * height).
+    # Images above this are skipped to prevent OOM crashes.
+    _MAX_RENDER_PIXELS = 1920 * 1080
 
     def _render_sensor_image(self, data: dict) -> bytes | None:
         """Convert raw ROS messages to JPEG bytes for display."""
@@ -230,6 +242,19 @@ class ColCapture(QWidget):
             _dbg.warning("[col4] render: no messages — returning None")
             return None
         msg = msgs[-1]
+
+        # Skip rendering for very large images to prevent OOM
+        w = getattr(msg, "width", 0) or 0
+        h = getattr(msg, "height", 0) or 0
+        if w * h > self._MAX_RENDER_PIXELS:
+            _dbg.warning(
+                "[col4] render: image too large (%dx%d = %d px), skipping to prevent OOM",
+                w, h, w * h,
+            )
+            self._image_too_large = True
+            self._image_too_large_resolution = f"{w}x{h}"
+            return None
+        self._image_too_large = False
 
         _dbg.warning(
             "[col4] render: msg type=%s attrs=%s",
@@ -422,6 +447,13 @@ class ColCapture(QWidget):
                 self.lbl_capture_image.setText("")
                 return
         self._clear_display(fallback)
+
+    def _show_placeholder(self, text: str) -> None:
+        self.lbl_capture_image.setPixmap(QPixmap())
+        self.lbl_capture_image.setText(text)
+        self.lbl_capture_image.setStyleSheet(
+            f"color: {Colors.TEXT_MUTED}; font-size: 12px; padding: 20px;"
+        )
 
     def _clear_display(self, text: str = "no capture data") -> None:
         self.lbl_capture_image.setPixmap(QPixmap())

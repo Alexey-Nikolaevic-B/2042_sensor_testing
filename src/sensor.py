@@ -247,7 +247,13 @@ class Sensor:
         while time.time() < deadline:
             try:
                 msg = rospy.wait_for_message(t, msg_type, timeout=timeout)
-                results.append(msg)
+                # For large image messages, keep only the latest to prevent OOM.
+                # A 4K RGB frame is ~28MB; accumulating 30fps for 3s = ~2.5GB.
+                msg_bytes = len(getattr(msg, "data", b""))
+                if msg_bytes > 2_000_000:  # >2MB per message — likely high-res image
+                    results = [msg]  # replace, don't accumulate
+                else:
+                    results.append(msg)
             except Exception:
                 continue
 
@@ -258,7 +264,7 @@ class Sensor:
                 "topic": t,
                 "count": len(results),
                 "image_path": self.image_path,
-                "messages": results,  # raw ROS messages for rendering
+                "messages": results[-1:],  # only last message for UI rendering
             }
             obs_img = (
                 simulator.capture_observer_frame()
