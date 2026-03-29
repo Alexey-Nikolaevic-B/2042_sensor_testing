@@ -7,6 +7,16 @@ logger = logging.getLogger(__name__)
 
 
 def detect_topics_from_sdf(sdf_path: str) -> list[str]:
+    """Extract ROS topics from an SDF file.
+
+    Handles multiple plugins per SDF (e.g. stereo cameras with two
+    libgazebo_ros_camera.so instances).  Each <plugin> block is processed
+    independently — its own namespace/cameraName/robotNamespace is used
+    to form fully-qualified topic paths.
+
+    Topics containing 'image_raw' are sorted to the front of the list
+    because camera tests rely on them as the primary data source.
+    """
     try:
         with open(sdf_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -17,64 +27,75 @@ def detect_topics_from_sdf(sdf_path: str) -> list[str]:
     seen = set()
     topics = []
 
-    namespace = ""
-    namespace_match = re.search(r"<namespace>\s*(/[^<\s]+)\s*</namespace>", content)
-    if namespace_match:
-        namespace = namespace_match.group(1).rstrip("/")
-
-    for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
-        t = m.group(1).strip()
-        if t and t not in seen:
-            seen.add(t)
-            topics.append(t)
-
-    for m in re.finditer(r"<argument>\s*([^<]+?)\s*</argument>", content):
-        arg = m.group(1).strip()
-
-        if ":= " in arg or ":=" in arg:
-            parts = re.split(r":=\s*", arg)
-            if len(parts) == 2:
-                remapped = parts[1].strip()
-                if not remapped.startswith("/") and namespace:
-                    topic = f"{namespace}/{remapped}"
-                elif remapped.startswith("/"):
-                    topic = remapped
-                else:
-                    topic = remapped
-
-                if topic and topic not in seen:
-                    seen.add(topic)
-                    topics.append(topic)
-        else:
-            if not arg.startswith("/") and namespace:
-                topic = f"{namespace}/{arg}"
-            elif arg.startswith("/"):
-                topic = arg
-            else:
-                topic = arg
-
-            if (
-                topic
-                and topic not in seen
-                and not topic.startswith("--")
-                and not topic.startswith("-")
-            ):
-                seen.add(topic)
-                topics.append(topic)
-
-    for m in re.finditer(r"<(\w*[Tt]opic\w*)>\s*([^<\s]+)\s*</\1>", content):
-        topic_name = m.group(2).strip()
-        if not topic_name.startswith("/") and namespace:
-            topic = f"{namespace}/{topic_name}"
-        elif topic_name.startswith("/"):
-            topic = topic_name
-        else:
-            topic = topic_name
-
-        if topic and topic not in seen and not topic.startswith("--"):
+    def _add(topic: str) -> None:
+        if topic and topic not in seen and not topic.startswith("-"):
             seen.add(topic)
             topics.append(topic)
 
+    def _qualify(name: str, ns: str) -> str:
+        """Prepend namespace if the name is not already absolute."""
+        if name.startswith("/"):
+            return name
+        if ns:
+            return f"{ns.rstrip('/')}/{name.lstrip('/')}"
+        return f"/{name}"
+
+    # ── Process each <plugin> block independently ────────────────────
+    for plugin_m in re.finditer(
+        r"<plugin\b[^>]*>(.*?)</plugin>", content, re.DOTALL
+    ):
+        block = plugin_m.group(1)
+
+        # Determine the namespace for this plugin block.
+        # Priority: <robotNamespace> > <namespace> > <cameraName>
+        ns = ""
+        rns = re.search(r"<robotNamespace>\s*(.*?)\s*</robotNamespace>", block)
+        if rns:
+            ns = rns.group(1).strip().rstrip("/")
+        else:
+            ns_m = re.search(r"<namespace>\s*(.*?)\s*</namespace>", block)
+            if ns_m:
+                ns = ns_m.group(1).strip().rstrip("/")
+
+        # <cameraName> — Gazebo camera plugin uses this as topic prefix:
+        #   /cameraName/image_raw, /cameraName/camera_info
+        cam_name = re.search(r"<cameraName>\s*(.*?)\s*</cameraName>", block)
+        if cam_name:
+            cam = cam_name.group(1).strip()
+            if cam:
+                # cameraName overrides namespace for libgazebo_ros_camera topics
+                _add(f"/{cam}/image_raw")
+                _add(f"/{cam}/camera_info")
+
+        # <topicName> / <*Topic*> — explicit topic tags
+        for tm in re.finditer(r"<(\w*[Tt]opic\w*Name?)>\s*([^<\s]+)\s*</\1>", block):
+            _add(_qualify(tm.group(2).strip(), ns))
+
+        # <argument>xxx:=yyy</argument> — ROS remapping
+        for am in re.finditer(r"<argument>\s*([^<]+?)\s*</argument>", block):
+            arg = am.group(1).strip()
+            if ":=" in arg:
+                parts = re.split(r":=\s*", arg)
+                if len(parts) == 2:
+                    remapped = parts[1].strip()
+                    # If cameraName exists, topics are under /cameraName/
+                    if cam_name and cam_name.group(1).strip():
+                        _add(f"/{cam_name.group(1).strip()}/{remapped}")
+                    else:
+                        _add(_qualify(remapped, ns))
+
+    # ── Fallback: scan entire file for topic-like tags outside <plugin> ──
+    # (catches standalone <topic>/path</topic> etc.)
+    for m in re.finditer(r"<\w*[Tt]opic\w*>\s*(/[^<\s]+)\s*</\w*[Tt]opic\w*>", content):
+        _add(m.group(1).strip())
+
+    # ── Sort: image_raw topics first (primary data source for tests) ──
+    def _sort_key(t: str) -> tuple:
+        if "image_raw" in t:
+            return (0, t)
+        return (1, t)
+
+    topics.sort(key=_sort_key)
     return topics
 
 
