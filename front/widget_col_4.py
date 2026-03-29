@@ -97,7 +97,14 @@ class ColCapture(QWidget):
             for key, value in result.items():
                 if isinstance(value, dict) and key in ("metrics", "checks", "diagnostics"):
                     for sub_key, sub_val in value.items():
-                        flat_items.append((f"  {sub_key}", sub_val))
+                        # Skip bulky nested lists/dicts that clutter the UI
+                        # (e.g. "measurements": [{...}, {...}], "samples": [...])
+                        if isinstance(sub_val, list) and sub_val and isinstance(sub_val[0], dict):
+                            flat_items.append((f"  {sub_key}", f"[{len(sub_val)} items]"))
+                        elif isinstance(sub_val, dict) and len(str(sub_val)) > 200:
+                            flat_items.append((f"  {sub_key}", f"{{{len(sub_val)} keys}}"))
+                        else:
+                            flat_items.append((f"  {sub_key}", sub_val))
                 else:
                     flat_items.append((key, value))
 

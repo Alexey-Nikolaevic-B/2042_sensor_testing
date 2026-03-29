@@ -122,6 +122,93 @@ def _mono_get_last_test_diagnostics(ctx) -> Dict[str, Any]:
     return dict(ctx._last_test_diagnostics)
 
 
+_MONO_TEST_DESCRIPTIONS = {
+    "c1_size_order_test": (
+        "Тест порядка размеров (C1). Красный куб размещается на расстояниях {positions}м от камеры. "
+        "Проверяется, что проекция куба уменьшается с расстоянием с запасом не менее {margin}x."
+    ),
+    "c2_resolution_test": (
+        "Тест разрешения (C2). Захватывается кадр с камеры и сравнивается фактическое разрешение "
+        "с заданным в SDF: {expected_w}x{expected_h}."
+    ),
+    "c4_geometries_presence_test": (
+        "Тест наличия геометрий (C4). В сцене размещены 4 цветных объекта (красный, зелёный, синий, жёлтый). "
+        "Проверяется, что каждый цвет обнаружен с количеством пикселей не менее {threshold}."
+    ),
+    "c7_occlusion_test": (
+        "Тест окклюзии (C7). Передний куб перемещается по Y, перекрывая задний. "
+        "Проверяется, что при большей окклюзии видимость заднего объекта уменьшается. "
+        "Минимум {threshold} синих пикселей в каждом случае."
+    ),
+    "c9_fov_test": (
+        "Тест поля зрения (C9). Белая сфера перемещается по Y на фиксированном расстоянии {x_fixed}м. "
+        "Определяется граница видимости и вычисляется горизонтальный FOV. "
+        "Допустимое отклонение от заданного FOV ({target_fov:.4f} рад): не более 2%."
+    ),
+    "c10_clipping_test": (
+        "Тест отсечения (C10). Красный куб перемещается вдоль оси X. Определяются границы ближнего "
+        "и дальнего отсечения. Ближнее: {near:.3f}м (найдено: {near_found:.3f}м), "
+        "дальнее: {far:.3f}м (найдено: {far_found:.3f}м). Допуск: 5%."
+    ),
+    "c11_fps_stability_test": (
+        "Тест стабильности FPS (C11). Записываются кадры в течение {duration}с. "
+        "Фактический FPS: {fps:.1f} Гц (требуется ≥95% от {target_fps} Гц). "
+        "Джиттер P95: {jitter:.4f}с (лимит {jitter_limit:.4f}с). Пропуски кадров: {dropouts}."
+    ),
+}
+
+
+def _mono_build_description(func_name: str, result: dict, passed: bool) -> str:
+    """Build a human-readable description for a mono camera test result."""
+    metrics = result.get("metrics", {})
+    tpl = _MONO_TEST_DESCRIPTIONS.get(func_name, "")
+    prefix = "" if passed else "Датчик не прошёл тест. "
+
+    try:
+        if func_name == "c1_size_order_test":
+            desc = tpl.format(
+                positions=metrics.get("positions", "?"),
+                margin=metrics.get("min_margin_ratio", "?"),
+            )
+        elif func_name == "c2_resolution_test":
+            exp = metrics.get("expected_resolution", {})
+            desc = tpl.format(
+                expected_w=exp.get("width", "?"),
+                expected_h=exp.get("height", "?"),
+            )
+        elif func_name == "c4_geometries_presence_test":
+            desc = tpl.format(threshold=metrics.get("threshold", "?"))
+        elif func_name == "c7_occlusion_test":
+            desc = tpl.format(threshold=metrics.get("threshold", "?"))
+        elif func_name == "c9_fov_test":
+            desc = tpl.format(
+                x_fixed=metrics.get("x_fixed_m", "?"),
+                target_fov=float(metrics.get("target_fov_rad", 0)),
+            )
+        elif func_name == "c10_clipping_test":
+            desc = tpl.format(
+                near=float(metrics.get("near_clip_target_m", 0)),
+                far=float(metrics.get("far_clip_target_m", 0)),
+                near_found=float(metrics.get("x_near_m", 0)),
+                far_found=float(metrics.get("x_far_m", 0)),
+            )
+        elif func_name == "c11_fps_stability_test":
+            desc = tpl.format(
+                duration=metrics.get("duration_target_s", "?"),
+                fps=float(metrics.get("fps_actual_hz", 0)),
+                target_fps=metrics.get("update_rate_hz", "?"),
+                jitter=float(metrics.get("jitter_s", 0)),
+                jitter_limit=float(metrics.get("jitter_limit_s", 0)),
+                dropouts=metrics.get("dropouts_count", "?"),
+            )
+        else:
+            desc = ""
+    except Exception:
+        desc = tpl  # fallback — raw template
+
+    return prefix + desc if desc else None
+
+
 def _mono_safe_wrapper(test_func):
     """Wrap mono test entry-point: catch exceptions and return {"passed": False} with diagnostics."""
     import functools
@@ -130,14 +217,19 @@ def _mono_safe_wrapper(test_func):
     @functools.wraps(test_func)
     def wrapper(simulator, sensor, progress_cb=None):
         try:
-            return test_func(simulator, sensor, progress_cb=progress_cb)
+            result = test_func(simulator, sensor, progress_cb=progress_cb)
+            # Add description for passed tests
+            if isinstance(result, dict) and "description" not in result:
+                desc = _mono_build_description(test_func.__name__, result, True)
+                if desc:
+                    result["description"] = desc
+            return result
         except Exception as exc:
             tb = _tb.format_exc()
             print(f"[DEBUG _mono_safe_wrapper] {test_func.__name__} RAISED: {type(exc).__name__}: {exc}")
             print(tb)
             diag = {}
             if "ctx" in test_func.__code__.co_varnames:
-                # ctx is a local — try to recover diagnostics from frame locals
                 import sys
                 frame = sys.exc_info()[2]
                 while frame is not None:
@@ -151,6 +243,9 @@ def _mono_safe_wrapper(test_func):
                 "error": f"{type(exc).__name__}: {exc}",
                 "diagnostics": diag,
             }
+            desc = _mono_build_description(test_func.__name__, result, False)
+            if desc:
+                result["description"] = desc
             if progress_cb:
                 try:
                     progress_cb(100)
@@ -1613,6 +1708,10 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         ) from exc
 
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
+    print(
+        f"[DEBUG C10] near_target={near_target:.3f}m  far_target={far_target:.3f}m  "
+        f"near_search=[{near_start:.3f}, {near_end:.3f}]"
+    )
 
     def _move_and_capture(
         x: float, settle_s: float
@@ -1635,6 +1734,8 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         frame = _mono__msg_to_bgr(ctx, msg)
         red_stats = _mono__red_stats(ctx, frame)
         red_pixels = int(red_stats["red_pixels"])
+        visible = bool(red_stats["visible_by_pixels"])
+        print(f"[DEBUG C10] x={x:.3f}m  red_pixels={red_pixels}  visible={visible}")
         return frame, red_stats, red_pixels
 
     near_before: Optional[Tuple[float, np.ndarray, int]] = None
@@ -2801,6 +2902,10 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         ) from exc
 
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
+    print(
+        f"[DEBUG C10] near_target={near_target:.3f}m  far_target={far_target:.3f}m  "
+        f"near_search=[{near_start:.3f}, {near_end:.3f}]"
+    )
 
     def _move_and_capture(
         x: float, settle_s: float
@@ -2823,6 +2928,8 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         frame = _mono__msg_to_bgr(ctx, msg)
         red_stats = _mono__red_stats(ctx, frame)
         red_pixels = int(red_stats["red_pixels"])
+        visible = bool(red_stats["visible_by_pixels"])
+        print(f"[DEBUG C10] x={x:.3f}m  red_pixels={red_pixels}  visible={visible}")
         return frame, red_stats, red_pixels
 
     near_before: Optional[Tuple[float, np.ndarray, int]] = None
