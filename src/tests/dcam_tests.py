@@ -322,6 +322,7 @@ class _DepthProfileTestContext:
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
         print(f"[DEBUG DepthCtx._open_test_scene] test_name={test_name}")
+        self._simulator = simulator  # store for capture_data calls
         self._last_test_diagnostics = {}
         self._resolved_depth_topic = ""
         self._resolved_image_topic = ""
@@ -825,6 +826,7 @@ class _DepthProfileTestContext:
                 msgs = self.sensor.capture_data(
                     Image, topic=target_topic,
                     window=min(1.0, remaining), timeout=0.25,
+                    simulator=getattr(self, '_simulator', None),
                 )
                 if not msgs:
                     raise rospy.ROSException(f"No messages on {target_topic}")
@@ -1095,6 +1097,7 @@ class _DepthProfileTestContext:
                 wait_t = min(float(timeout), float(self.DEPTH_WAIT_PER_CANDIDATE_S))
                 msgs = self.sensor.capture_data(
                     Image, topic=topic, window=wait_t, timeout=0.25,
+                    simulator=getattr(self, '_simulator', None),
                 )
                 if not msgs:
                     raise RuntimeError(f"No messages on {topic}")
@@ -1113,6 +1116,7 @@ class _DepthProfileTestContext:
         try:
             msgs = self.sensor.capture_data(
                 Image, topic=target_topic, window=timeout, timeout=0.25,
+                simulator=getattr(self, '_simulator', None),
             )
             return msgs[-1] if msgs else None
         except Exception:
