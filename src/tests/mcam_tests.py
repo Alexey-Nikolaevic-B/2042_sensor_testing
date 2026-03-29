@@ -1957,7 +1957,11 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     dropouts = int(np.sum(deltas > (2.0 * ideal_dt))) if deltas.size > 0 else 0
 
     fps_ok = fps_actual >= (0.95 * float(ctx.update_rate))
-    jitter_ok = jitter <= float(ctx.C11_MAX_JITTER_S)
+    # Jitter limit: use the larger of the hardcoded limit or 50% of the ideal frame time.
+    # This prevents false failures on low-FPS cameras where even small timing
+    # variations exceed the absolute 15ms threshold.
+    jitter_limit = max(float(ctx.C11_MAX_JITTER_S), ideal_dt * 0.5)
+    jitter_ok = jitter <= jitter_limit
     dropouts_ok = dropouts == 0
 
     metrics.update(
@@ -1969,6 +1973,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             "timestamps_interval_s": total_dt,
             "fps_actual_hz": fps_actual,
             "ideal_dt_s": ideal_dt,
+            "jitter_limit_s": float(jitter_limit),
             "jitter_s": jitter,
             "jitter_old_max_abs_s": jitter_max_abs,
             "max_dt_s": max_dt,
@@ -2005,7 +2010,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     if not (fps_ok and jitter_ok and dropouts_ok):
         raise AssertionError(
             f"C11 failed: fps={fps_actual:.3f} (target>={0.95 * ctx.update_rate:.3f}), "
-            f"jitter={jitter:.4f}s (limit<={ctx.C11_MAX_JITTER_S:.4f}s), dropouts={dropouts}"
+            f"jitter={jitter:.4f}s (limit<={jitter_limit:.4f}s), dropouts={dropouts}"
         )
 
     return {"id": "C11", "passed": True, "metrics": metrics}

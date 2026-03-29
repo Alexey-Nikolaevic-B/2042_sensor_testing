@@ -23,7 +23,21 @@ _LEVEL_FMT: dict[str, tuple[str, str]] = {
 }
 
 
-_fmt_value = lambda v: "\n".join(f"- {x}" for x in v) if isinstance(v, list) else str(v)
+def _fmt_value(v):
+    if isinstance(v, list):
+        return "\n".join(f"- {x}" for x in v)
+    if isinstance(v, dict):
+        lines = []
+        for k, val in v.items():
+            if isinstance(val, dict):
+                inner = ", ".join(f"{ik}: {iv}" for ik, iv in val.items())
+                lines.append(f"{k}: {{{inner}}}")
+            elif isinstance(val, list):
+                lines.append(f"{k}: [{', '.join(str(x) for x in val)}]")
+            else:
+                lines.append(f"{k}: {val}")
+        return "\n".join(lines)
+    return str(v)
 
 
 class ColCapture(QWidget):
@@ -76,7 +90,18 @@ class ColCapture(QWidget):
             )
             layout.addWidget(lbl)
         else:
+            # Flatten result: top-level keys shown as rows;
+            # if value is a dict (e.g. "metrics"), expand its children
+            # as separate rows with indented keys.
+            flat_items = []
             for key, value in result.items():
+                if isinstance(value, dict) and key in ("metrics", "checks", "diagnostics"):
+                    for sub_key, sub_val in value.items():
+                        flat_items.append((f"  {sub_key}", sub_val))
+                else:
+                    flat_items.append((key, value))
+
+            for key, value in flat_items:
                 row = QFrame()
                 row.setStyleSheet(
                     f"QFrame {{ border-bottom: 1px solid {Colors.BORDER};"
