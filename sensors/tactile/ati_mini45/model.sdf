@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="ati_mini45">
+    <pose>0 0 0 0 0 0</pose>
+    <static>false</static>
+    <link name="mount">
+      <gravity>false</gravity>
+      <inertial>
+        <mass>1000.0</mass>
+        <inertia>
+          <ixx>1.0</ixx>
+          <iyy>1.0</iyy>
+          <izz>1.0</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+    </link>
+    <link name="body">
+      <inertial>
+        <mass>0.0917</mass>
+        <inertia>
+          <ixx>1.348937558333e-05</ixx>
+          <iyy>1.348937558333e-05</iyy>
+          <izz>2.321156250000e-05</izz>
+          <ixy>0.0</ixy>
+          <ixz>0.0</ixz>
+          <iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry>
+          <cylinder>
+            <radius>0.0225</radius>
+            <length>0.0157</length>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.0225</radius>
+            <length>0.0157</length>
+          </cylinder>
+        </geometry>
+      </visual>
+    </link>
+    <joint name="ft_joint" type="fixed">
+      <parent>mount</parent>
+      <child>body</child>
+      <sensor name="ft_sensor" type="force_torque">
+        <always_on>true</always_on>
+        <update_rate>1000</update_rate>
+        <visualize>false</visualize>
+        <force_torque>
+          <frame>child</frame>
+          <measure_direction>child_to_parent</measure_direction>
+        </force_torque>
+      </sensor>
+    </joint>
+  </model>
+</sdf>
