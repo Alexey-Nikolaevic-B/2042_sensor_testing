@@ -102,11 +102,23 @@ def _run_camera_context_test(
     except Exception as e:
         import traceback
 
+        tb = traceback.format_exc()
         print(
             f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}"
         )
-        print(traceback.format_exc())
-        raise
+        print(tb)
+        diag = ctx.get_last_test_diagnostics() if hasattr(ctx, "get_last_test_diagnostics") else {}
+        result = {
+            "passed": False,
+            "error": f"{type(e).__name__}: {e}",
+            "diagnostics": diag,
+        }
+        if progress_cb:
+            try:
+                progress_cb(100)
+            except Exception:
+                pass
+        return result
     if not isinstance(result, dict):
         result = {"result": result}
     else:

@@ -1,4 +1,3 @@
-import ctypes
 import time
 import traceback
 import threading
@@ -29,36 +28,6 @@ class _Worker(QObject):
 
     def request_stop(self):
         self._stop_requested = True
-
-    def raise_in_thread(self, exc_type):
-        tid = self._thread_id
-        if tid is None:
-            self.log_line.emit(
-                f"[Worker:{self._func_name}] raise_in_thread: no thread_id"
-            )
-            return
-        try:
-            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
-                ctypes.c_ulong(tid),
-                ctypes.py_object(exc_type),
-            )
-            if res == 0:
-                self.log_line.emit(
-                    f"[Worker:{self._func_name}] raise_in_thread: tid {tid} not found"
-                )
-            elif res > 1:
-                ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(tid), None)
-                self.log_line.emit(
-                    f"[Worker:{self._func_name}] raise_in_thread: affected {res} threads — undone"
-                )
-            else:
-                self.log_line.emit(
-                    f"[Worker:{self._func_name}] {exc_type.__name__} injected into tid {tid}"
-                )
-        except Exception as exc:
-            self.log_line.emit(
-                f"[Worker:{self._func_name}] raise_in_thread error: {exc}"
-            )
 
     @pyqtSlot()
     def run(self):
@@ -178,7 +147,7 @@ class TestRunner(QObject):
         self.log_line.emit(f"[TestRunner] force_kill() called, worker={worker}")
 
         if worker is not None:
-            worker.raise_in_thread(SystemExit)
+            worker.request_stop()
 
         try:
             proc = getattr(self._core.simulator, "gazebo_process", None)

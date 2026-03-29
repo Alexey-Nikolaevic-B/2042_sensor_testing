@@ -122,6 +122,45 @@ def _mono_get_last_test_diagnostics(ctx) -> Dict[str, Any]:
     return dict(ctx._last_test_diagnostics)
 
 
+def _mono_safe_wrapper(test_func):
+    """Wrap mono test entry-point: catch exceptions and return {"passed": False} with diagnostics."""
+    import functools
+    import traceback as _tb
+
+    @functools.wraps(test_func)
+    def wrapper(simulator, sensor, progress_cb=None):
+        try:
+            return test_func(simulator, sensor, progress_cb=progress_cb)
+        except Exception as exc:
+            tb = _tb.format_exc()
+            print(f"[DEBUG _mono_safe_wrapper] {test_func.__name__} RAISED: {type(exc).__name__}: {exc}")
+            print(tb)
+            diag = {}
+            if "ctx" in test_func.__code__.co_varnames:
+                # ctx is a local — try to recover diagnostics from frame locals
+                import sys
+                frame = sys.exc_info()[2]
+                while frame is not None:
+                    local_ctx = frame.tb_frame.f_locals.get("ctx")
+                    if local_ctx is not None and hasattr(local_ctx, "_last_test_diagnostics"):
+                        diag = dict(local_ctx._last_test_diagnostics)
+                        break
+                    frame = frame.tb_next
+            result = {
+                "passed": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "diagnostics": diag,
+            }
+            if progress_cb:
+                try:
+                    progress_cb(100)
+                except Exception:
+                    pass
+            return result
+
+    return wrapper
+
+
 def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None) -> Image:
     target_topic = str(topic or ctx.IMAGE_TOPIC)
     print(f"[DEBUG _mono__wait_image] topic={target_topic}, timeout={timeout:.1f}s")
@@ -1972,6 +2011,7 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     return {"id": "C11", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2119,6 +2159,7 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C1", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2241,6 +2282,7 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C2", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2344,6 +2386,7 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C4", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2483,6 +2526,7 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C7", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2662,6 +2706,7 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C9", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:
@@ -2950,6 +2995,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
     return {"id": "C10", "passed": True, "metrics": metrics}
 
 
+@_mono_safe_wrapper
 def c11_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         try:

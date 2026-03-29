@@ -53,18 +53,10 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     logger.debug("Sensor SDF exists: %s", os.path.exists(sensor.sdf_path))
 
     if not os.path.exists(world_path):
-        logger.warning("World file not found, using fallback")
-        fallback = "/tmp/default_world.world"
-        with open(fallback, "w") as f:
-            f.write("""<?xml version="1.0"?>
-<sdf version="1.6">
-  <world name="default">
-    <include><uri>model://sun</uri></include>
-    <include><uri>model://ground_plane</uri></include>
-  </world>
-</sdf>""")
-        world_path = fallback
-        logger.debug("Created fallback world: %s", world_path)
+        result["error"] = f"World file not found: {world_path}"
+        result["duration"] = round(time.time() - t0, 2)
+        logger.error("World file not found: %s", world_path)
+        return result
 
     logger.info("Opening Gazebo scene...")
     if not simulator.open_scene(world_path, sensor.sdf_path):

@@ -561,10 +561,12 @@ class _StereoProfileTestContext:
             pair_holder: Dict[str, Any] = {}
 
             def _left_count(_msg: Image) -> None:
-                attempt_diag["left_msgs"] += 1
+                with lock:
+                    attempt_diag["left_msgs"] += 1
 
             def _right_count(_msg: Image) -> None:
-                attempt_diag["right_msgs"] += 1
+                with lock:
+                    attempt_diag["right_msgs"] += 1
 
             def _pair_cb(left_msg: Image, right_msg: Image) -> None:
                 with lock:
@@ -1047,6 +1049,7 @@ class _StereoProfileTestContext:
 
         return {
             "id": "STEREO_DISPARITY",
+            "passed": True,
             "metrics": metrics,
         }
 
@@ -1481,7 +1484,7 @@ def _run_camera_context_test(
         }
 
     if context_cls.__name__ == "_StereoProfileTestContext" and not getattr(
-        ctx, "LEFT_TOPIC", ""
+        ctx, "LEFT_IMAGE_TOPIC", ""
     ):
         msg = (
             f"Test {method_name} requires a stereo camera, but sensor "
@@ -1512,11 +1515,23 @@ def _run_camera_context_test(
     except Exception as e:
         import traceback
 
+        tb = traceback.format_exc()
         print(
             f"[DEBUG _run_camera_context_test] method RAISED: {type(e).__name__}: {e}"
         )
-        print(traceback.format_exc())
-        raise
+        print(tb)
+        diag = ctx.get_last_test_diagnostics() if hasattr(ctx, "get_last_test_diagnostics") else {}
+        result = {
+            "passed": False,
+            "error": f"{type(e).__name__}: {e}",
+            "diagnostics": diag,
+        }
+        if progress_cb:
+            try:
+                progress_cb(100)
+            except Exception:
+                pass
+        return result
     if not isinstance(result, dict):
         result = {"result": result}
     else:
