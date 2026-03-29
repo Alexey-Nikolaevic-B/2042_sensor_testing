@@ -171,7 +171,7 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
     logger.info("Capturing from %s ...", sensor.topic)
     try:
         msgs = sensor.capture_data(
-            msg_class, topic=sensor.topic, window=3.0, timeout=1.0, simulator=simulator
+            msg_class, topic=sensor.topic, window=0.5, timeout=0.5, simulator=simulator
         )
         if not msgs:
             result["error"] = "No messages received within capture window"
@@ -368,7 +368,7 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
     logger.info("Waiting for image on %s (timeout=10s)...", primary_topic)
     try:
         msgs = sensor.capture_data(
-            Image, topic=primary_topic, window=3.0, timeout=0.5, simulator=simulator,
+            Image, topic=primary_topic, window=0.5, timeout=0.5, simulator=simulator,
         )
         if not msgs:
             raise RuntimeError(f"No messages received on {primary_topic}")

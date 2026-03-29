@@ -293,7 +293,7 @@ def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None, s
     print(f"[DEBUG _mono__wait_image] topic={target_topic}, timeout={timeout:.1f}s, simulator={'yes' if sim else 'NO'}")
     try:
         msgs = ctx.sensor.capture_data(
-            Image, topic=target_topic, window=min(timeout, 3.0), timeout=0.5, simulator=sim,
+            Image, topic=target_topic, window=0.5, timeout=0.5, simulator=sim,
         )
         if not msgs:
             raise rospy.ROSException(f"No messages received on {target_topic}")
