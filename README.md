@@ -3,20 +3,6 @@
 Десктопное приложение (PyQt5) для автоматизированного тестирования датчиков в симуляторе Gazebo.
 Поддерживаемые типы датчиков: mono/depth/stereo камеры, RFID, тактильные.
 
----
-
-## Системные требования
-
-| Компонент | Версия | Примечание |
-|-----------|--------|------------|
-| ОС | Ubuntu 20.04 LTS | Единственная официально поддерживаемая |
-| ROS | Noetic | Последняя версия для Ubuntu 20.04 |
-| Gazebo | 11 | Устанавливается вместе с ROS Noetic |
-| Python | 3.14+ | Должен быть установлен отдельно |
-| Qt | PyQt5 | Устанавливается через pip |
-
----
-
 ## Установка
 
 ### 1. Установите ROS Noetic
@@ -84,117 +70,28 @@ python3 __main__.py
 
 При первом запуске база данных (`sensor_storage.db`) создаётся автоматически. Она будет пустой — без датчиков.
 
+### Добавление типа датчика
+
+1. В левой колонкe нажмите кнопку **"+"**. Там две кнопки выбрать верхнюю.
+2. Добваить новый тип датичка
+
 ### Добавление датчика
 
-1. В левой колонке (Col 1) нажмите кнопку **"+"**.
-2. В диалоге выберите SDF-файл датчика из папки `sensors/`:
-
-**Камеры — mono:**
-| Файл | Разрешение | FOV | Описание |
-|------|-----------|-----|----------|
-| `camera/mono_camera.sdf` | 3840×2400 | 75° | Базовая mono камера, 5 Hz |
-| `camera/picam3_std.sdf` | 1920×1080 | 66° | Raspberry Pi Camera v3 |
-| `camera/uvc_profile_640x480_60deg.sdf` | 640×480 | 60° | Стандартный UVC профиль |
-| `camera/axis_wide_110deg.sdf` | 1920×1080 | 110° | Широкоугольная камера |
-
-**Камеры — depth:**
-| Файл | Разрешение | FOV | Описание |
-|------|-----------|-----|----------|
-| `camera/depth_camera.sdf` | 1280×960 | 80° | Базовая depth камера, 5 Hz |
-| `camera/d455_like.sdf` | 1280×720 | 86° | Intel RealSense D455 |
-| `camera/azure_kinect_wfov.sdf` | 512×512 | 120° | Azure Kinect (Wide FOV) |
-
-**Камеры — stereo:**
-| Файл | Разрешение | FOV | Baseline | Описание |
-|------|-----------|-----|----------|----------|
-| `camera/d435_like.sdf` | 1280×720 | 87° | — | Intel RealSense D435 (RGB + depth) |
-| `camera/bumblebee2_like.sdf` | 1024×768 | 70° | 12 см | Point Grey Bumblebee2 |
-| `camera/zed2i_like.sdf` | 1920×1200 | 110° | 12 см | Stereolabs ZED 2i |
-| `camera/zed_mini.sdf` | 1920×1080 | 102° | 6.3 см | Stereolabs ZED Mini |
-
-**Другие датчики:**
-| Файл | Тип |
-|------|-----|
-| `rfid/rfid_antenna.sdf` | RFID антенна |
-| `tactile/ati_nano17/model.sdf` | Тактильный (ATI Nano17) |
-| `tactile/ati_nano25/model.sdf` | Тактильный (ATI Nano25) |
-| `tactile/ati_mini45/model.sdf` | Тактильный (ATI Mini45) |
-| `tactile/leptrino_cfs018ca101u/model.sdf` | Тактильный (Leptrino) |
-| `tactile/wacoh_dynpick_wlf_6a500_20_rad_b/model.sdf` | Тактильный (Wacoh DynPick) |
-| `tactile/amti_he6x6_force_plate/model.sdf` | Тактильный (AMTI Force Plate) |
-
+1. В левой колонкe нажмите кнопку **"+"**. Нижняя кнопка.
+2. Выберите SDF-файл для датчика.
 3. Тип датчика определится автоматически из SDF.
 4. Подтвердите добавление.
 
 ### Запуск тестов
 
-1. Выберите датчик в Col 1 (клик по нему).
-2. В Col 3 появится список доступных тестов.
+1. Выберите датчик (клик по нему).
+2. В третей колонке появится список доступных тестов.
 3. Нажмите кнопку запуска (**Play**) рядом с тестом или кнопку **"Run All"** для запуска всех.
-4. Результаты отобразятся в Col 4 (правая панель).
+4. Результаты отобразятся нв правой панели.
 
----
 
-## Структура проекта
 
-```
-.
-├── __main__.py              # Точка входа
-├── config.py                # Конфигурация (читает config.yaml)
-├── config.yaml              # Настройки путей, таймаутов
-├── requirements.txt         # Python-зависимости
-├── setup.sh                 # Скрипт установки
-├── log_config.json          # Настройки логирования
-│
-├── front/                   # Интерфейс (PyQt5)
-│   ├── main.py              # Главное окно (4 колонки)
-│   ├── widget_col_1.py      # Список датчиков
-│   ├── widget_col_2.py      # Детали датчика
-│   ├── widget_col_3.py      # Список тестов
-│   ├── widget_col_4.py      # Результаты, логи, изображения
-│   ├── logic_queue_manager.py   # Очередь тестов
-│   ├── logic_test_runner.py     # Выполнение тестов
-│   ├── logic_sensor_repository.py # Кэш датчиков + SQLite
-│   ├── dialog_add_sensor.py     # Диалог добавления датчика
-│   ├── dialog_add_sensor_type.py # Диалог типа датчика
-│   ├── dialog_edit_tests.py     # Редактирование тестов
-│   ├── _theme.py            # Цвета и стили
-│   ├── icon/                # Иконки
-│   └── qt/                  # Qt-ресурсы
-│
-├── src/                     # Бэкенд
-│   ├── core.py              # Ядро: связь с Simulator + реестр тестов
-│   ├── sensor.py            # Модель датчика, захват данных
-│   ├── sensor_storage.py    # SQLite: датчики, результаты, типы
-│   ├── gazebo_simulator.py  # Управление ROS/Gazebo
-│   ├── detector.py          # Автоопределение типа датчика из SDF
-│   └── tests/               # Тестовые функции
-│       ├── _common.py       # Реестр TESTS, утилиты, Worlds
-│       ├── generic_tests.py # Базовый тест (sensor_capture_basic)
-│       ├── mcam_tests.py    # Тесты mono камеры (C1-C11)
-│       ├── dcam_tests.py    # Тесты depth камеры (C3, C5, C6)
-│       ├── scam_tests.py    # Тесты stereo камеры (S1, S2)
-│       ├── rfid_tests.py    # Тесты RFID
-│       └── tactile_tests.py # Тесты тактильных датчиков (T1-T4)
-│
-├── assets/
-│   ├── sensors/             # Примеры SDF-файлов датчиков
-│   ├── worlds/              # World-файлы для Gazebo (сцены тестов)
-│   └── observer_camera.sdf  # Камера-наблюдатель
-│
-├── catkin_ws/               # ROS workspace
-│   ├── scenario_test_pkg/   # Пакет запуска сценариев
-│   └── RFID_Sensor_Plugin_gazebo/ # RFID-плагин для Gazebo
-│
-└── sensors/                 # SDF-файлы датчиков для добавления в UI
-    ├── camera/              # Mono, depth, stereo камеры (11 профилей)
-    ├── rfid/                # RFID антенна
-    └── tactile/             # Тактильные датчики (6 профилей)
-```
-
----
-
-## Решение типичных проблем
+## Типичные проблы
 
 ### Приложение не запускается: `FileNotFoundError: log_config.json`
 
@@ -316,23 +213,6 @@ rm sensor_storage.db
 find . -type d -name __pycache__ -exec rm -rf {} +
 python3 __main__.py
 ```
-
----
-
-## Конфигурация
-
-Файл `config.yaml` в корне проекта. Основные параметры:
-
-| Параметр | Значение по умолчанию | Описание |
-|----------|----------------------|----------|
-| `CATKIN_SETUP_DIR` | `catkin_ws/devel/setup.bash` | Путь к setup.bash catkin workspace |
-| `SENSOR_PKG` | `scenario_test_pkg` | ROS-пакет для запуска сценариев |
-| `LAUNCH_FILE` | `scenario.launch` | Файл запуска Gazebo |
-| `WORLDS_PATH` | `resources/worlds/` | Директория с world-файлами |
-| `SENSORS_PATH` | `resources/sensors/` | Директория с SDF датчиков |
-| `MESSAGE_TIMEOUT` | `10` | Таймаут ожидания ROS-сообщения (секунды) |
-| `SAVE_SENSOR_DATA` | `true` | Сохранять данные датчиков |
-| `SAVE_DEBUG_DATA` | `true` | Сохранять отладочные данные |
 
 ---
 
