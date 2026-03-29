@@ -76,15 +76,22 @@ def _depth_build_description(method_name: str, result: dict, passed: bool) -> st
             x_max = float(metrics.get("x_max_ok_m", 0))
             checks = metrics.get("checks", {})
             width = float(checks.get("interval_width_m", x_max - x_min))
+            tol = metrics.get("tolerance_m", "?")
+            n_samples = len(metrics.get("samples", []))
+            ok_count = sum(1 for s in metrics.get("samples", []) if s.get("ok"))
             if passed:
                 desc = (
                     f"Тест пройден: обнаружен стабильный рабочий диапазон [{x_min:.2f}, {x_max:.2f}]м "
-                    f"(ширина {width:.2f}м, требовалось ≥{checks.get('min_interval_required_m', '?')}м)."
+                    f"(ширина {width:.2f}м, требовалось ≥{checks.get('min_interval_required_m', '?')}м). "
+                    f"Из {n_samples} контрольных позиций {ok_count} прошли проверку глубины (допуск ≤{tol}м). "
+                    f"За пределами этого интервала объект может быть визуально виден, но измеренная "
+                    f"глубина отклоняется от ожидаемой из-за ограничений метода детекции."
                 )
             else:
                 desc = (
                     f"Стабильный рабочий диапазон слишком узкий: [{x_min:.2f}, {x_max:.2f}]м "
-                    f"(ширина {width:.2f}м)."
+                    f"(ширина {width:.2f}м). Из {n_samples} позиций только {ok_count} прошли "
+                    f"проверку глубины (допуск ≤{tol}м)."
                 )
         elif method_name == "c6_small_displacement_sensitivity_test":
             ratio = float(metrics.get("changed_ratio", 0))
