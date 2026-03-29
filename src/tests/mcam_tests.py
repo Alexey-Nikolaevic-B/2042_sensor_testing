@@ -205,18 +205,26 @@ def _mono_build_description(func_name: str, result: dict, passed: bool) -> str:
                     f"отклонение: {metrics.get('relative_error', 0):.2%}."
                 )
         elif func_name == "c10_clipping_test":
+            checks = metrics.get("checks", {})
+            near_x = metrics.get("x_near_m", 0)
+            far_x = metrics.get("x_far_m", 0)
+            min_far = checks.get("far_min_required_m", 0)
             if passed:
                 desc = (
-                    f"Тест пройден: границы отсечения в пределах допуска. "
-                    f"Ближнее: найдено {metrics.get('x_near_m', 0):.3f}м (задано {metrics.get('near_clip_target_m', 0):.3f}м). "
-                    f"Дальнее: найдено {metrics.get('x_far_m', 0):.1f}м (задано {metrics.get('far_clip_target_m', 0):.1f}м)."
+                    f"Тест пройден: объект обнаружен вблизи камеры ({float(near_x):.2f}м) "
+                    f"и виден на расстоянии до {float(far_x):.1f}м "
+                    f"(требовалось ≥{float(min_far):.1f}м)."
                 )
             else:
-                desc = (
-                    f"Границы отсечения за пределами допуска. "
-                    f"Ближнее: {metrics.get('x_near_m', 0):.3f}м (задано {metrics.get('near_clip_target_m', 0):.3f}м). "
-                    f"Дальнее: {metrics.get('x_far_m', 0):.1f}м (задано {metrics.get('far_clip_target_m', 0):.1f}м)."
-                )
+                near_vis = checks.get("near_visible", False)
+                far_ok = checks.get("far_ok", False)
+                if not near_vis:
+                    desc = "Объект не обнаружен вблизи камеры — возможно, near clip plane не настроен."
+                else:
+                    desc = (
+                        f"Объект виден только до {float(far_x):.1f}м "
+                        f"(требовалось ≥{float(min_far):.1f}м)."
+                    )
         elif func_name == "c11_fps_stability_test":
             if passed:
                 desc = (
