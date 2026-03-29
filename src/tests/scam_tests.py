@@ -1430,67 +1430,54 @@ class _StereoProfileTestContext:
         return {"id": "S2", "passed": True, "metrics": metrics}
 
 
-_STEREO_TEST_DESCRIPTIONS = {
-    "stereo_topics_presence_test": (
-        "Тест наличия стерео-топиков. В сцене размещены 4 цветных объекта. "
-        "Проверяется, что оба кадра (левый и правый) содержат все 4 цвета "
-        "с количеством пикселей не менее {threshold}."
-    ),
-    "stereo_disparity_test": (
-        "Тест диспаритета. Красный куб на расстоянии 3м. "
-        "Измеряется сдвиг центра куба между левым и правым кадрами. "
-        "Диспаритет: {disparity:.1f}px (минимум {min_disp}px)."
-    ),
-    "stereo_occlusion_test": (
-        "Тест окклюзии стерео. Передний куб перемещается, перекрывая задний. "
-        "Проверяется уменьшение видимости заднего объекта при увеличении окклюзии. "
-        "Минимум {threshold} синих пикселей в каждом случае."
-    ),
-    "s1_stereo_accuracy_test": (
-        "Тест точности стерео-глубины (S1). По стерео-паре вычисляется карта глубины. "
-        "Для {n_objects} цветных объектов сравнивается измеренная глубина с эталонной. "
-        "Пройдено объектов: {passed_objects}/{min_pass} (допуск ≤{max_err:.0%})."
-    ),
-    "s2_texture_vs_smooth_stability_test": (
-        "Тест текстура vs гладкость (S2). Сравнивается качество диспаритета на "
-        "текстурированной и гладкой стенах. Преимущество текстуры: {gain:.4f} "
-        "(минимум {min_gain})."
-    ),
-}
-
-
 def _stereo_build_description(method_name: str, result: dict, passed: bool) -> str:
     metrics = result.get("metrics", {})
-    tpl = _STEREO_TEST_DESCRIPTIONS.get(method_name, "")
     prefix = "" if passed else "Датчик не прошёл тест. "
     try:
         if method_name == "stereo_topics_presence_test":
-            desc = tpl.format(threshold=metrics.get("threshold", "?"))
+            if passed:
+                desc = (
+                    f"Тест пройден: оба кадра (левый и правый) содержат все 4 цветных объекта. "
+                    f"Порог: {metrics.get('threshold', '?')} пикселей."
+                )
+            else:
+                desc = f"Не все цветные объекты обнаружены в стерео-кадрах. Порог: {metrics.get('threshold', '?')}."
         elif method_name == "stereo_disparity_test":
-            desc = tpl.format(
-                disparity=float(metrics.get("disparity_px", 0)),
-                min_disp=metrics.get("min_disparity_px", "?"),
-            )
+            disp = float(metrics.get("disparity_px", 0))
+            min_d = metrics.get("min_disparity_px", "?")
+            if passed:
+                desc = f"Тест пройден: диспаритет {disp:.1f}px корректен (минимум {min_d}px). Стерео-пара формирует сдвиг."
+            else:
+                desc = f"Диспаритет {disp:.1f}px ниже минимума {min_d}px."
         elif method_name == "stereo_occlusion_test":
-            desc = tpl.format(threshold=metrics.get("threshold", "?"))
+            threshold = metrics.get("threshold", "?")
+            if passed:
+                desc = (
+                    f"Тест пройден: при увеличении окклюзии видимость заднего объекта уменьшается. "
+                    f"Порог: {threshold} синих пикселей."
+                )
+            else:
+                desc = f"Окклюзия работает некорректно. Порог: {threshold}."
         elif method_name == "s1_stereo_accuracy_test":
-            desc = tpl.format(
-                n_objects=len(metrics.get("objects", {})),
-                passed_objects=metrics.get("passed_objects", "?"),
-                min_pass=metrics.get("min_pass_objects", "?"),
-                max_err=float(metrics.get("max_rel_error", 0)),
-            )
+            n_obj = len(metrics.get("objects", {}))
+            p_obj = metrics.get("passed_objects", "?")
+            min_p = metrics.get("min_pass_objects", "?")
+            if passed:
+                desc = f"Тест пройден: {p_obj} из {n_obj} объектов измерены с ошибкой ≤{float(metrics.get('max_rel_error', 0)):.0%} (требуется ≥{min_p})."
+            else:
+                desc = f"Точность недостаточна: {p_obj} из {n_obj} объектов в допуске (требуется ≥{min_p})."
         elif method_name == "s2_texture_vs_smooth_stability_test":
             vr = metrics.get("valid_ratio", {})
-            desc = tpl.format(
-                gain=float(vr.get("gain_textured_minus_smooth", 0)),
-                min_gain=metrics.get("min_valid_gain", "?") if "min_valid_gain" in metrics else "0.05",
-            )
+            gain = float(vr.get("gain_textured_minus_smooth", 0))
+            if passed:
+                desc = f"Тест пройден: текстурированная стена даёт лучший диспаритет. Преимущество: {gain:.4f} (минимум 0.05)."
+            else:
+                desc = f"Текстурированная стена не даёт достаточного преимущества. Gain: {gain:.4f}."
         else:
-            desc = ""
+            return None
     except Exception:
-        desc = tpl
-    return prefix + desc if desc else None
+        return None
+    return prefix + desc
 
 
 def _camera_method_passed(result: dict) -> bool:

@@ -94,7 +94,12 @@ class ColCapture(QWidget):
             # if value is a dict (e.g. "metrics"), expand its children
             # as separate rows with indented keys.
             flat_items = []
+            # Put "description" first if it exists
+            if "description" in result:
+                flat_items.append(("description", result["description"]))
             for key, value in result.items():
+                if key == "description":
+                    continue  # already added above
                 if isinstance(value, dict) and key in ("metrics", "checks", "diagnostics"):
                     for sub_key, sub_val in value.items():
                         # Skip bulky nested lists/dicts that clutter the UI

@@ -45,67 +45,59 @@ def _camera_method_passed(result: dict) -> bool:
     return True
 
 
-_DEPTH_TEST_DESCRIPTIONS = {
-    "depth_perception_test": (
-        "Тест восприятия глубины. Зелёный куб размещается на расстояниях {distances}м. "
-        "Проверяется точность измерения глубины (допуск ≤{max_err}м) и монотонность."
-    ),
-    "c3_view_angle_stability_test": (
-        "Тест стабильности по углу обзора (C3). Объект размещается на {n_samples} позициях "
-        "по окружности радиусом {radius}м. Средняя ошибка: {mean_err:.4f}м (лимит {mean_limit}м), "
-        "максимальная: {max_err:.4f}м (лимит {max_limit}м)."
-    ),
-    "c5_working_range_test": (
-        "Тест рабочего диапазона (C5). Куб размещается на {n_positions} позициях от {start}м до {end}м. "
-        "Найден стабильный интервал: [{x_min:.2f}, {x_max:.2f}]м. Допуск по глубине: {tol}м."
-    ),
-    "c6_small_displacement_sensitivity_test": (
-        "Тест чувствительности к малым сдвигам (C6). Куб перемещается с шагом {step}м. "
-        "Доля пар с обнаруженным изменением глубины: {ratio:.1%}. "
-        "Средняя ошибка позиции: {mean_err:.4f}м."
-    ),
-}
-
-
 def _depth_build_description(method_name: str, result: dict, passed: bool) -> str:
     metrics = result.get("metrics", {})
-    tpl = _DEPTH_TEST_DESCRIPTIONS.get(method_name, "")
     prefix = "" if passed else "Датчик не прошёл тест. "
     try:
         if method_name == "depth_perception_test":
-            desc = tpl.format(
-                distances=metrics.get("distances_m", "?"),
-                max_err=metrics.get("max_abs_error_m", "?"),
-            )
+            if passed:
+                desc = (
+                    f"Тест пройден: глубина корректно измеряется на всех дистанциях {metrics.get('distances_m', '?')}м. "
+                    f"Монотонность соблюдена. Допуск: ≤{metrics.get('max_abs_error_m', '?')}м."
+                )
+            else:
+                desc = f"Измерение глубины некорректно. Дистанции: {metrics.get('distances_m', '?')}м. Допуск: ≤{metrics.get('max_abs_error_m', '?')}м."
         elif method_name == "c3_view_angle_stability_test":
-            desc = tpl.format(
-                n_samples=metrics.get("samples_target", "?"),
-                radius=metrics.get("radius_m", "?"),
-                mean_err=float(metrics.get("mean_abs_error_m", 0)),
-                mean_limit=metrics.get("mean_abs_error_limit_m", "?"),
-                max_err=float(metrics.get("max_abs_error_m", 0)),
-                max_limit=metrics.get("max_abs_error_limit_m", "?"),
-            )
+            mean_e = float(metrics.get("mean_abs_error_m", 0))
+            max_e = float(metrics.get("max_abs_error_m", 0))
+            if passed:
+                desc = (
+                    f"Тест пройден: глубина стабильна при разных углах обзора. "
+                    f"Средняя ошибка: {mean_e:.4f}м (лимит {metrics.get('mean_abs_error_limit_m', '?')}м), "
+                    f"максимальная: {max_e:.4f}м (лимит {metrics.get('max_abs_error_limit_m', '?')}м)."
+                )
+            else:
+                desc = (
+                    f"Глубина нестабильна при разных углах обзора. "
+                    f"Средняя ошибка: {mean_e:.4f}м, максимальная: {max_e:.4f}м."
+                )
         elif method_name == "c5_working_range_test":
-            desc = tpl.format(
-                n_positions=len(metrics.get("x_values_m", [])),
-                start=metrics.get("x_values_m", [0])[0] if metrics.get("x_values_m") else 0,
-                end=metrics.get("x_values_m", [0])[-1] if metrics.get("x_values_m") else 0,
-                x_min=float(metrics.get("x_min_ok_m", 0)),
-                x_max=float(metrics.get("x_max_ok_m", 0)),
-                tol=metrics.get("tolerance_m", "?"),
-            )
+            x_min = float(metrics.get("x_min_ok_m", 0))
+            x_max = float(metrics.get("x_max_ok_m", 0))
+            if passed:
+                desc = (
+                    f"Тест пройден: рабочий диапазон покрывает ожидаемый. "
+                    f"Стабильный интервал: [{x_min:.2f}, {x_max:.2f}]м. "
+                    f"Допуск по глубине: {metrics.get('tolerance_m', '?')}м."
+                )
+            else:
+                desc = f"Рабочий диапазон не покрывает ожидаемый. Стабильный интервал: [{x_min:.2f}, {x_max:.2f}]м."
         elif method_name == "c6_small_displacement_sensitivity_test":
-            desc = tpl.format(
-                step=metrics.get("eps_m", "?"),
-                ratio=float(metrics.get("changed_ratio", 0)),
-                mean_err=float(metrics.get("mean_abs_error_m", 0)),
-            )
+            ratio = float(metrics.get("changed_ratio", 0))
+            mean_e = float(metrics.get("mean_abs_error_m", 0))
+            if passed:
+                desc = (
+                    f"Тест пройден: датчик реагирует на малые перемещения. "
+                    f"Доля пар с изменением глубины: {ratio:.1%}. "
+                    f"Средняя ошибка позиции: {mean_e:.4f}м."
+                )
+            else:
+                desc = f"Датчик не реагирует на малые перемещения. Доля изменений: {ratio:.1%}. Ошибка: {mean_e:.4f}м."
         else:
-            desc = ""
+            return None
     except Exception:
-        desc = tpl
-    return prefix + desc if desc else None
+        return None
+    return prefix + desc
 
 
 def _run_camera_context_test(
