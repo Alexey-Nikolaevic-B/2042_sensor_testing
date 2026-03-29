@@ -119,15 +119,30 @@ class _StereoProfileTestContext:
             )
 
         sensor_topics = list(getattr(sensor, "topics", []) or [])
+        # Filter image_raw topics for left/right assignment
+        image_topics = [t for t in sensor_topics if "image_raw" in t]
         print(f"[DEBUG StereoCtx.__init__] sensor.topics={sensor_topics}")
-        self.LEFT_IMAGE_TOPIC = str(
-            profile.get("left_topic", "")
-            or (sensor_topics[0] if len(sensor_topics) > 0 else self.LEFT_IMAGE_TOPIC)
-        )
-        self.RIGHT_IMAGE_TOPIC = str(
-            profile.get("right_topic", "")
-            or (sensor_topics[1] if len(sensor_topics) > 1 else self.RIGHT_IMAGE_TOPIC)
-        )
+        print(f"[DEBUG StereoCtx.__init__] image_topics={image_topics}")
+
+        # Priority: sensor.topics (from UI / detect_topics_from_sdf) > SDF profile
+        # sensor.topics already contain correctly resolved topic names
+        if len(image_topics) >= 2:
+            self.LEFT_IMAGE_TOPIC = str(image_topics[0])
+            self.RIGHT_IMAGE_TOPIC = str(image_topics[1])
+        elif len(image_topics) == 1:
+            self.LEFT_IMAGE_TOPIC = str(image_topics[0])
+            self.RIGHT_IMAGE_TOPIC = str(
+                profile.get("right_topic", "") or self.RIGHT_IMAGE_TOPIC
+            )
+        else:
+            self.LEFT_IMAGE_TOPIC = str(
+                profile.get("left_topic", "")
+                or (sensor_topics[0] if len(sensor_topics) > 0 else self.LEFT_IMAGE_TOPIC)
+            )
+            self.RIGHT_IMAGE_TOPIC = str(
+                profile.get("right_topic", "")
+                or (sensor_topics[1] if len(sensor_topics) > 1 else self.RIGHT_IMAGE_TOPIC)
+            )
         self.image_width = int(profile.get("image_width") or self.IMAGE_WIDTH)
         self.image_height = int(profile.get("image_height") or self.IMAGE_HEIGHT)
         self.horizontal_fov = float(
@@ -196,6 +211,7 @@ class _StereoProfileTestContext:
 
     def _open_test_scene(self, simulator, test_name: str) -> None:
         print(f"[DEBUG StereoCtx._open_test_scene] test_name={test_name}")
+        self._simulator = simulator  # store for capture_data calls
         self._last_test_diagnostics = {}
         self._reset_resolved_stereo_topics()
         display_env = self._ensure_render_display_env()
@@ -632,6 +648,23 @@ class _StereoProfileTestContext:
                     pair_diag["attempts"].append(attempt_diag)
                     self._set_test_diagnostics(stereo_pair_capture=pair_diag)
                     if skew <= float(max_skew_s):
+                        # Send captured frame to UI via simulator
+                        sim = getattr(self, "_simulator", None)
+                        if sim is not None:
+                            sensor_data = {
+                                "sensor_type": self.sensor_type,
+                                "sensor_name": self.sensor_name,
+                                "topic": left_topic,
+                                "count": 1,
+                                "image_path": getattr(self.sensor, "image_path", ""),
+                                "messages": [pair_holder["left"]],
+                            }
+                            obs_img = (
+                                sim.capture_observer_frame()
+                                if sim.gazebo_is_running
+                                else None
+                            )
+                            sim.notify_capture(sensor_data, obs_img)
                         return pair_holder["left"], pair_holder["right"], skew
                     attempt_diag["pair_rejected"] = True
                     attempt_diag["pair_reject_reason"] = "skew_above_threshold"
