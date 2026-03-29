@@ -8,29 +8,20 @@
       <inertial>
         <mass>1000.0</mass>
         <inertia>
-          <ixx>1.0</ixx>
-          <iyy>1.0</iyy>
-          <izz>1.0</izz>
-          <ixy>0.0</ixy>
-          <ixz>0.0</ixz>
-          <iyz>0.0</iyz>
+          <ixx>1.0</ixx><iyy>1.0</iyy><izz>1.0</izz>
+          <ixy>0.0</ixy><ixz>0.0</ixz><iyz>0.0</iyz>
         </inertia>
       </inertial>
     </link>
     <link name="body">
       <inertial>
-        <!-- TODO: replace temporary mass with vendor-confirmed value -->
         <mass>0.02</mass>
         <inertia>
-          <ixx>1.531666666667e-06</ixx>
-          <iyy>1.531666666667e-06</iyy>
-          <izz>8.100000000000e-07</izz>
-          <ixy>0.0</ixy>
-          <ixz>0.0</ixz>
-          <iyz>0.0</iyz>
+          <ixx>1e-6</ixx><iyy>1e-6</iyy><izz>1e-6</izz>
+          <ixy>0.0</ixy><ixz>0.0</ixz><iyz>0.0</iyz>
         </inertia>
       </inertial>
-      <collision name="collision">
+      <collision name="tactile_collision">
         <geometry>
           <cylinder>
             <radius>0.009</radius>
@@ -46,6 +37,18 @@
           </cylinder>
         </geometry>
       </visual>
+      <sensor name="tactile_bumper" type="contact">
+        <always_on>1</always_on>
+        <update_rate>50.0</update_rate>
+        <contact>
+          <collision>tactile_collision</collision>
+        </contact>
+        <plugin name="tactile_bumper_plugin" filename="libgazebo_ros_bumper.so">
+          <robotNamespace>/leptrino_cfs018ca101u</robotNamespace>
+          <topicName>bumper_states</topicName>
+          <frameName>body</frameName>
+        </plugin>
+      </sensor>
     </link>
     <joint name="ft_joint" type="fixed">
       <parent>mount</parent>
