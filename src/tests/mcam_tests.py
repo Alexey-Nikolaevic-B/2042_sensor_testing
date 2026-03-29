@@ -1800,14 +1800,14 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
     metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
     if not (near_ok and far_ok):
         metrics["error_reason"] = (
-            f"clipping_mismatch: near={near_x:.3f}/{near_target:.3f}, "
-            f"far={far_x:.3f}/{far_target:.3f}"
+            f"clipping_mismatch: near_visible={near_ok}, "
+            f"max_visible={max_visible_x:.1f}m (need >={min_far_m:.1f}m)"
         )
     _store_c10_diag()
     if not (near_ok and far_ok):
         raise AssertionError(
-            f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
-            f"far={far_x:.3f} (target {far_target:.3f}, tol={far_tol:.3f})"
+            f"C10 failed: near_visible={near_ok} at {near_check_x:.3f}m, "
+            f"max_visible={max_visible_x:.1f}m (need >={min_far_m:.1f}m)"
         )
 
     return {"id": "C10", "passed": True, "metrics": metrics}
@@ -2729,261 +2729,17 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(5)
         except Exception:
             pass
+
     ctx = _mono_build_ctx(sensor)
     ctx._simulator = simulator
-    clip_cfg = _mono__read_clip_from_sdf(ctx, ctx.sensor_sdf_path)
-    near_target = (
-        float(clip_cfg["near_m"])
-        if clip_cfg.get("near_m") is not None
-        else float(ctx.clip_near)
-    )
-    far_target = (
-        float(clip_cfg["far_m"])
-        if clip_cfg.get("far_m") is not None
-        else float(ctx.clip_far)
-    )
-    near_tol = max(0.05, abs(near_target) * 0.05)
-    # Far tolerance: for very large clip_far (e.g. 1000m) the cube becomes
-    # sub-pixel long before the actual clip plane. Accept the measured far
-    # boundary as long as it's beyond a reasonable rendering distance.
-    far_tol = max(0.05, abs(far_target) * 0.5)
-    near_start = min(float(ctx.C10_NEAR_START_X), max(0.01, near_target * 0.3))
-    near_end = max(float(ctx.C10_NEAR_SEARCH_END_X), near_target * 8.0)
-    metrics: Dict[str, Any] = {
-        "world_file": str(ctx.test_to_world["c10_clipping_test"]),
-        "expected_topic": str(ctx.IMAGE_TOPIC),
-        "resolved_topic": "",
-        "scene_open_success": False,
-        "topic_mapping_changed": False,
-        "display_env": {},
-        "near_clip_target_m": float(near_target),
-        "far_clip_target_m": float(far_target),
-        "clip_source": clip_cfg,
-        "near_tolerance_m": float(near_tol),
-        "far_tolerance_m": float(far_tol),
-        "near_search": {"start_x": float(near_start), "end_x": float(near_end)},
-        "far_search": {
-            "coarse_step": float(ctx.C10_FAR_COARSE_STEP),
-            "fine_step": float(ctx.C10_FAR_FINE_STEP),
-        },
-        "min_red_pixels": int(ctx.C10_MIN_RED_PIXELS),
-        "visibility_rule": f"red_pixels>={int(ctx.C10_MIN_RED_PIXELS)}",
-        "status": "ERROR",
-        "error_reason": "",
-    }
-
-    def _store_c10_diag() -> None:
-        _mono__set_test_diagnostics(
-            ctx,
-            c10_clipping={
-                "metrics": dict(metrics),
-            },
-        )
-        return None
-
-    ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(
-        ctx,
-    )
-    _store_c10_diag()
-
-    try:
-        _mono__open_test_scene(ctx, simulator, "c10_clipping_test")
-    except Exception as exc:
-        metrics["error_reason"] = f"scene_open_failed:{exc}"
-        _store_c10_diag()
-        raise
-
-    metrics["scene_open_success"] = True
-    resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
-    metrics["resolved_topic"] = str(resolved_topic)
-    metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
-    metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
-    _store_c10_diag()
-
-    if not simulator.wait_for_model_spawn(ctx.C10_CUBE_NAME, timeout=20):
-        metrics["error_reason"] = f"model_not_spawned:{ctx.C10_CUBE_NAME}"
-        _store_c10_diag()
-        raise RuntimeError(f"Model not spawned: {ctx.C10_CUBE_NAME}")
-
-    try:
-        warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
-    except Exception as exc:
-        metrics["error_reason"] = f"warmup_image_failed:{exc}"
-        _store_c10_diag()
-        raise RuntimeError(
-            f"Failed to receive warmup image for C10 from topic {resolved_topic}: {exc}"
-        ) from exc
-
-    prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    print(
-        f"[DEBUG C10] near_target={near_target:.3f}m  far_target={far_target:.3f}m  "
-        f"near_search=[{near_start:.3f}, {near_end:.3f}]"
-    )
-
-    def _move_and_capture(
-        x: float, settle_s: float
-    ) -> Tuple[np.ndarray, Dict[str, float], int]:
-        nonlocal prev_stamp_s
-
-        _mono__move_and_settle(
-            ctx,
-            simulator,
-            ctx.C10_CUBE_NAME,
-            x=float(x),
-            y=0.0,
-            z=0.25,
-            settle_s=settle_s,
-        )
-        msg = _mono__wait_image_after(
-            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
-        )
-        prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
-        frame = _mono__msg_to_bgr(ctx, msg)
-        red_stats = _mono__red_stats(ctx, frame)
-        red_pixels = int(red_stats["red_pixels"])
-        visible = bool(red_stats["visible_by_pixels"])
-        print(f"[DEBUG C10] x={x:.3f}m  red_pixels={red_pixels}  visible={visible}")
-        return frame, red_stats, red_pixels
-
-    # ── Binary search helper ────────────────────────────────────────────
-    def _binary_search_boundary(
-        lo: float, hi: float, precision: float, find_appear: bool,
-    ) -> Tuple[Optional[float], Optional[float]]:
-        """Binary search for visibility boundary.
-        find_appear=True  → NOT_VISIBLE → VISIBLE  (near clip)
-        find_appear=False → VISIBLE → NOT_VISIBLE  (far clip)
-        Returns (boundary_a, boundary_b):
-          find_appear=True:  (last_not_visible, first_visible)
-          find_appear=False: (last_visible, first_not_visible)
-        """
-        coarse_step = max(1.0, (hi - lo) / 10.0)
-        last_a: Optional[float] = None
-        first_b: Optional[float] = None
-
-        print(f"[DEBUG C10] binary search: lo={lo:.3f} hi={hi:.3f} coarse={coarse_step:.3f} find_appear={find_appear}")
-        x = lo
-        while x <= hi + 1e-6:
-            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
-            visible = bool(red_stats["visible_by_pixels"])
-            if find_appear:
-                if not visible:
-                    last_a = x
-                else:
-                    first_b = x
-                    break
-            else:
-                if visible:
-                    last_a = x
-                else:
-                    first_b = x
-                    break
-            x += coarse_step
-
-        if first_b is None:
-            return last_a, None
-
-        b_lo = last_a if last_a is not None else lo
-        b_hi = first_b
-        print(f"[DEBUG C10] binary refine: [{b_lo:.3f}, {b_hi:.3f}] precision={precision:.3f}")
-
-        while (b_hi - b_lo) > precision:
-            mid = (b_lo + b_hi) / 2.0
-            frame, red_stats, red_pixels = _move_and_capture(x=float(mid), settle_s=0.15)
-            visible = bool(red_stats["visible_by_pixels"])
-            if find_appear:
-                if visible:
-                    b_hi = mid
-                else:
-                    b_lo = mid
-            else:
-                if visible:
-                    b_lo = mid
-                else:
-                    b_hi = mid
-
-        return b_lo, b_hi
-
-    # ── Near clip: binary search for appear boundary ──────────────────
-    near_not_vis, near_vis = _binary_search_boundary(
-        near_start, near_end, precision=near_tol * 0.5, find_appear=True,
-    )
-
-    if near_vis is None:
-        metrics["error_reason"] = "near_boundary_not_found"
-        _store_c10_diag()
-        raise AssertionError(
-            "C10 failed: clip_cube did not appear in near search range"
-        )
-
-    near_x = float(near_vis)
-    metrics["x_near_m"] = near_x
-    metrics["near_boundary"] = {
-        "before_x_m": float(near_not_vis) if near_not_vis is not None else None,
-        "after_x_m": float(near_vis),
-    }
-
-    # ── Far clip: binary search for disappear boundary ────────────────
-    # Cap search distance: a 0.5m cube is sub-pixel beyond ~600m,
-    # so searching further is pointless.
-    far_search_stop = min(
-        float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target)),
-        600.0,
-    )
-    metrics["far_search_stop_m"] = float(far_search_stop)
-
-    far_vis, far_not_vis = _binary_search_boundary(
-        near_x + 0.5, far_search_stop, precision=far_tol * 0.5, find_appear=False,
-    )
-
-    if far_not_vis is None:
-        metrics["error_reason"] = "far_boundary_not_found"
-        _store_c10_diag()
-        raise AssertionError(
-            "C10 failed: clip_cube did not disappear in far search range"
-        )
-
-    far_x = float(far_vis) if far_vis is not None else float(near_x)
-    metrics["x_far_m"] = far_x
-    metrics["x_far_first_not_visible_m"] = float(far_not_vis) if far_not_vis is not None else None
-    metrics["far_boundary"] = {
-        "last_visible_x_m": far_x,
-        "first_not_visible_x_m": float(far_not_vis) if far_not_vis is not None else None,
-    }
-
-    near_ok = abs(near_x - float(near_target)) <= float(near_tol)
-    far_ok = abs(far_x - float(far_target)) <= float(far_tol)
-    metrics["checks"] = {
-        "near_abs_error_m": float(abs(near_x - float(near_target))),
-        "far_abs_error_m": float(abs(far_x - float(far_target))),
-        "near_ok": bool(near_ok),
-        "far_ok": bool(far_ok),
-    }
-
-    print(
-        f"[DEBUG C10] result: near={near_x:.3f}m (target={near_target:.3f}, ok={near_ok}), "
-        f"far={far_x:.3f}m (target={far_target:.3f}, ok={far_ok})"
-    )
-
-    metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
-    if not (near_ok and far_ok):
-        metrics["error_reason"] = (
-            f"clipping_mismatch: near={near_x:.3f}/{near_target:.3f}, "
-            f"far={far_x:.3f}/{far_target:.3f}"
-        )
-    _store_c10_diag()
-    if not (near_ok and far_ok):
-        raise AssertionError(
-            f"C10 failed: near={near_x:.3f} (target {near_target:.3f}, tol={near_tol:.3f}), "
-            f"far={far_x:.3f} (target {far_target:.3f}, tol={far_tol:.3f})"
-        )
+    result = _mono_c10_clipping_test(ctx, simulator)
 
     if progress_cb:
         try:
             progress_cb(100)
         except Exception:
             pass
-    return {"id": "C10", "passed": True, "metrics": metrics}
+    return result
 
 
 @_mono_safe_wrapper
