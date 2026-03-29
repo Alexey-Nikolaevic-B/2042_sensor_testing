@@ -256,11 +256,17 @@ def _mono_safe_wrapper(test_func):
     return wrapper
 
 
-def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None) -> Image:
+def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None, simulator=None) -> Image:
     target_topic = str(topic or ctx.IMAGE_TOPIC)
     print(f"[DEBUG _mono__wait_image] topic={target_topic}, timeout={timeout:.1f}s")
     try:
-        msg = rospy.wait_for_message(target_topic, Image, timeout=timeout)
+        sim = simulator or getattr(ctx, "_simulator", None)
+        msgs = ctx.sensor.capture_data(
+            Image, topic=target_topic, window=min(timeout, 3.0), timeout=0.5, simulator=sim,
+        )
+        if not msgs:
+            raise rospy.ROSException(f"No messages received on {target_topic}")
+        msg = msgs[-1]
         print(
             f"[DEBUG _mono__wait_image] GOT image: {msg.width}x{msg.height}, enc={msg.encoding}, data_len={len(msg.data)}"
         )
@@ -269,7 +275,6 @@ def _mono__wait_image(ctx, timeout: float = 35.0, topic: Optional[str] = None) -
         print(
             f"[DEBUG _mono__wait_image] TIMEOUT on {target_topic} after {timeout:.1f}s: {e}"
         )
-        # список активных топиков для диагностики
         try:
             topics = rospy.get_published_topics()
             image_topics = [
@@ -1738,80 +1743,104 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         print(f"[DEBUG C10] x={x:.3f}m  red_pixels={red_pixels}  visible={visible}")
         return frame, red_stats, red_pixels
 
-    near_before: Optional[Tuple[float, np.ndarray, int]] = None
-    near_after: Optional[Tuple[float, np.ndarray, int]] = None
+    # ── Binary search helper ────────────────────────────────────────────
+    def _binary_search_boundary(
+        lo: float, hi: float, precision: float, find_appear: bool,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Binary search for visibility boundary.
+        find_appear=True  → NOT_VISIBLE → VISIBLE  (near clip)
+        find_appear=False → VISIBLE → NOT_VISIBLE  (far clip)
+        Returns (boundary_a, boundary_b):
+          find_appear=True:  (last_not_visible, first_visible)
+          find_appear=False: (last_visible, first_not_visible)
+        """
+        coarse_step = max(1.0, (hi - lo) / 10.0)
+        last_a: Optional[float] = None
+        first_b: Optional[float] = None
 
-    for x in _mono__iter_float_range(ctx, near_start, near_end, ctx.C10_NEAR_STEP):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
-        if bool(red_stats["visible_by_pixels"]):
-            near_after = (float(x), frame, red_pixels)
-            break
-        near_before = (float(x), frame, red_pixels)
+        print(f"[DEBUG C10] binary search: lo={lo:.3f} hi={hi:.3f} coarse={coarse_step:.3f} find_appear={find_appear}")
+        x = lo
+        while x <= hi + 1e-6:
+            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
+            visible = bool(red_stats["visible_by_pixels"])
+            if find_appear:
+                if not visible:
+                    last_a = x
+                else:
+                    first_b = x
+                    break
+            else:
+                if visible:
+                    last_a = x
+                else:
+                    first_b = x
+                    break
+            x += coarse_step
 
-    if near_after is None:
+        if first_b is None:
+            return last_a, None
+
+        b_lo = last_a if last_a is not None else lo
+        b_hi = first_b
+        print(f"[DEBUG C10] binary refine: [{b_lo:.3f}, {b_hi:.3f}] precision={precision:.3f}")
+
+        while (b_hi - b_lo) > precision:
+            mid = (b_lo + b_hi) / 2.0
+            frame, red_stats, red_pixels = _move_and_capture(x=float(mid), settle_s=0.15)
+            visible = bool(red_stats["visible_by_pixels"])
+            if find_appear:
+                if visible:
+                    b_hi = mid
+                else:
+                    b_lo = mid
+            else:
+                if visible:
+                    b_lo = mid
+                else:
+                    b_hi = mid
+
+        return b_lo, b_hi
+
+    # ── Near clip: binary search for appear boundary ──────────────────
+    near_not_vis, near_vis = _binary_search_boundary(
+        near_start, near_end, precision=near_tol * 0.5, find_appear=True,
+    )
+
+    if near_vis is None:
         metrics["error_reason"] = "near_boundary_not_found"
         _store_c10_diag()
         raise AssertionError(
             "C10 failed: clip_cube did not appear in near search range"
         )
 
-    near_x = float(near_after[0])
+    near_x = float(near_vis)
     metrics["x_near_m"] = near_x
     metrics["near_boundary"] = {
-        "before_x_m": float(near_before[0]) if near_before is not None else None,
-        "after_x_m": float(near_after[0]),
+        "before_x_m": float(near_not_vis) if near_not_vis is not None else None,
+        "after_x_m": float(near_vis),
     }
 
-    far_last_visible = near_after
-    far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-
+    # ── Far clip: binary search for disappear boundary ────────────────
     far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
     metrics["far_search_stop_m"] = float(far_search_stop)
-    for x in _mono__iter_float_range(
-        ctx,
-        near_x + float(ctx.C10_FAR_COARSE_STEP),
-        far_search_stop,
-        float(ctx.C10_FAR_COARSE_STEP),
-    ):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
-        visible = bool(red_stats["visible_by_pixels"])
-        if visible:
-            far_last_visible = (float(x), frame, red_pixels)
-        else:
-            far_first_not_visible = (float(x), frame, red_pixels)
-            break
 
-    if far_first_not_visible is None:
+    far_vis, far_not_vis = _binary_search_boundary(
+        near_x + 0.5, far_search_stop, precision=far_tol * 0.5, find_appear=False,
+    )
+
+    if far_not_vis is None:
         metrics["error_reason"] = "far_boundary_not_found"
         _store_c10_diag()
         raise AssertionError(
             "C10 failed: clip_cube did not disappear in far search range"
         )
 
-    fine_start = max(
-        float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP)
-    )
-    fine_end = float(far_first_not_visible[0])
-    far_last_visible_fine = far_last_visible
-    far_first_not_visible_fine = far_first_not_visible
-
-    for x in _mono__iter_float_range(
-        ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)
-    ):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.15)
-        visible = bool(red_stats["visible_by_pixels"])
-        if visible:
-            far_last_visible_fine = (float(x), frame, red_pixels)
-        else:
-            far_first_not_visible_fine = (float(x), frame, red_pixels)
-            break
-
-    far_x = float(far_last_visible_fine[0])
+    far_x = float(far_vis) if far_vis is not None else float(near_x)
     metrics["x_far_m"] = far_x
-    metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
+    metrics["x_far_first_not_visible_m"] = float(far_not_vis) if far_not_vis is not None else None
     metrics["far_boundary"] = {
-        "last_visible_x_m": float(far_last_visible_fine[0]),
-        "first_not_visible_x_m": float(far_first_not_visible_fine[0]),
+        "last_visible_x_m": far_x,
+        "first_not_visible_x_m": float(far_not_vis) if far_not_vis is not None else None,
     }
 
     near_ok = abs(near_x - float(near_target)) <= float(near_tol)
@@ -1823,73 +1852,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "far_ok": bool(far_ok),
     }
 
-    near_after_stats = _mono__red_stats(ctx, near_after[1])
-    far_before_stats = _mono__red_stats(ctx, far_last_visible_fine[1])
-    far_after_stats = _mono__red_stats(ctx, far_first_not_visible_fine[1])
-    metrics["visibility_debug"] = {
-        "near_before_red_pixels": (
-            int(near_before[2]) if near_before is not None else None
-        ),
-        "near_before_pixel_ratio": (
-            float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"])
-            if near_before is not None
-            else None
-        ),
-        "near_after_red_pixels": int(near_after[2]),
-        "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
-        "far_before_red_pixels": int(far_last_visible_fine[2]),
-        "far_before_pixel_ratio": float(far_before_stats["pixel_ratio"]),
-        "far_after_red_pixels": int(far_first_not_visible_fine[2]),
-        "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
-    }
-
-    if near_before is not None:
-        dbg = _mono__annotate(
-            ctx,
-            near_before[1],
-            [
-                f"near_before x={near_before[0]:.2f}",
-                f"red_px={near_before[2]}",
-                f"ratio={_mono__red_stats(ctx, near_before[1])['pixel_ratio']:.4f}",
-                "visible=False",
-                f"topic={resolved_topic}",
-            ],
-        )
-
-    dbg = _mono__annotate(
-        ctx,
-        near_after[1],
-        [
-            f"near_after x={near_after[0]:.2f}",
-            f"red_px={near_after[2]}",
-            f"ratio={near_after_stats['pixel_ratio']:.4f}",
-            "visible=True",
-            f"topic={resolved_topic}",
-        ],
-    )
-
-    dbg = _mono__annotate(
-        ctx,
-        far_last_visible_fine[1],
-        [
-            f"far_before x={far_last_visible_fine[0]:.2f}",
-            f"red_px={far_last_visible_fine[2]}",
-            f"ratio={far_before_stats['pixel_ratio']:.4f}",
-            "visible=True",
-            f"topic={resolved_topic}",
-        ],
-    )
-
-    dbg = _mono__annotate(
-        ctx,
-        far_first_not_visible_fine[1],
-        [
-            f"far_after x={far_first_not_visible_fine[0]:.2f}",
-            f"red_px={far_first_not_visible_fine[2]}",
-            f"ratio={far_after_stats['pixel_ratio']:.4f}",
-            "visible=False",
-            f"topic={resolved_topic}",
-        ],
+    print(
+        f"[DEBUG C10] result: near={near_x:.3f}m (target={near_target:.3f}, ok={near_ok}), "
+        f"far={far_x:.3f}m (target={far_target:.3f}, ok={far_ok})"
     )
 
     metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
@@ -2932,80 +2897,104 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         print(f"[DEBUG C10] x={x:.3f}m  red_pixels={red_pixels}  visible={visible}")
         return frame, red_stats, red_pixels
 
-    near_before: Optional[Tuple[float, np.ndarray, int]] = None
-    near_after: Optional[Tuple[float, np.ndarray, int]] = None
+    # ── Binary search helper ────────────────────────────────────────────
+    def _binary_search_boundary(
+        lo: float, hi: float, precision: float, find_appear: bool,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Binary search for visibility boundary.
+        find_appear=True  → NOT_VISIBLE → VISIBLE  (near clip)
+        find_appear=False → VISIBLE → NOT_VISIBLE  (far clip)
+        Returns (boundary_a, boundary_b):
+          find_appear=True:  (last_not_visible, first_visible)
+          find_appear=False: (last_visible, first_not_visible)
+        """
+        coarse_step = max(1.0, (hi - lo) / 10.0)
+        last_a: Optional[float] = None
+        first_b: Optional[float] = None
 
-    for x in _mono__iter_float_range(ctx, near_start, near_end, ctx.C10_NEAR_STEP):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
-        if bool(red_stats["visible_by_pixels"]):
-            near_after = (float(x), frame, red_pixels)
-            break
-        near_before = (float(x), frame, red_pixels)
+        print(f"[DEBUG C10] binary search: lo={lo:.3f} hi={hi:.3f} coarse={coarse_step:.3f} find_appear={find_appear}")
+        x = lo
+        while x <= hi + 1e-6:
+            frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
+            visible = bool(red_stats["visible_by_pixels"])
+            if find_appear:
+                if not visible:
+                    last_a = x
+                else:
+                    first_b = x
+                    break
+            else:
+                if visible:
+                    last_a = x
+                else:
+                    first_b = x
+                    break
+            x += coarse_step
 
-    if near_after is None:
+        if first_b is None:
+            return last_a, None
+
+        b_lo = last_a if last_a is not None else lo
+        b_hi = first_b
+        print(f"[DEBUG C10] binary refine: [{b_lo:.3f}, {b_hi:.3f}] precision={precision:.3f}")
+
+        while (b_hi - b_lo) > precision:
+            mid = (b_lo + b_hi) / 2.0
+            frame, red_stats, red_pixels = _move_and_capture(x=float(mid), settle_s=0.15)
+            visible = bool(red_stats["visible_by_pixels"])
+            if find_appear:
+                if visible:
+                    b_hi = mid
+                else:
+                    b_lo = mid
+            else:
+                if visible:
+                    b_lo = mid
+                else:
+                    b_hi = mid
+
+        return b_lo, b_hi
+
+    # ── Near clip: binary search for appear boundary ──────────────────
+    near_not_vis, near_vis = _binary_search_boundary(
+        near_start, near_end, precision=near_tol * 0.5, find_appear=True,
+    )
+
+    if near_vis is None:
         metrics["error_reason"] = "near_boundary_not_found"
         _store_c10_diag()
         raise AssertionError(
             "C10 failed: clip_cube did not appear in near search range"
         )
 
-    near_x = float(near_after[0])
+    near_x = float(near_vis)
     metrics["x_near_m"] = near_x
     metrics["near_boundary"] = {
-        "before_x_m": float(near_before[0]) if near_before is not None else None,
-        "after_x_m": float(near_after[0]),
+        "before_x_m": float(near_not_vis) if near_not_vis is not None else None,
+        "after_x_m": float(near_vis),
     }
 
-    far_last_visible = near_after
-    far_first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
-
+    # ── Far clip: binary search for disappear boundary ────────────────
     far_search_stop = float(far_target) * 1.2 + max(2.0, 0.2 * float(far_target))
     metrics["far_search_stop_m"] = float(far_search_stop)
-    for x in _mono__iter_float_range(
-        ctx,
-        near_x + float(ctx.C10_FAR_COARSE_STEP),
-        far_search_stop,
-        float(ctx.C10_FAR_COARSE_STEP),
-    ):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.2)
-        visible = bool(red_stats["visible_by_pixels"])
-        if visible:
-            far_last_visible = (float(x), frame, red_pixels)
-        else:
-            far_first_not_visible = (float(x), frame, red_pixels)
-            break
 
-    if far_first_not_visible is None:
+    far_vis, far_not_vis = _binary_search_boundary(
+        near_x + 0.5, far_search_stop, precision=far_tol * 0.5, find_appear=False,
+    )
+
+    if far_not_vis is None:
         metrics["error_reason"] = "far_boundary_not_found"
         _store_c10_diag()
         raise AssertionError(
             "C10 failed: clip_cube did not disappear in far search range"
         )
 
-    fine_start = max(
-        float(near_x), float(far_last_visible[0]) - float(ctx.C10_FAR_COARSE_STEP)
-    )
-    fine_end = float(far_first_not_visible[0])
-    far_last_visible_fine = far_last_visible
-    far_first_not_visible_fine = far_first_not_visible
-
-    for x in _mono__iter_float_range(
-        ctx, fine_start, fine_end, float(ctx.C10_FAR_FINE_STEP)
-    ):
-        frame, red_stats, red_pixels = _move_and_capture(x=float(x), settle_s=0.15)
-        visible = bool(red_stats["visible_by_pixels"])
-        if visible:
-            far_last_visible_fine = (float(x), frame, red_pixels)
-        else:
-            far_first_not_visible_fine = (float(x), frame, red_pixels)
-            break
-
-    far_x = float(far_last_visible_fine[0])
+    far_x = float(far_vis) if far_vis is not None else float(near_x)
     metrics["x_far_m"] = far_x
-    metrics["x_far_first_not_visible_m"] = float(far_first_not_visible_fine[0])
+    metrics["x_far_first_not_visible_m"] = float(far_not_vis) if far_not_vis is not None else None
     metrics["far_boundary"] = {
-        "last_visible_x_m": float(far_last_visible_fine[0]),
-        "first_not_visible_x_m": float(far_first_not_visible_fine[0]),
+        "last_visible_x_m": far_x,
+        "first_not_visible_x_m": float(far_not_vis) if far_not_vis is not None else None,
     }
 
     near_ok = abs(near_x - float(near_target)) <= float(near_tol)
@@ -3017,73 +3006,9 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
         "far_ok": bool(far_ok),
     }
 
-    near_after_stats = _mono__red_stats(ctx, near_after[1])
-    far_before_stats = _mono__red_stats(ctx, far_last_visible_fine[1])
-    far_after_stats = _mono__red_stats(ctx, far_first_not_visible_fine[1])
-    metrics["visibility_debug"] = {
-        "near_before_red_pixels": (
-            int(near_before[2]) if near_before is not None else None
-        ),
-        "near_before_pixel_ratio": (
-            float(_mono__red_stats(ctx, near_before[1])["pixel_ratio"])
-            if near_before is not None
-            else None
-        ),
-        "near_after_red_pixels": int(near_after[2]),
-        "near_after_pixel_ratio": float(near_after_stats["pixel_ratio"]),
-        "far_before_red_pixels": int(far_last_visible_fine[2]),
-        "far_before_pixel_ratio": float(far_before_stats["pixel_ratio"]),
-        "far_after_red_pixels": int(far_first_not_visible_fine[2]),
-        "far_after_pixel_ratio": float(far_after_stats["pixel_ratio"]),
-    }
-
-    if near_before is not None:
-        dbg = _mono__annotate(
-            ctx,
-            near_before[1],
-            [
-                f"near_before x={near_before[0]:.2f}",
-                f"red_px={near_before[2]}",
-                f"ratio={_mono__red_stats(ctx, near_before[1])['pixel_ratio']:.4f}",
-                "visible=False",
-                f"topic={resolved_topic}",
-            ],
-        )
-
-    dbg = _mono__annotate(
-        ctx,
-        near_after[1],
-        [
-            f"near_after x={near_after[0]:.2f}",
-            f"red_px={near_after[2]}",
-            f"ratio={near_after_stats['pixel_ratio']:.4f}",
-            "visible=True",
-            f"topic={resolved_topic}",
-        ],
-    )
-
-    dbg = _mono__annotate(
-        ctx,
-        far_last_visible_fine[1],
-        [
-            f"far_before x={far_last_visible_fine[0]:.2f}",
-            f"red_px={far_last_visible_fine[2]}",
-            f"ratio={far_before_stats['pixel_ratio']:.4f}",
-            "visible=True",
-            f"topic={resolved_topic}",
-        ],
-    )
-
-    dbg = _mono__annotate(
-        ctx,
-        far_first_not_visible_fine[1],
-        [
-            f"far_after x={far_first_not_visible_fine[0]:.2f}",
-            f"red_px={far_first_not_visible_fine[2]}",
-            f"ratio={far_after_stats['pixel_ratio']:.4f}",
-            "visible=False",
-            f"topic={resolved_topic}",
-        ],
+    print(
+        f"[DEBUG C10] result: near={near_x:.3f}m (target={near_target:.3f}, ok={near_ok}), "
+        f"far={far_x:.3f}m (target={far_target:.3f}, ok={far_ok})"
     )
 
     metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"

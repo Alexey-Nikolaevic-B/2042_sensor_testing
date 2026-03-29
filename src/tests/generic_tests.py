@@ -367,7 +367,12 @@ def camera_check(simulator, sensor, progress_cb=None) -> dict:
 
     logger.info("Waiting for image on %s (timeout=10s)...", primary_topic)
     try:
-        msg = rospy.wait_for_message(primary_topic, Image, timeout=10.0)
+        msgs = sensor.capture_data(
+            Image, topic=primary_topic, window=3.0, timeout=0.5, simulator=simulator,
+        )
+        if not msgs:
+            raise RuntimeError(f"No messages received on {primary_topic}")
+        msg = msgs[-1]
         logger.info(
             "Image received! %dx%d, encoding=%s", msg.width, msg.height, msg.encoding
         )

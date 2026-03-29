@@ -830,9 +830,13 @@ class _DepthProfileTestContext:
             remaining = max(0.2, float(timeout) - (time.time() - start))
             attempt += 1
             try:
-                msg = rospy.wait_for_message(
-                    target_topic, Image, timeout=min(1.0, remaining)
+                msgs = self.sensor.capture_data(
+                    Image, topic=target_topic,
+                    window=min(1.0, remaining), timeout=0.25,
                 )
+                if not msgs:
+                    raise rospy.ROSException(f"No messages on {target_topic}")
+                msg = msgs[-1]
             except rospy.ROSException:
                 if attempt <= 3:
                     print(
@@ -1097,7 +1101,12 @@ class _DepthProfileTestContext:
         for topic in candidates:
             try:
                 wait_t = min(float(timeout), float(self.DEPTH_WAIT_PER_CANDIDATE_S))
-                return rospy.wait_for_message(topic, Image, timeout=wait_t)
+                msgs = self.sensor.capture_data(
+                    Image, topic=topic, window=wait_t, timeout=0.25,
+                )
+                if not msgs:
+                    raise RuntimeError(f"No messages on {topic}")
+                return msgs[-1]
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{topic}: {exc}")
                 continue
@@ -1110,8 +1119,11 @@ class _DepthProfileTestContext:
         if not target_topic:
             return None
         try:
-            return rospy.wait_for_message(target_topic, Image, timeout=timeout)
-        except rospy.ROSException:
+            msgs = self.sensor.capture_data(
+                Image, topic=target_topic, window=timeout, timeout=0.25,
+            )
+            return msgs[-1] if msgs else None
+        except Exception:
             return None
 
     # ------------------------------------------------------------------
