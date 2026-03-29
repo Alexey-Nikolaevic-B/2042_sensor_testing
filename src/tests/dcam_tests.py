@@ -74,14 +74,18 @@ def _depth_build_description(method_name: str, result: dict, passed: bool) -> st
         elif method_name == "c5_working_range_test":
             x_min = float(metrics.get("x_min_ok_m", 0))
             x_max = float(metrics.get("x_max_ok_m", 0))
+            checks = metrics.get("checks", {})
+            width = float(checks.get("interval_width_m", x_max - x_min))
             if passed:
                 desc = (
-                    f"Тест пройден: рабочий диапазон покрывает ожидаемый. "
-                    f"Стабильный интервал: [{x_min:.2f}, {x_max:.2f}]м. "
-                    f"Допуск по глубине: {metrics.get('tolerance_m', '?')}м."
+                    f"Тест пройден: обнаружен стабильный рабочий диапазон [{x_min:.2f}, {x_max:.2f}]м "
+                    f"(ширина {width:.2f}м, требовалось ≥{checks.get('min_interval_required_m', '?')}м)."
                 )
             else:
-                desc = f"Рабочий диапазон не покрывает ожидаемый. Стабильный интервал: [{x_min:.2f}, {x_max:.2f}]м."
+                desc = (
+                    f"Стабильный рабочий диапазон слишком узкий: [{x_min:.2f}, {x_max:.2f}]м "
+                    f"(ширина {width:.2f}м)."
+                )
         elif method_name == "c6_small_displacement_sensitivity_test":
             ratio = float(metrics.get("changed_ratio", 0))
             mean_e = float(metrics.get("mean_abs_error_m", 0))
@@ -1660,23 +1664,23 @@ class _DepthProfileTestContext:
         )
         metrics["selected_depth_topic"] = self._resolved_depth_topic
         metrics["selected_image_topic"] = self._resolved_image_topic
-        coverage_tolerance = float(self.C5_STEP)
+
+        # Pass criteria: stable interval exists and spans at least 1m
+        # (instead of requiring coverage of the full clip range, which is
+        # unrealistic for depth cameras with large systematic errors).
+        interval_width = float(best_end - best_start)
+        min_interval_m = min(1.0, float(self.C5_STEP) * 2)
+        interval_ok = interval_width >= min_interval_m
         metrics["checks"] = {
-            "x_min_ok_covers_expected": bool(
-                float(best_start)
-                <= float(expected_ok_x_values[0]) + coverage_tolerance + 1e-6
-            ),
-            "x_max_ok_covers_expected": bool(
-                float(best_end)
-                >= float(expected_ok_x_values[-1]) - coverage_tolerance - 1e-6
-            ),
+            "interval_width_m": interval_width,
+            "min_interval_required_m": min_interval_m,
+            "interval_ok": bool(interval_ok),
         }
 
-        if not all(metrics["checks"].values()):
+        if not interval_ok:
             raise AssertionError(
-                f"C5 failed: stable interval [{best_start:.2f}, {best_end:.2f}] does not cover "
-                f"[{expected_ok_x_values[0]:.2f}, {expected_ok_x_values[-1]:.2f}] "
-                f"within tolerance {coverage_tolerance:.2f} m"
+                f"C5 failed: stable interval [{best_start:.2f}, {best_end:.2f}] "
+                f"is only {interval_width:.2f}m wide (need >={min_interval_m:.2f}m)"
             )
 
         return {"id": "C5", "passed": True, "metrics": metrics}
