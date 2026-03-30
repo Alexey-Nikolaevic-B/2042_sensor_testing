@@ -29,9 +29,9 @@
           <parent_frame>base_link_sim</parent_frame>
           <tags_per_fix>1</tags_per_fix>
 
-          <map_path>../../RFID_Sensor_Plugin_gazebo/rfid_tag_plugin/map_layouts/map.txt</map_path>
-          <fix_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/normal_size_fixture/model.sdf</fix_sdf_path>
-          <tag_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_1/model.sdf</tag_sdf_path>
+          <map_path>package://rfid_tag_plugin/map_layouts/map.txt</map_path>
+          <fix_sdf_path>package://rfid_tag_plugin/../Models/normal_size_fixture/model.sdf</fix_sdf_path>
+          <tag_sdf_path>package://rfid_tag_plugin/../Models/RFID_1/model.sdf</tag_sdf_path>
 
           <randomize>false</randomize>
 
@@ -81,10 +81,10 @@
           <elevation_beamwidth>1</elevation_beamwidth>
           <rzero>10</rzero>
 
-          <tag_yellow_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_3/model.sdf</tag_yellow_sdf_path>
-          <tag_red_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_2/model.sdf</tag_red_sdf_path>
-          <tag_blue_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_5/model.sdf</tag_blue_sdf_path>
-          <tag_purple_sdf_path>../../RFID_Sensor_Plugin_gazebo/Models/RFID_4/model.sdf</tag_purple_sdf_path>
+          <tag_yellow_sdf_path>package://rfid_tag_plugin/../Models/RFID_3/model.sdf</tag_yellow_sdf_path>
+          <tag_red_sdf_path>package://rfid_tag_plugin/../Models/RFID_2/model.sdf</tag_red_sdf_path>
+          <tag_blue_sdf_path>package://rfid_tag_plugin/../Models/RFID_5/model.sdf</tag_blue_sdf_path>
+          <tag_purple_sdf_path>package://rfid_tag_plugin/../Models/RFID_4/model.sdf</tag_purple_sdf_path>
 
           <max_tags>50</max_tags>
           <stop_after_misses>5</stop_after_misses>
