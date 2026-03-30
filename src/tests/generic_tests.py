@@ -174,7 +174,14 @@ def sensor_capture_basic(simulator, sensor, progress_cb=None) -> dict:
             msg_class, topic=sensor.topic, window=0.5, timeout=0.5, simulator=simulator
         )
         if not msgs:
-            result["error"] = "No messages received within capture window"
+            result["error"] = f"No messages received on topic {sensor.topic}"
+            try:
+                all_topics = rospy.get_published_topics()
+                result["available_topics"] = [
+                    t for t, _ in all_topics[:20] if not t.startswith("/rosout")
+                ]
+            except Exception:
+                pass
             logger.error("No messages received on %s", sensor.topic)
         else:
             msg = msgs[-1]

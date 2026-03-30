@@ -28,6 +28,8 @@
           </box>
         </geometry>
       </collision>
+      <!-- Bounding size for test framework -->
+      <sensor_size>0.152 0.152 0.029</sensor_size>
       <visual name="visual">
         <geometry>
           <box>

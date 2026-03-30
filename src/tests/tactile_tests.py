@@ -38,7 +38,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     t0 = time.time()
 
     # ── Read sensor dimensions from SDF params ────────────────────────────────
-    raw_size = sensor.params.get("size")
+    raw_size = sensor.params.get("sensor_size") or sensor.params.get("size")
     if not raw_size:
         result["error"] = "no sensor size"
         result["duration"] = round(time.time() - t0, 2)
@@ -181,7 +181,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
     t0 = time.time()
 
     # ── Read sensor dimensions from SDF params ────────────────────────────────
-    raw_size = sensor.params.get("size")
+    raw_size = sensor.params.get("sensor_size") or sensor.params.get("size")
     if not raw_size:
         result["error"] = "no sensor size"
         result["duration"] = round(time.time() - t0, 2)
@@ -378,7 +378,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     t0 = time.time()
 
     # ── Read sensor dimensions from SDF params ────────────────────────────────
-    raw_size = sensor.params.get("size")
+    raw_size = sensor.params.get("sensor_size") or sensor.params.get("size")
     if not raw_size:
         result["error"] = "no sensor size"
         result["duration"] = round(time.time() - t0, 2)
@@ -566,7 +566,7 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     t0 = time.time()
 
     # ── Read sensor dimensions from SDF params ────────────────────────────────
-    raw_size = sensor.params.get("size")
+    raw_size = sensor.params.get("sensor_size") or sensor.params.get("size")
     if not raw_size:
         result["error"] = "no sensor size"
         result["duration"] = round(time.time() - t0, 2)
