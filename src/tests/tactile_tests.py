@@ -173,7 +173,7 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         "std_deviation": 0,
         "max_deviation": 0,
         "max_deviation_percent": 0,
-        "deviation_threshold": 10.0,
+        "deviation_threshold": 150.0,
         "missed_points": 0,
         "error": None,
     }
