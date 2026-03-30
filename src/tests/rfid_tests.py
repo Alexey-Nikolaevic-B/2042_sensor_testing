@@ -39,7 +39,7 @@ def rfid_max_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            ros_msgs = sensor.capture_data(
+            ros_msgs = sensor.capture_persistent(
                 _PoseStamped(), window=3, simulator=simulator
             )
             rfid_tags = {msg.header.frame_id: msg.pose for msg in ros_msgs}
@@ -86,7 +86,7 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
             simulator.set_pose(tag, current, 0, 0)
-            ros_msgs = sensor.capture_data(
+            ros_msgs = sensor.capture_persistent(
                 _PoseStamped(), window=3, simulator=simulator
             )
             rfid_tags = {msg.header.frame_id: msg.pose for msg in ros_msgs}
@@ -179,8 +179,8 @@ def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
         print(f"[DEBUG rfid_mass_read] could not list models: {e}")
 
     t0 = time.time()
-    print(f"[DEBUG rfid_mass_read] starting capture_data on topic={sensor.topic}, window=20s")
-    ros_msgs = sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
+    print(f"[DEBUG rfid_mass_read] starting capture_persistent on topic={sensor.topic}, window=20s")
+    ros_msgs = sensor.capture_persistent(_PoseStamped(), window=20, simulator=simulator)
     print(f"[DEBUG rfid_mass_read] capture done: {len(ros_msgs)} raw messages")
 
     # Log all unique frame_ids
@@ -252,7 +252,7 @@ def rfid_overlap_tags(simulator, sensor, progress_cb=None) -> dict:
                 spawned += 1
         print(f"[DEBUG rfid_overlap_tags] spawned: {spawned}/{tags_count}")
 
-        ros_msgs = sensor.capture_data(_PoseStamped(), window=5, simulator=simulator)
+        ros_msgs = sensor.capture_persistent(_PoseStamped(), window=5, simulator=simulator)
         rfid_tags = {msg.header.frame_id: msg.pose for msg in ros_msgs}
         print(f"[DEBUG rfid_overlap_tags] raw msgs: {len(ros_msgs)}, unique tags: {list(rfid_tags.keys())}")
 
@@ -336,7 +336,7 @@ def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
 
     t0 = time.time()
     print(f"[DEBUG rfid_angle_dependence] capturing on topic={sensor.topic}, window=20s")
-    ros_msgs = sensor.capture_data(_PoseStamped(), window=20, simulator=simulator)
+    ros_msgs = sensor.capture_persistent(_PoseStamped(), window=20, simulator=simulator)
     print(f"[DEBUG rfid_angle_dependence] raw msgs: {len(ros_msgs)}")
 
     all_frame_ids = [msg.header.frame_id for msg in ros_msgs]
@@ -405,7 +405,7 @@ def rfid_move_tags(simulator, sensor, progress_cb=None) -> dict:
 
         def _capture_worker():
             ros_msgs_holder.extend(
-                sensor.capture_data(
+                sensor.capture_persistent(
                     _PoseStamped(),
                     window=capture_window,
                     simulator=simulator,
@@ -495,7 +495,7 @@ def rfid_antenna_rotation(simulator, sensor, progress_cb=None) -> dict:
         time.sleep(0.01)
 
         print(f"[DEBUG rfid_antenna_rotation] angle={math.degrees(angle):.1f}° capturing...")
-        ros_msgs = sensor.capture_data(_PoseStamped(), window=7, simulator=simulator)
+        ros_msgs = sensor.capture_persistent(_PoseStamped(), window=7, simulator=simulator)
         rfid_tags = {msg.header.frame_id: msg.pose for msg in ros_msgs}
         print(f"[DEBUG rfid_antenna_rotation] angle={math.degrees(angle):.1f}°: raw={len(ros_msgs)}, unique={list(rfid_tags.keys())}")
 

@@ -345,6 +345,57 @@ class Sensor:
 
         return results
 
+    def capture_persistent(
+        self,
+        msg_type,
+        topic: str = "",
+        window: float = 2.0,
+        simulator=None,
+    ) -> list:
+        """
+        Capture messages using a persistent subscriber (no subscribe/unsubscribe gaps).
+
+        Unlike capture_data (which uses rospy.wait_for_message in a loop and
+        loses burst-published messages), this method keeps a single subscriber
+        open for the entire window.  Essential for RFID antennas that publish
+        one message per detected tag in quick succession — wait_for_message
+        catches only the first, missing the rest.
+
+        Returns a list of raw ROS messages in arrival order.
+        """
+        import rospy
+
+        t = topic or self.topic
+        results = []
+
+        def _cb(msg):
+            results.append(msg)
+
+        sub = rospy.Subscriber(t, msg_type, _cb, queue_size=500)
+        try:
+            time.sleep(window)
+        finally:
+            sub.unregister()
+
+        if simulator is not None:
+            sensor_data = {
+                "sensor_type": self.sensor_type,
+                "sensor_name": self.sensor_name,
+                "topic": t,
+                "count": len(results),
+                "image_path": self.image_path,
+                "messages": results[-1:],
+            }
+            obs_img = (
+                simulator.capture_observer_frame()
+                if simulator.gazebo_is_running
+                else None
+            )
+            simulator.notify_capture(sensor_data, obs_img)
+            simulator.wait_for_step()
+
+        return results
+
     def capture_frames(
         self,
         msg_type,
@@ -355,10 +406,10 @@ class Sensor:
     ) -> dict:
         """
         RFID-style capture: returns {frame_id: pose} deduplicating by frame_id.
-        Wraps capture_data — keeps RFID tests unchanged.
+        Uses persistent subscriber to catch all tags published in bursts.
         """
-        msgs = self.capture_data(
-            msg_type, topic=topic, window=window, timeout=timeout, simulator=simulator
+        msgs = self.capture_persistent(
+            msg_type, topic=topic, window=window, simulator=simulator
         )
         return {
             msg.header.frame_id: msg.pose
