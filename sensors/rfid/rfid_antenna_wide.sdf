@@ -74,7 +74,11 @@
           <event_only>false</event_only>
 
           <deterministic>true</deterministic>
-          <deterministic_threshold>0.5</deterministic_threshold>
+          <!-- Порог: тег считается обнаруженным если signal >= threshold.
+               signal ≈ 1 - distance/rzero.  При threshold=0.5 теги на
+               расстоянии rzero/2 (1.5м) — ровно на границе и теряются.
+               Значение 0.01 = детектировать всё в пределах rzero. -->
+          <deterministic_threshold>0.01</deterministic_threshold>
 
           <spawn_visual_markers>false</spawn_visual_markers>
 
@@ -93,7 +97,8 @@
           <tag_purple_sdf_path>package://rfid_tag_plugin/../Models/RFID_4/model.sdf</tag_purple_sdf_path>
 
           <max_tags>50</max_tags>
-          <stop_after_misses>5</stop_after_misses>
+          <!-- Не прекращать сканирование после промахов — перебрать ВСЕ теги -->
+          <stop_after_misses>100</stop_after_misses>
         </plugin>
       </sensor>
 
