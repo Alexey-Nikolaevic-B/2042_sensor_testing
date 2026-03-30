@@ -151,31 +151,48 @@ class Sensor:
         result = {}
         for item in param_defs:
             if isinstance(item, str):
-                name = item
+                raw_name = item
                 path = ""
             else:
-                name = item.get("name", "")
+                raw_name = item.get("name", "")
                 path = item.get("path", "")
+
+            if not raw_name:
+                continue
+
+            # Support path in the name itself: "collision/geometry/box/size"
+            # The last segment is the tag name, everything before is the path.
+            if "/" in raw_name and not path:
+                parts = raw_name.strip("/").split("/")
+                name = parts[-1]
+                path = "/".join(parts[:-1])
+            else:
+                name = raw_name
 
             if not name:
                 continue
 
             search_in = content
             if path:
-                # Walk down each segment of the path, scoping progressively deeper
+                # Walk down each segment of the path, scoping progressively deeper.
+                # Use findall to collect ALL matching regions (for multi-plugin SDFs
+                # where e.g. two <collision> blocks exist).
+                regions = [content]
                 for seg in path.split("/"):
-                    seg_m = re.search(
-                        rf"<{re.escape(seg)}>(.*?)</{re.escape(seg)}>",
-                        search_in,
-                        re.DOTALL,
-                    )
-                    if seg_m:
-                        search_in = seg_m.group(1)
-                    else:
-                        search_in = None
+                    next_regions = []
+                    for region in regions:
+                        for m in re.finditer(
+                            rf"<{re.escape(seg)}\b[^>]*>(.*?)</{re.escape(seg)}>",
+                            region,
+                            re.DOTALL,
+                        ):
+                            next_regions.append(m.group(1))
+                    regions = next_regions
+                    if not regions:
                         break
-                if search_in is None:
+                if not regions:
                     continue
+                search_in = "\n".join(regions)
 
             matches = re.findall(
                 rf"<{re.escape(name)}>\s*(.*?)\s*</{re.escape(name)}>",
