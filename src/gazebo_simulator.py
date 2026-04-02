@@ -499,7 +499,8 @@ class Simulator:
 
     def capture_observer_frame(self) -> bytes | None:
         """Grab one JPEG frame from the observer camera ROS topic.
-        Returns the last successfully captured frame if the fresh grab fails."""
+        Returns the last successfully captured frame if the fresh grab fails.
+        Uses a short timeout to avoid blocking the test worker thread."""
         if not self.gazebo_is_running:
             return self._last_observer_frame
         if self._rospy is None:
@@ -507,7 +508,7 @@ class Simulator:
         try:
             from sensor_msgs.msg import Image
 
-            msg = self._rospy.wait_for_message(self._observer_topic, Image, timeout=2.0)
+            msg = self._rospy.wait_for_message(self._observer_topic, Image, timeout=1.0)
             import numpy as np
 
             arr = np.frombuffer(msg.data, dtype=np.uint8).reshape(
@@ -531,9 +532,10 @@ class Simulator:
         self, sensor_data: dict, observer_img: bytes | None = None
     ) -> None:
         """Fire on_capture callback after each sensor capture.
-        Always grabs a fresh observer frame so the UI stays current."""
-        if observer_img is None and self.gazebo_is_running:
-            observer_img = self.capture_observer_frame()
+        Uses cached observer frame to avoid blocking the test thread."""
+        if observer_img is None:
+            # Use cached frame instead of blocking on wait_for_message
+            observer_img = self._last_observer_frame
 
         if self.on_capture:
             try:

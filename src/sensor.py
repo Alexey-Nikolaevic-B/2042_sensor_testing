@@ -335,12 +335,9 @@ class Sensor:
                 "image_path": self.image_path,
                 "messages": results[-1:],  # only last message for UI rendering
             }
-            obs_img = (
-                simulator.capture_observer_frame()
-                if simulator.gazebo_is_running
-                else None
-            )
-            simulator.notify_capture(sensor_data, obs_img)
+            # Use cached observer frame — don't block test thread with
+            # wait_for_message on observer topic (was causing 2s delay per capture)
+            simulator.notify_capture(sensor_data)
             simulator.wait_for_step()
 
         return results
@@ -386,12 +383,7 @@ class Sensor:
                 "image_path": self.image_path,
                 "messages": results[-1:],
             }
-            obs_img = (
-                simulator.capture_observer_frame()
-                if simulator.gazebo_is_running
-                else None
-            )
-            simulator.notify_capture(sensor_data, obs_img)
+            simulator.notify_capture(sensor_data)
             simulator.wait_for_step()
 
         return results
