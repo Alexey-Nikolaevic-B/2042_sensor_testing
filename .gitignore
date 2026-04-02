@@ -19,3 +19,5 @@ catkin_ws/.catkin_workspace
 catkin_ws/devel/
 catkin_ws/build
 catkin_ws/src/scenario_test_pkg/worlds/base_world.world
+
+claude.md
