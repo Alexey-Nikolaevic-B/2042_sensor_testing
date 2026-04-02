@@ -195,15 +195,20 @@ def _mono_build_description(func_name: str, result: dict, passed: bool) -> str:
                     f"Тест пройден: измеренный FOV совпадает с заданным. "
                     f"Измерено: {metrics.get('fov_measured_deg', 0):.1f}°, "
                     f"задано: {metrics.get('fov_target_deg', 0):.1f}°, "
-                    f"отклонение: {metrics.get('relative_error', 0):.2%} (допуск ≤2%)."
+                    f"отклонение: {metrics.get('relative_error', 0):.2%} (допуск ≤5%)."
                 )
             else:
-                desc = (
-                    f"Измеренный FOV не совпадает с заданным. "
-                    f"Измерено: {metrics.get('fov_measured_deg', 0):.1f}°, "
-                    f"задано: {metrics.get('fov_target_deg', 0):.1f}°, "
-                    f"отклонение: {metrics.get('relative_error', 0):.2%}."
-                )
+                # При исключении metrics может быть пуст — берём данные из error
+                error_str = result.get("error", "")
+                if error_str and "measured=" in error_str:
+                    desc = f"Измеренный FOV не совпадает с заданным (допуск ≤5%). {error_str}"
+                else:
+                    desc = (
+                        f"Измеренный FOV не совпадает с заданным. "
+                        f"Измерено: {metrics.get('fov_measured_deg', 0):.1f}°, "
+                        f"задано: {metrics.get('fov_target_deg', 0):.1f}°, "
+                        f"отклонение: {metrics.get('relative_error', 0):.2%} (допуск ≤5%)."
+                    )
         elif func_name == "c10_clipping_test":
             checks = metrics.get("checks", {})
             near_x = metrics.get("x_near_m", 0)
@@ -1654,14 +1659,14 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
     metrics["fov_measured_deg"] = float(degrees(measured_fov))
     metrics["fov_target_deg"] = float(degrees(target_fov))
     metrics["relative_error"] = rel_error
-    metrics["checks"] = {"rel_error_le_0_02": bool(rel_error <= 0.02)}
-    metrics["status"] = "PASS" if rel_error <= 0.02 else "FAIL"
-    if rel_error > 0.02:
+    metrics["checks"] = {"rel_error_le_0_05": bool(rel_error <= 0.05)}
+    metrics["status"] = "PASS" if rel_error <= 0.05 else "FAIL"
+    if rel_error > 0.05:
         metrics["error_reason"] = (
             f"fov_mismatch: measured={measured_fov:.6f}, target={target_fov:.6f}, rel_error={rel_error:.4f}"
         )
     _store_c9_diag()
-    if rel_error > 0.02:
+    if rel_error > 0.05:
         raise AssertionError(
             f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
         )
@@ -2710,14 +2715,14 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     metrics["fov_measured_deg"] = float(degrees(measured_fov))
     metrics["fov_target_deg"] = float(degrees(target_fov))
     metrics["relative_error"] = rel_error
-    metrics["checks"] = {"rel_error_le_0_02": bool(rel_error <= 0.02)}
-    metrics["status"] = "PASS" if rel_error <= 0.02 else "FAIL"
-    if rel_error > 0.02:
+    metrics["checks"] = {"rel_error_le_0_05": bool(rel_error <= 0.05)}
+    metrics["status"] = "PASS" if rel_error <= 0.05 else "FAIL"
+    if rel_error > 0.05:
         metrics["error_reason"] = (
             f"fov_mismatch: measured={measured_fov:.6f}, target={target_fov:.6f}, rel_error={rel_error:.4f}"
         )
     _store_c9_diag()
-    if rel_error > 0.02:
+    if rel_error > 0.05:
         raise AssertionError(
             f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
         )

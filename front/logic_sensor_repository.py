@@ -1,9 +1,19 @@
 import copy
+import os
 from datetime import datetime
 
 from PyQt5.QtCore import QObject, pyqtSignal
 
 import src.sensor_storage as db
+
+_PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _resolve_path(path: str) -> str:
+    """Convert a relative DB path to absolute using project root."""
+    if not path or os.path.isabs(path):
+        return path
+    return os.path.normpath(os.path.join(_PROJECT_ROOT, path))
 
 
 class Sensor:
@@ -18,6 +28,10 @@ class Sensor:
                 raise ValueError(f"Sensor data missing required field: '{field}'")
         self._data = copy.deepcopy(data)
         self._data.setdefault("tests", [])
+        # Resolve relative paths from DB to absolute for file operations
+        for key in ("sdf_path", "image_path"):
+            if key in self._data and self._data[key]:
+                self._data[key] = _resolve_path(self._data[key])
 
     def __getitem__(self, key):
         return self._data[key]

@@ -20,7 +20,27 @@ from PyQt5 import uic
 from ._theme import Colors, Icons, Layout, QT_DIR, LightColors as LC, LightStyles as LS
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "sensors")
+PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 IMAGE_W, IMAGE_H = 300, 200
+
+
+def _to_relative(path: str) -> str:
+    """Convert absolute path to relative (from project root) for DB storage."""
+    if not path:
+        return path
+    abs_path = os.path.abspath(path)
+    abs_root = os.path.abspath(PROJECT_ROOT)
+    if abs_path.startswith(abs_root + os.sep):
+        return os.path.relpath(abs_path, abs_root)
+    # Already relative or outside project — keep as is
+    return path
+
+
+def _to_absolute(path: str) -> str:
+    """Convert relative path (from project root) to absolute for file operations."""
+    if not path or os.path.isabs(path):
+        return path
+    return os.path.normpath(os.path.join(PROJECT_ROOT, path))
 
 
 class AddSensorDialog(QDialog):
@@ -115,8 +135,8 @@ class AddSensorDialog(QDialog):
         result = {
             "name": name,
             "type": self._detected_type or "unknown",
-            "sdf_path": sdf_dest,
-            "image_path": image_dest,
+            "sdf_path": _to_relative(sdf_dest),
+            "image_path": _to_relative(image_dest),
             "description": self.input_description.toPlainText().strip(),
             "params": dict(self._params),
             "topics": self._collect_topics(),

@@ -33,7 +33,7 @@ python3.14 --version
 
 ```bash
 git clone <URL_репозитория>
-cd 2042_sensor_testing
+cd gazebo-sensors-validation-in-gazebo
 ```
 
 ### 4. Запустите скрипт установки
@@ -98,7 +98,7 @@ python3 __main__.py
 Приложение запущено не из корневой директории проекта.
 
 ```bash
-cd /путь/к/2042_sensor_testing
+cd /путь/к/gazebo-sensors-validation-in-gazebo
 source venv/bin/activate
 python3 __main__.py
 ```
