@@ -295,7 +295,10 @@ def _camera_load_sensor_profile(sensor_sdf_path: str) -> Dict[str, Any]:
     path = Path(sensor_sdf_path)
     if not path.exists():
         print(f"[DEBUG _camera_load_sensor_profile] FILE NOT FOUND: {sensor_sdf_path}")
-    tree = ET.parse(path)
+    # Use explicit open/close to avoid leaking file descriptors.
+    # ET.parse(path) keeps an internal fd that only closes on GC.
+    with open(path, "rb") as _f:
+        tree = ET.parse(_f)
     root = tree.getroot()
     model = root.find("model")
     model_name = str(model.get("name", "")).strip() if model is not None else ""

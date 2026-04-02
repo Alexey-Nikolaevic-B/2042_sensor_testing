@@ -218,5 +218,15 @@ class QueueManager(QObject):
         with self._lock:
             self._running = None
         self._stop_requested = False
+
+        # Release file descriptors accumulated during the test.
+        # Each test opens ROS subscribers, Gazebo pipes, SDF files, etc.
+        # Without cleanup these accumulate and hit the OS limit (~1024).
+        try:
+            import gc
+            gc.collect()
+        except Exception:
+            pass
+
         self.log_line.emit("[QueueManager] all_finished — advancing queue")
         self._try_advance()

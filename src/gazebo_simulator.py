@@ -13,9 +13,11 @@ import xml.etree.ElementTree as ET
 
 import logging
 
-with open("log_config.json") as f_in:
-    log_config = json.load(f_in)
-logging.config.dictConfig(log_config)
+_log_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "log_config.json")
+if os.path.exists(_log_config_path):
+    with open(_log_config_path) as f_in:
+        log_config = json.load(f_in)
+    logging.config.dictConfig(log_config)
 
 logger = logging.getLogger(__name__)
 
@@ -342,12 +344,14 @@ class Simulator:
 
     def _generate_world(self, world_path, camera_model_path):
         try:
-            tree = ET.parse(world_path)
+            with open(world_path, "rb") as _f:
+                tree = ET.parse(_f)
             root = tree.getroot()
             world = root.find("world")
 
             # Inject sensor model(s)
-            camera_tree = ET.parse(camera_model_path)
+            with open(camera_model_path, "rb") as _f:
+                camera_tree = ET.parse(_f)
             camera_root = camera_tree.getroot()
             for camera_model in camera_root.findall("model"):
                 world.append(camera_model)
@@ -359,7 +363,8 @@ class Simulator:
                 "observer_camera.sdf",
             )
             if os.path.exists(observer_sdf):
-                obs_tree = ET.parse(observer_sdf)
+                with open(observer_sdf, "rb") as _f:
+                    obs_tree = ET.parse(_f)
                 obs_root = obs_tree.getroot()
                 # Accept both bare <model> root and <sdf><model> wrapper
                 models = obs_root.findall("model") or (
@@ -542,10 +547,28 @@ class Simulator:
 
     def kill_gazebo(self) -> None:
         try:
+            # Close pipe file descriptors BEFORE killing the process
+            # to allow daemon reader threads to exit cleanly.
+            proc = self.gazebo_process
+            if proc is not None:
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except Exception:
+                            pass
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
-            if self.gazebo_process:
-                self.gazebo_process = None
+            self.gazebo_process = None
             logger.info("Gazebo processes killed")
         except Exception as e:
             logger.error(f"Failed to kill Gazebo processes: {str(e)}")

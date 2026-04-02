@@ -62,12 +62,22 @@ if [ -d "$CATKIN_WS" ]; then
         echo "[setup]   sudo apt install ros-noetic-mavros ros-noetic-mavros-msgs" >&2
     fi
 
-    # Install Gazebo ROS packages
+    # Install Gazebo ROS packages — install individual packages instead of
+    # the meta-package ros-noetic-gazebo-ros-pkgs which may be missing from apt.
     echo "[setup] Installing Gazebo packages..."
-    if ! sudo apt install -y ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control ros-noetic-gazebo-plugins; then
-        echo "[setup] WARNING: Failed to install some Gazebo packages." >&2
-        echo "[setup] If catkin_make fails later, install manually:" >&2
-        echo "[setup]   sudo apt install ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control" >&2
+    if ! sudo apt install -y ros-noetic-gazebo-ros ros-noetic-gazebo-msgs ros-noetic-gazebo-dev 2>/dev/null; then
+        echo "[setup] WARNING: Failed to install Gazebo packages via apt." >&2
+        echo "[setup] Checking if ROS apt repository is configured..." >&2
+        if [ ! -f /etc/apt/sources.list.d/ros-latest.list ]; then
+            echo "[setup] Adding ROS apt repository..." >&2
+            sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -cs) main" > /etc/apt/sources.list.d/ros-latest.list'
+            sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654 2>/dev/null
+            sudo apt update
+            sudo apt install -y ros-noetic-gazebo-ros ros-noetic-gazebo-msgs ros-noetic-gazebo-dev || true
+        else
+            echo "[setup] ROS repository exists but packages not found." >&2
+            echo "[setup] Try: sudo apt update && sudo apt install ros-noetic-gazebo-ros ros-noetic-gazebo-msgs" >&2
+        fi
     fi
 
     # Install remaining dependencies from the workspace

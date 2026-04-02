@@ -165,13 +165,19 @@ cd catkin_ws && catkin_make && cd ..
 
 ### Ошибка: `catkin_make failed`
 
-Чаще всего причина — не установлены MAVROS-пакеты (нужны для RFID-плагина):
+Чаще всего причина — не установлены Gazebo или MAVROS пакеты:
 
 ```bash
+# Проверьте что ROS apt-репозиторий подключен
+cat /etc/apt/sources.list.d/ros-latest.list
+# Если файла нет:
+sudo sh -c 'echo "deb http://packages.ros.org/ros/ubuntu focal main" > /etc/apt/sources.list.d/ros-latest.list'
+sudo apt-key adv --keyserver 'hkp://keyserver.ubuntu.com:80' --recv-key C1CF6E31E6BADE8868B172B4F42ED6FBAB17C654
+
 # Установите зависимости вручную
 sudo apt update
+sudo apt install -y ros-noetic-gazebo-ros ros-noetic-gazebo-msgs ros-noetic-gazebo-dev
 sudo apt install -y ros-noetic-mavros ros-noetic-mavros-msgs ros-noetic-libmavconn ros-noetic-mavlink
-sudo apt install -y ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control
 
 # Очистите и пересоберите
 cd catkin_ws
@@ -181,7 +187,10 @@ catkin_make
 cd ..
 ```
 
-Если ошибка `Could not find a package configuration file provided by "mavros_msgs"` — значит пакет `ros-noetic-mavros-msgs` не установился. Проверьте, что ROS-репозиторий добавлен в apt sources.
+Типичные ошибки:
+- `Could not find "gazebo_msgs"` — нужен `ros-noetic-gazebo-msgs`
+- `Could not find "mavros_msgs"` — нужен `ros-noetic-mavros-msgs`
+- `Unable to locate package ros-noetic-gazebo-ros-pkgs` — мета-пакет убран из репозитория, используйте `ros-noetic-gazebo-ros` и `ros-noetic-gazebo-msgs` отдельно
 
 ### Ошибка: `PyQt5` не устанавливается
 
