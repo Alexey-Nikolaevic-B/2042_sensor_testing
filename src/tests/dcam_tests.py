@@ -151,6 +151,7 @@ def _run_camera_context_test(
             "metrics": {"status": "SKIP", "error_reason": msg},
         }
 
+    ctx._progress_cb = progress_cb
     method = getattr(ctx, method_name)
     if progress_cb:
         try:
@@ -359,6 +360,10 @@ class _DepthProfileTestContext:
                 f"Failed to open scene for {test_name}: {world} (reason={reason})"
             )
         print(f"[DEBUG DepthCtx._open_test_scene] scene opened OK, resolving topics...")
+        _pcb = getattr(self, "_progress_cb", None)
+        if _pcb:
+            try: _pcb(15)
+            except Exception: pass
         self._update_resolved_topics(simulator)
         print(
             f"[DEBUG DepthCtx._open_test_scene] resolved_depth={self._resolved_depth_topic}, resolved_image={self._resolved_image_topic}"
@@ -376,6 +381,9 @@ class _DepthProfileTestContext:
         print(f"[DEBUG DepthCtx._open_test_scene] waiting for services...")
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+        if _pcb:
+            try: _pcb(20)
+            except Exception: pass
         print(f"[DEBUG DepthCtx._open_test_scene] services ready")
 
     @staticmethod

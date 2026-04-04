@@ -26,6 +26,31 @@ ROSCORE_POLL_INTERVAL = 0.5
 ROSCORE_TIMEOUT = 30.0
 
 
+def _service_call_with_timeout(proxy, timeout: float = 5.0):
+    """Call a ROS ServiceProxy in a daemon thread with a timeout.
+    Raises TimeoutError if the call does not return within `timeout` seconds."""
+    result = [None]
+    exc = [None]
+
+    def _call():
+        try:
+            result[0] = proxy()
+        except Exception as e:
+            exc[0] = e
+
+    t = threading.Thread(target=_call, daemon=True)
+    t.start()
+    t.join(timeout)
+
+    if t.is_alive():
+        raise TimeoutError(
+            f"ServiceProxy call timed out after {timeout:.1f}s"
+        )
+    if exc[0] is not None:
+        raise exc[0]
+    return result[0]
+
+
 class _RoscoreWatcher(QThread):
     ready = pyqtSignal()
     log = pyqtSignal(str, str)  # level, message
@@ -126,6 +151,10 @@ class Simulator:
                 self._rospy.wait_for_service(
                     "/gazebo/get_world_properties", timeout=0.5
                 )
+                proxy = self._rospy.ServiceProxy(
+                    "/gazebo/get_world_properties", self._GetWorldProperties
+                )
+                _service_call_with_timeout(proxy, timeout=2.0)
                 return True
             except Exception:
                 pass
@@ -213,7 +242,8 @@ class Simulator:
             if GWP is None:
                 from gazebo_msgs.srv import GetWorldProperties as GWP
             self._rospy.wait_for_service("/gazebo/get_world_properties", timeout=2)
-            self._rospy.ServiceProxy("/gazebo/get_world_properties", GWP)()
+            proxy = self._rospy.ServiceProxy("/gazebo/get_world_properties", GWP)
+            _service_call_with_timeout(proxy, timeout=3.0)
             return True
         except Exception as exc:
             logger.debug(f"is_gazebo_running: {exc}")
@@ -226,7 +256,7 @@ class Simulator:
         logger.info(f"open_scene: is_gazebo_running={gazebo_running}")
         if gazebo_running:
             self.kill_gazebo()
-            time.sleep(1.0)
+            # kill_gazebo now polls for process death — no fixed sleep needed
 
         if not self.ros_is_running:
             logger.error("open_scene: ros_is_running=False")
@@ -547,6 +577,25 @@ class Simulator:
                     "notify_capture callback error: %s\n%s", e, traceback.format_exc()
                 )
 
+    @staticmethod
+    def _is_gzserver_alive() -> bool:
+        try:
+            r = subprocess.run(
+                ["pgrep", "-f", "gzserver"], capture_output=True, timeout=2
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    def _wait_gzserver_dead(self, timeout: float = 5.0) -> bool:
+        """Poll until no gzserver process exists. Returns True if dead."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if not self._is_gzserver_alive():
+                return True
+            time.sleep(0.3)
+        return False
+
     def kill_gazebo(self) -> None:
         try:
             # Close pipe file descriptors BEFORE killing the process
@@ -570,6 +619,14 @@ class Simulator:
 
             subprocess.run(["pkill", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-f", "gzclient"], check=False)
+
+            # Wait for gzserver to actually die; escalate to SIGKILL if needed
+            if not self._wait_gzserver_dead(timeout=5.0):
+                logger.warning("gzserver still alive after SIGTERM, sending SIGKILL")
+                subprocess.run(["pkill", "-9", "-f", "gzserver"], check=False)
+                subprocess.run(["pkill", "-9", "-f", "gzclient"], check=False)
+                self._wait_gzserver_dead(timeout=3.0)
+
             self.gazebo_process = None
             logger.info("Gazebo processes killed")
         except Exception as e:
@@ -624,7 +681,8 @@ class Simulator:
         while time.time() < deadline:
             try:
                 self._rospy.wait_for_service("/gazebo/get_world_properties", timeout=1)
-                self._rospy.ServiceProxy("/gazebo/get_world_properties", GWP)()
+                proxy = self._rospy.ServiceProxy("/gazebo/get_world_properties", GWP)
+                _service_call_with_timeout(proxy, timeout=5.0)
                 return True
             except Exception as e:
                 last_exc = e

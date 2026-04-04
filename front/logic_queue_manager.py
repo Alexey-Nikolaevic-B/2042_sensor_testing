@@ -219,6 +219,14 @@ class QueueManager(QObject):
             self._running = None
         self._stop_requested = False
 
+        # Kill Gazebo between tests so the next test starts with a clean slate.
+        # Without this, the next open_scene() must detect and kill the old
+        # gzserver — which can hang if gzserver is in a zombie state.
+        try:
+            self._runner._core.simulator.kill_gazebo()
+        except Exception as exc:
+            logger.warning("kill_gazebo between tests failed: %s", exc)
+
         # Release file descriptors accumulated during the test.
         # Each test opens ROS subscribers, Gazebo pipes, SDF files, etc.
         # Without cleanup these accumulate and hit the OS limit (~1024).

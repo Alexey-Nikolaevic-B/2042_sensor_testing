@@ -244,8 +244,15 @@ class _StereoProfileTestContext:
         print(
             f"[DEBUG StereoCtx._open_test_scene] scene opened OK, waiting for services..."
         )
+        _pcb = getattr(self, "_progress_cb", None)
+        if _pcb:
+            try: _pcb(15)
+            except Exception: pass
         rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+        if _pcb:
+            try: _pcb(20)
+            except Exception: pass
         print(f"[DEBUG StereoCtx._open_test_scene] services ready, resolving topics...")
         scene_diag = self._update_resolved_stereo_topics(simulator)
         print(
@@ -942,8 +949,15 @@ class _StereoProfileTestContext:
                 )
             if not simulator.open_scene(world_path, self.sensor_sdf_path):
                 return None
+            _pcb = getattr(self, "_progress_cb", None)
+            if _pcb:
+                try: _pcb(15)
+                except Exception: pass
             rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
             rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+            if _pcb:
+                try: _pcb(20)
+                except Exception: pass
             self._update_resolved_stereo_topics(simulator)
 
         left_msg, right_msg = self._wait_pair(timeout=timeout)
@@ -1581,6 +1595,7 @@ def _run_camera_context_test(
             "error": msg,
             "metrics": {"status": "SKIP", "error_reason": msg},
         }
+    ctx._progress_cb = progress_cb
     method = getattr(ctx, method_name)
     if progress_cb:
         try:

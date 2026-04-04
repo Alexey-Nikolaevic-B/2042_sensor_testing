@@ -667,8 +667,15 @@ def _mono__open_test_scene(ctx, simulator, test_name: str) -> None:
             f"Failed to open scene for {test_name}: {world} (reason={reason})"
         )
     print(f"[DEBUG _mono__open_test_scene] scene opened OK, waiting for services...")
+    _pcb = getattr(ctx, "_progress_cb", None)
+    if _pcb:
+        try: _pcb(15)
+        except Exception: pass
     rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
     rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+    if _pcb:
+        try: _pcb(20)
+        except Exception: pass
     print(f"[DEBUG _mono__open_test_scene] services ready")
 
 
@@ -1101,8 +1108,13 @@ def _mono_c1_size_order_test(ctx, simulator) -> Dict[str, Any]:
         raise RuntimeError(f"Model not spawned: {ctx.C1_CUBE_NAME}")
 
     prev_stamp_s: Optional[float] = None
-    for x in ctx.C1_POSITIONS:
+    _c1_positions = list(ctx.C1_POSITIONS)
+    _c1_pcb = getattr(ctx, "_progress_cb", None)
+    for _c1_idx, x in enumerate(_c1_positions):
         label = f"x{int(x)}"
+        if _c1_pcb:
+            try: _c1_pcb(30 + int(50 * _c1_idx / len(_c1_positions)))
+            except Exception: pass
         _mono__move_and_settle(
             ctx,
             simulator,
@@ -1741,6 +1753,10 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         raise RuntimeError(f"Failed to receive warmup image for C10: {exc}") from exc
 
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
+    _c10_pcb = getattr(ctx, "_progress_cb", None)
+    if _c10_pcb:
+        try: _c10_pcb(30)
+        except Exception: pass
     print(f"[DEBUG C10] near_target={near_target:.3f}m  far_target={far_target:.3f}m  min_far={min_far_m:.1f}m")
 
     def _is_visible(x: float, settle_s: float = 0.2) -> bool:
@@ -1771,6 +1787,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
                 break
 
     near_ok = near_visible
+    if _c10_pcb:
+        try: _c10_pcb(50)
+        except Exception: pass
 
     # ── Step 2: Binary search for max visible distance ────────────────
     # Start from a known visible point, find where cube disappears
@@ -1907,9 +1926,15 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
 
     sub = rospy.Subscriber(resolved_topic, Image, _on_image, queue_size=2000)
     started_wall = time.perf_counter()
+    _c11_pcb = getattr(ctx, "_progress_cb", None)
     try:
         while (time.perf_counter() - started_wall) < float(ctx.C11_DURATION_S):
             time.sleep(0.1)
+            if _c11_pcb:
+                elapsed = time.perf_counter() - started_wall
+                pct = 25 + int(65 * elapsed / float(ctx.C11_DURATION_S))
+                try: _c11_pcb(min(pct, 90))
+                except Exception: pass
     finally:
         sub.unregister()
 
@@ -2043,6 +2068,7 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c1_size_order_test"]),
@@ -2105,8 +2131,13 @@ def c1_size_order_test(simulator, sensor, progress_cb=None) -> dict:
         raise RuntimeError(f"Model not spawned: {ctx.C1_CUBE_NAME}")
 
     prev_stamp_s: Optional[float] = None
-    for x in ctx.C1_POSITIONS:
+    _c1_positions = list(ctx.C1_POSITIONS)
+    _c1_pcb = getattr(ctx, "_progress_cb", None)
+    for _c1_idx, x in enumerate(_c1_positions):
         label = f"x{int(x)}"
+        if _c1_pcb:
+            try: _c1_pcb(30 + int(50 * _c1_idx / len(_c1_positions)))
+            except Exception: pass
         _mono__move_and_settle(
             ctx,
             simulator,
@@ -2192,6 +2223,7 @@ def c2_resolution_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c2_resolution_test"]),
@@ -2316,6 +2348,7 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c4_geometries_presence_test"]),
@@ -2421,6 +2454,7 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c7_occlusion_test"]),
@@ -2562,6 +2596,7 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             pass
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     x_fixed = 2.0
 
@@ -2744,6 +2779,7 @@ def c10_clipping_test(simulator, sensor, progress_cb=None) -> dict:
             pass
 
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     result = _mono_c10_clipping_test(ctx, simulator)
 
@@ -2764,6 +2800,7 @@ def c11_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
             pass
 
     ctx = _mono_build_ctx(sensor)
+    ctx._progress_cb = progress_cb
     ctx._simulator = simulator
     result = _mono_c11_fps_stability_test(ctx, simulator)
 
