@@ -617,8 +617,8 @@ class Simulator:
                 except Exception:
                     pass
 
-            subprocess.run(["pkill", "-f", "gzserver"], check=False)
-            subprocess.run(["pkill", "-f", "gzclient"], check=False)
+            subprocess.run(["pkill", "-9", "-f", "gzserver"], check=False)
+            subprocess.run(["pkill", "-9", "-f", "gzclient"], check=False)
 
             # Wait for gzserver to actually die; escalate to SIGKILL if needed
             if not self._wait_gzserver_dead(timeout=5.0):
