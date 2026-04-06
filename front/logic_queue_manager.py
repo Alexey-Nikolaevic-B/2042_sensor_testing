@@ -219,13 +219,11 @@ class QueueManager(QObject):
             self._running = None
         self._stop_requested = False
 
-        # Kill Gazebo between tests so the next test starts with a clean slate.
-        # Without this, the next open_scene() must detect and kill the old
-        # gzserver — which can hang if gzserver is in a zombie state.
-        try:
-            self._runner._core.simulator.kill_gazebo()
-        except Exception as exc:
-            logger.warning("kill_gazebo between tests failed: %s", exc)
+        # NOTE: do NOT call kill_gazebo() here — this handler runs on the
+        # main Qt thread and kill_gazebo() blocks for seconds (polling for
+        # process death), which freezes the entire UI.  The next test's
+        # open_scene() already kills old Gazebo on the worker thread, and
+        # _service_call_with_timeout prevents it from hanging.
 
         # Release file descriptors accumulated during the test.
         # Each test opens ROS subscribers, Gazebo pipes, SDF files, etc.
