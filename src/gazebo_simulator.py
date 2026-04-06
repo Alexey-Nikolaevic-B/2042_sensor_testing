@@ -606,31 +606,21 @@ class Simulator:
     def kill_gazebo(self) -> None:
         _tk = time.time()
         try:
-            proc = self.gazebo_process
-            if proc is not None:
-                logger.info(f"kill_gazebo: closing pipes for pid={proc.pid}...")
-                for pipe in (proc.stdout, proc.stderr):
-                    if pipe is not None:
-                        try:
-                            pipe.close()
-                        except Exception:
-                            pass
-                logger.info("kill_gazebo: terminate + wait(3s)...")
-                try:
-                    proc.terminate()
-                    proc.wait(timeout=3)
-                    logger.info(f"kill_gazebo: process terminated in {time.time()-_tk:.1f}s")
-                except subprocess.TimeoutExpired:
-                    logger.info("kill_gazebo: terminate timed out, sending SIGKILL...")
-                    proc.kill()
-                    proc.wait(timeout=2)
-                    logger.info(f"kill_gazebo: process killed in {time.time()-_tk:.1f}s")
-                except Exception as e:
-                    logger.warning(f"kill_gazebo: process cleanup error: {e}")
-
+            # Kill ALL gzserver/gzclient processes FIRST with SIGKILL.
+            # This is the most reliable way — SIGTERM can be ignored by Gazebo.
+            # Pipes will get EOF automatically when the process dies,
+            # allowing daemon reader threads to exit on their own.
             logger.info("kill_gazebo: pkill -9 gzserver/gzclient...")
             subprocess.run(["pkill", "-9", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-9", "-f", "gzclient"], check=False)
+
+            proc = self.gazebo_process
+            if proc is not None:
+                logger.info(f"kill_gazebo: waiting for process pid={proc.pid} to die...")
+                try:
+                    proc.wait(timeout=3)
+                except Exception:
+                    pass
 
             # Wait for gzserver to actually die; escalate to SIGKILL if needed
             if not self._wait_gzserver_dead(timeout=5.0):
