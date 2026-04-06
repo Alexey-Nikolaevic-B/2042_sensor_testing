@@ -367,10 +367,12 @@ def _mono__ensure_render_display_env(ctx) -> Dict[str, str]:
 
 
 def _mono__msg_stamp_s(ctx, msg: Image) -> float:
-    stamp = float(msg.header.stamp.to_sec())
-    if stamp <= 0.0:
-        return float(time.time())
-    return stamp
+    """Extract timestamp from ROS message header.
+    Always returns the sim-time stamp from the header, even if zero.
+    Never falls back to wall-clock time — mixing sim-time and wall-clock
+    causes _wait_image_after to hang after Gazebo restarts (sim-time resets
+    to 0 while prev_stamp is still ~1.7e9 from wall clock)."""
+    return float(msg.header.stamp.to_sec())
 
 
 def _mono__wait_image_after(
@@ -414,6 +416,14 @@ def _mono__wait_image_after(
             return msg
 
         stamp = _mono__msg_stamp_s(ctx, msg)
+        # Detect Gazebo restart: if prev_stamp is much larger than current stamp
+        # (e.g. prev=1775506223 from wall clock, current=12 from restarted sim time),
+        # treat current frame as fresh — the sim was restarted.
+        if prev_stamp_s is not None and float(prev_stamp_s) > stamp + 100.0:
+            print(
+                f"[DEBUG _mono__wait_image_after] sim-time reset detected: prev={prev_stamp_s:.1f} >> stamp={stamp:.1f}, accepting as fresh"
+            )
+            prev_stamp_s = 0.0  # reset — accept any frame from new Gazebo session
         if stamp > float(prev_stamp_s) + 1e-6:
             if frames_to_skip > 0:
                 frames_to_skip -= 1

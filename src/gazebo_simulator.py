@@ -682,6 +682,17 @@ class Simulator:
         last_exc = None
         attempt = 0
         t_start = time.time()
+
+        # Reset rospy shutdown flag if it was set by raise_in_thread(SystemExit).
+        # Without this, all wait_for_service calls throw ROSInterruptException.
+        try:
+            import rospy.core as _rc
+            if _rc._shutdown_flag:
+                logger.info("wait_gazebo_quiet: clearing rospy shutdown flag")
+                _rc._shutdown_flag = False
+        except Exception:
+            pass
+
         while time.time() < deadline:
             attempt += 1
             try:
