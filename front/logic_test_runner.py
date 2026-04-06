@@ -1,3 +1,4 @@
+import ctypes
 import time
 import traceback
 import threading
@@ -28,6 +29,34 @@ class _Worker(QObject):
 
     def request_stop(self):
         self._stop_requested = True
+
+    def raise_in_thread(self, exc_type):
+        """Inject an exception into the worker thread to break blocking calls.
+        This is a CPython-specific mechanism — use only as last resort after
+        request_stop() fails to stop the thread (e.g. thread stuck in
+        rospy.wait_for_message or time.sleep)."""
+        tid = self._thread_id
+        if tid is None:
+            return
+        try:
+            res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+                ctypes.c_ulong(tid),
+                ctypes.py_object(exc_type),
+            )
+            if res == 0:
+                self.log_line.emit(
+                    f"[Worker:{self._func_name}] raise_in_thread: tid {tid} not found"
+                )
+            elif res > 1:
+                # Affected more than one thread — undo
+                ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_ulong(tid), None)
+                self.log_line.emit(
+                    f"[Worker:{self._func_name}] raise_in_thread: affected {res} threads — undone"
+                )
+        except Exception as exc:
+            self.log_line.emit(
+                f"[Worker:{self._func_name}] raise_in_thread error: {exc}"
+            )
 
     @pyqtSlot()
     def run(self):
@@ -147,7 +176,10 @@ class TestRunner(QObject):
         self.log_line.emit(f"[TestRunner] force_kill() called, worker={worker}")
 
         if worker is not None:
+            # Step 1: cooperative stop
             worker.request_stop()
+            # Step 2: inject exception to break any blocking call
+            worker.raise_in_thread(SystemExit)
 
         try:
             proc = getattr(self._core.simulator, "gazebo_process", None)

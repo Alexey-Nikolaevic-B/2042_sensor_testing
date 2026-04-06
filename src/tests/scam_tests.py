@@ -666,12 +666,7 @@ class _StereoProfileTestContext:
                                 "image_path": getattr(self.sensor, "image_path", ""),
                                 "messages": [pair_holder["left"]],
                             }
-                            obs_img = (
-                                sim.capture_observer_frame()
-                                if sim.gazebo_is_running
-                                else None
-                            )
-                            sim.notify_capture(sensor_data, obs_img)
+                            sim.notify_capture(sensor_data)
                         return pair_holder["left"], pair_holder["right"], skew
                     attempt_diag["pair_rejected"] = True
                     attempt_diag["pair_reject_reason"] = "skew_above_threshold"

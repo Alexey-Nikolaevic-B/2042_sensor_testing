@@ -256,7 +256,7 @@ class Simulator:
         logger.info(f"open_scene: is_gazebo_running={gazebo_running}")
         if gazebo_running:
             self.kill_gazebo()
-            # kill_gazebo now polls for process death — no fixed sleep needed
+            time.sleep(2)  # let OS release ports/sockets before restarting
 
         if not self.ros_is_running:
             logger.error("open_scene: ros_is_running=False")
