@@ -117,6 +117,11 @@ class _Worker(QObject):
 
         finally:
             self._thread_id = None
+            # Small delay to ensure test_finished signal is processed
+            # by QueueManager BEFORE all_finished triggers _try_advance.
+            # Without this, Qt may deliver all_finished first, starting
+            # the next test while the current one hasn't saved results yet.
+            time.sleep(0.1)
 
         self.all_finished.emit()
 

@@ -260,8 +260,11 @@ def _mono_safe_wrapper(test_func):
 
     @functools.wraps(test_func)
     def wrapper(simulator, sensor, progress_cb=None):
+        t_start = time.time()
+        print(f"\n[DEBUG _mono_safe_wrapper] ▶ START {test_func.__name__} sensor={getattr(sensor, 'sensor_name', '?')}")
         try:
             result = test_func(simulator, sensor, progress_cb=progress_cb)
+            print(f"[DEBUG _mono_safe_wrapper] ✓ DONE {test_func.__name__} in {time.time()-t_start:.1f}s passed={result.get('passed', '?') if isinstance(result, dict) else '?'}")
             # Add description for passed tests
             if isinstance(result, dict) and "description" not in result:
                 desc = _mono_build_description(test_func.__name__, result, True)
@@ -270,7 +273,7 @@ def _mono_safe_wrapper(test_func):
             return result
         except Exception as exc:
             tb = _tb.format_exc()
-            print(f"[DEBUG _mono_safe_wrapper] {test_func.__name__} RAISED: {type(exc).__name__}: {exc}")
+            print(f"[DEBUG _mono_safe_wrapper] ✗ FAILED {test_func.__name__} in {time.time()-t_start:.1f}s: {type(exc).__name__}: {exc}")
             print(tb)
             diag = {}
             if "ctx" in test_func.__code__.co_varnames:
@@ -657,26 +660,33 @@ def _mono__open_test_scene(ctx, simulator, test_name: str) -> None:
         f"[DEBUG _mono__open_test_scene] sdf_path={ctx.sensor_sdf_path}, exists={os.path.exists(ctx.sensor_sdf_path) if ctx.sensor_sdf_path else False}"
     )
     print(f"[DEBUG _mono__open_test_scene] calling simulator.open_scene()...")
+    t_scene = time.time()
     if not simulator.open_scene(world, ctx.sensor_sdf_path):
         diag = _mono__scene_diag(ctx, simulator)
         reason = diag.get("reason", "unknown") if isinstance(diag, dict) else "unknown"
         print(
-            f"[DEBUG _mono__open_test_scene] FAILED to open scene: reason={reason}, diag={diag}"
+            f"[DEBUG _mono__open_test_scene] FAILED to open scene after {time.time()-t_scene:.1f}s: reason={reason}"
         )
         raise RuntimeError(
             f"Failed to open scene for {test_name}: {world} (reason={reason})"
         )
-    print(f"[DEBUG _mono__open_test_scene] scene opened OK, waiting for services...")
+    print(f"[DEBUG _mono__open_test_scene] scene opened OK in {time.time()-t_scene:.1f}s, waiting for services...")
     _pcb = getattr(ctx, "_progress_cb", None)
     if _pcb:
         try: _pcb(15)
         except Exception: pass
+    t_svc = time.time()
+    print(f"[DEBUG _mono__open_test_scene] waiting for get_world_properties (30s timeout)...")
     rospy.wait_for_service("/gazebo/get_world_properties", timeout=30.0)
+    print(f"[DEBUG _mono__open_test_scene] get_world_properties ready in {time.time()-t_svc:.1f}s")
+    t_svc2 = time.time()
+    print(f"[DEBUG _mono__open_test_scene] waiting for set_model_state (30s timeout)...")
     rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
+    print(f"[DEBUG _mono__open_test_scene] set_model_state ready in {time.time()-t_svc2:.1f}s")
     if _pcb:
         try: _pcb(20)
         except Exception: pass
-    print(f"[DEBUG _mono__open_test_scene] services ready")
+    print(f"[DEBUG _mono__open_test_scene] services ready, total scene setup: {time.time()-t_scene:.1f}s")
 
 
 def _mono__move_and_settle(

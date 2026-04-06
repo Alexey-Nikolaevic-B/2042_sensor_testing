@@ -250,13 +250,20 @@ class Simulator:
             return False
 
     def open_scene(self, world_path, camera_model_path) -> bool:
+        import time as _t
+        _t0 = _t.time()
         logger.info(f"open_scene: world={world_path}")
 
+        logger.info("open_scene: checking is_gazebo_running...")
         gazebo_running = self.is_gazebo_running()
-        logger.info(f"open_scene: is_gazebo_running={gazebo_running}")
+        logger.info(f"open_scene: is_gazebo_running={gazebo_running} (check took {_t.time()-_t0:.1f}s)")
         if gazebo_running:
+            logger.info("open_scene: killing old Gazebo...")
+            _tk = _t.time()
             self.kill_gazebo()
+            logger.info(f"open_scene: kill_gazebo took {_t.time()-_tk:.1f}s, sleeping 2s...")
             time.sleep(2)  # let OS release ports/sockets before restarting
+            logger.info(f"open_scene: ready to restart (total kill+sleep: {_t.time()-_tk:.1f}s)")
 
         if not self.ros_is_running:
             logger.error("open_scene: ros_is_running=False")
@@ -597,26 +604,31 @@ class Simulator:
         return False
 
     def kill_gazebo(self) -> None:
+        _tk = time.time()
         try:
-            # Close pipe file descriptors BEFORE killing the process
-            # to allow daemon reader threads to exit cleanly.
             proc = self.gazebo_process
             if proc is not None:
+                logger.info(f"kill_gazebo: closing pipes for pid={proc.pid}...")
                 for pipe in (proc.stdout, proc.stderr):
                     if pipe is not None:
                         try:
                             pipe.close()
                         except Exception:
                             pass
+                logger.info("kill_gazebo: terminate + wait(3s)...")
                 try:
                     proc.terminate()
                     proc.wait(timeout=3)
+                    logger.info(f"kill_gazebo: process terminated in {time.time()-_tk:.1f}s")
                 except subprocess.TimeoutExpired:
+                    logger.info("kill_gazebo: terminate timed out, sending SIGKILL...")
                     proc.kill()
                     proc.wait(timeout=2)
-                except Exception:
-                    pass
+                    logger.info(f"kill_gazebo: process killed in {time.time()-_tk:.1f}s")
+                except Exception as e:
+                    logger.warning(f"kill_gazebo: process cleanup error: {e}")
 
+            logger.info("kill_gazebo: pkill -9 gzserver/gzclient...")
             subprocess.run(["pkill", "-9", "-f", "gzserver"], check=False)
             subprocess.run(["pkill", "-9", "-f", "gzclient"], check=False)
 
@@ -678,14 +690,20 @@ class Simulator:
             GWP = GetWorldProperties
         deadline = time.time() + timeout
         last_exc = None
+        attempt = 0
+        t_start = time.time()
         while time.time() < deadline:
+            attempt += 1
             try:
                 self._rospy.wait_for_service("/gazebo/get_world_properties", timeout=1)
                 proxy = self._rospy.ServiceProxy("/gazebo/get_world_properties", GWP)
                 _service_call_with_timeout(proxy, timeout=5.0)
+                logger.info(f"wait_gazebo_quiet: Gazebo responded after {time.time()-t_start:.1f}s ({attempt} attempts)")
                 return True
             except Exception as e:
                 last_exc = e
+                if attempt <= 3 or attempt % 10 == 0:
+                    logger.info(f"wait_gazebo_quiet: attempt {attempt}, elapsed={time.time()-t_start:.1f}s: {type(e).__name__}")
                 time.sleep(0.5)
         logger.error(
             "wait_gazebo_quiet timed out after %.0fs — last error: %s",
