@@ -8,7 +8,7 @@
 
       <!-- Tag spawner plugin — reads map.txt and spawns tag models into Gazebo -->
       <sensor name="rfid_tags_dummy" type="ray">
-        <always_on>1</always_on>
+        <always_on>true</always_on>
         <update_rate>1</update_rate>
         <ray>
           <scan>
@@ -43,7 +43,7 @@
 
       <!-- Antenna detection plugin — publishes detected tags to /detected_tags -->
       <sensor name="rfid_antenna_dummy" type="ray">
-        <always_on>1</always_on>
+        <always_on>true</always_on>
         <update_rate>20</update_rate>
         <ray>
           <scan>

@@ -7,7 +7,7 @@
     <link name="base_link_sim">
 
       <sensor name="rfid_tags_dummy" type="ray">
-        <always_on>1</always_on>
+        <always_on>true</always_on>
         <update_rate>1</update_rate>
         <ray>
           <scan>
@@ -41,7 +41,7 @@
       </sensor>
 
       <sensor name="rfid_antenna_dummy" type="ray">
-        <always_on>1</always_on>
+        <always_on>true</always_on>
         <update_rate>20</update_rate>
         <ray>
           <scan>
