@@ -1,5 +1,6 @@
 """Tactile sensor tests."""
 
+import math
 import time
 
 import numpy as np
@@ -210,82 +211,130 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time() - t0, 2)
         return result
 
-    # Build 3×3 grid using actual sensor dimensions from SDF
-    x_margin = size_x * 0.1
-    y_margin = size_y * 0.1
-    x_start = -size_x / 2 + x_margin
-    x_end = size_x / 2 - x_margin
-    y_start = -size_y / 2 + y_margin
-    y_end = size_y / 2 - y_margin
-    x_step = (x_end - x_start) / 2
-    y_step = (y_end - y_start) / 2
+    # ── Detect sensor shape (cylinder vs box) from SDF ────────────────────────
+    # Cylinder: has <collision><geometry><cylinder><radius>
+    # Box:      has <collision><geometry><box><size>
+    # For cylindrical sensors, a square grid would place corner points
+    # OUTSIDE the cylinder's footprint (diagonal > diameter / √2), causing
+    # missed contacts.  Use a circular grid for cylinders.
+    sdf_params = sensor.read_params_from_sdf([
+        {"name": "collision/geometry/cylinder/radius"},
+    ])
+    cylinder_radius = sdf_params.get("radius")
 
-    x_positions = [x_start, x_start + x_step, x_end]
-    y_positions = [y_start, y_start + y_step, y_end]
+    # Build a list of (row, col, x, y) tuples — 9 points total
+    grid_positions = []
+    if cylinder_radius:
+        shape = "cylinder"
+        # Test-circle radius = 70% of the cylinder's physical radius,
+        # so all 8 peripheral points are guaranteed inside the collision.
+        test_r = float(cylinder_radius) * 0.7
+        # Center point → (1, 1) in the 3×3 response matrix
+        grid_positions.append((1, 1, 0.0, 0.0))
+        # 8 points on the circle, 45° apart.
+        # Map each angular position to (row, col) in the 3×3 matrix so
+        # response_grid retains a geometric layout (top/bottom/left/right).
+        angle_to_rc = [
+            (2, 1),  # 0°     →  +X, centre Y       → right-centre
+            (2, 2),  # 45°    →  +X +Y              → top-right
+            (1, 2),  # 90°    →  centre X, +Y       → top-centre
+            (0, 2),  # 135°   →  -X +Y              → top-left
+            (0, 1),  # 180°   →  -X, centre Y       → left-centre
+            (0, 0),  # 225°   →  -X -Y              → bottom-left
+            (1, 0),  # 270°   →  centre X, -Y       → bottom-centre
+            (2, 0),  # 315°   →  +X -Y              → bottom-right
+        ]
+        for k, (row, col) in enumerate(angle_to_rc):
+            angle = math.pi * k / 4.0  # 0, π/4, π/2, ...
+            x = test_r * math.cos(angle)
+            y = test_r * math.sin(angle)
+            grid_positions.append((row, col, x, y))
+    else:
+        shape = "box"
+        # Square 3×3 grid using 80% of the bounding-box footprint
+        x_margin = size_x * 0.1
+        y_margin = size_y * 0.1
+        x_start = -size_x / 2 + x_margin
+        x_end = size_x / 2 - x_margin
+        y_start = -size_y / 2 + y_margin
+        y_end = size_y / 2 - y_margin
+        x_step = (x_end - x_start) / 2
+        y_step = (y_end - y_start) / 2
+        xs = [x_start, x_start + x_step, x_end]
+        ys = [y_start, y_start + y_step, y_end]
+        for i, x in enumerate(xs):
+            for j, y in enumerate(ys):
+                grid_positions.append((i, j, x, y))
 
-    print(f"\n[DEBUG] Grid positions:")
-    print(f"  X: {[round(x, 4) for x in x_positions]}")
-    print(f"  Y: {[round(y, 4) for y in y_positions]}")
+    result["shape"] = shape
 
-    total_points = len(x_positions) * len(y_positions)
+    print(f"\n[DEBUG T2] shape={shape}")
+    if shape == "cylinder":
+        print(f"[DEBUG T2] cylinder radius={cylinder_radius}, test circle radius={test_r:.4f}m")
+    else:
+        print(f"[DEBUG T2] box size_x={size_x}, size_y={size_y}")
+    print(f"[DEBUG T2] grid positions (row, col, x, y):")
+    for row, col, x, y in grid_positions:
+        print(f"  ({row},{col}) → x={x:+.4f}, y={y:+.4f}")
+
+    total_points = len(grid_positions)
     point_counter = 0
     response_grid = np.zeros((3, 3))
 
-    for i, x in enumerate(x_positions):
-        for j, y in enumerate(y_positions):
-            point_counter += 1
-            if progress_cb:
-                progress_cb(int((point_counter / total_points) * 100))
+    for row, col, x, y in grid_positions:
+        point_counter += 1
+        if progress_cb:
+            progress_cb(int((point_counter / total_points) * 100))
 
-            grid_point = {
-                "x": round(x, 4),
-                "y": round(y, 4),
-                "row": i,
-                "col": j,
-            }
+        grid_point = {
+            "x": round(x, 4),
+            "y": round(y, 4),
+            "row": row,
+            "col": col,
+        }
 
-            # ── Rise: position probe above this grid point ────────────────────
-            simulator.set_pose(probe_model, x, y, rest_z)
-            time.sleep(1.0)
+        # ── Rise: position probe above this grid point ────────────────────
+        simulator.set_pose(probe_model, x, y, rest_z)
+        time.sleep(1.0)
 
-            # ── Lower: make contact and wait for physics to stabilise ─────────
-            simulator.set_pose(probe_model, x, y, contact_z)
-            time.sleep(1.5)
+        # ── Lower: make contact and wait for physics to stabilise ─────────
+        simulator.set_pose(probe_model, x, y, contact_z)
+        time.sleep(1.5)
 
-            # ── Collect: gather all force magnitudes in the window → median ───
-            try:
-                contacts = sensor.capture_data(
-                    ContactsState, window=3.0, timeout=2.0, simulator=simulator
-                )
+        # ── Collect: gather all force magnitudes in the window → median ───
+        try:
+            contacts = sensor.capture_data(
+                ContactsState, window=3.0, timeout=2.0, simulator=simulator
+            )
 
-                magnitudes = []
-                for msg in contacts:
-                    if msg.states:
-                        for state in msg.states:
-                            if state.total_wrench.force is not None:
-                                f = state.total_wrench.force
-                                mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
-                                magnitudes.append(mag)
+            magnitudes = []
+            for msg in contacts:
+                if msg.states:
+                    for state in msg.states:
+                        if state.total_wrench.force is not None:
+                            f = state.total_wrench.force
+                            mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
+                            magnitudes.append(mag)
 
-                stable_response = float(np.median(magnitudes)) if magnitudes else 0.0
+            stable_response = float(np.median(magnitudes)) if magnitudes else 0.0
 
-                response_grid[i][j] = stable_response
-                grid_point["response"] = round(stable_response, 4)
-                grid_point["detected"] = stable_response > 0
-                grid_point["samples"] = len(magnitudes)
+            response_grid[row][col] = stable_response
+            grid_point["response"] = round(stable_response, 4)
+            grid_point["detected"] = stable_response > 0
+            grid_point["samples"] = len(magnitudes)
 
-            except Exception as e:
-                response_grid[i][j] = 0.0
-                grid_point["response"] = 0.0
-                grid_point["detected"] = False
-                grid_point["samples"] = 0
-                grid_point["error"] = str(e)
+        except Exception as e:
+            response_grid[row][col] = 0.0
+            grid_point["response"] = 0.0
+            grid_point["detected"] = False
+            grid_point["samples"] = 0
+            grid_point["error"] = str(e)
 
-            # ── Rise: lift before moving to the next point ────────────────────
-            simulator.set_pose(probe_model, x, y, rest_z)
-            time.sleep(1.0)
+        # ── Rise: lift before moving to the next point ────────────────────
+        simulator.set_pose(probe_model, x, y, rest_z)
+        time.sleep(1.0)
 
-            result["grid_points"].append(grid_point)
+        result["grid_points"].append(grid_point)
 
     # ── Analysis ──────────────────────────────────────────────────────────────
     all_responses = response_grid.flatten()  # all 9 points, zeros included
