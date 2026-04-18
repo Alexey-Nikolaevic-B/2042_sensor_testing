@@ -58,8 +58,14 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     time.sleep(3)
 
     probe_model = "force_probe"
-    start_pos = [0.0, 0.0, 0.12]
-    contact_pos = [0.0, 0.0, 0.095]
+    # Compute probe positions from sensor height (body centered at z=0 in SDF,
+    # top surface at z = size_z/2).  Probe tip sits 13mm below probe_link origin.
+    size_z = float(raw_size[2])
+    sensor_top_z = size_z / 2.0
+    probe_tip_offset = 0.013
+    start_pos = [0.0, 0.0, sensor_top_z + probe_tip_offset + 0.05]   # 5cm above
+    contact_pos = [0.0, 0.0, sensor_top_z + probe_tip_offset]        # at surface
+    print(f"[DEBUG T1] size_z={size_z}, sensor_top={sensor_top_z:.4f}, start_z={start_pos[2]:.4f}, contact_z={contact_pos[2]:.4f}")
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Force probe '{probe_model}' not spawned"
@@ -203,8 +209,19 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
     probe_model = "uniformity_probe"
     applied_force = result["applied_force_n"]
     penetration = applied_force * 0.001
-    rest_z = 0.12
-    contact_z = 0.095 - penetration
+
+    # ── Compute probe positions based on sensor height ────────────────────────
+    # Sensor body is placed in SDF at <pose>0 0 0</pose>, body link centered
+    # at origin, so top surface is at z = size_z / 2.
+    # The probe's tip (collision sphere) sits 13mm below the probe_link origin
+    # (tip offset -10mm + sphere radius 3mm).  To place the tip exactly at the
+    # sensor's top surface, probe_link must be at z = sensor_top_z + 0.013.
+    size_z = float(raw_size[2])
+    sensor_top_z = size_z / 2.0
+    probe_tip_offset = 0.013  # from probe_link origin to tip's bottom contact
+    rest_z = sensor_top_z + probe_tip_offset + 0.05           # 5cm above sensor
+    contact_z = sensor_top_z + probe_tip_offset - penetration  # sunk into surface
+    print(f"[DEBUG T2] size_z={size_z}, sensor_top={sensor_top_z:.4f}, rest_z={rest_z:.4f}, contact_z={contact_z:.4f}")
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Probe '{probe_model}' not spawned"
@@ -447,10 +464,15 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
 
     probe_model = "force_probe"
     center_x, center_y = 0.0, 0.0
-    rest_z = 0.12
     applied_force = result["applied_force_n"]
     penetration = applied_force * 0.001
-    contact_z = 0.095 - penetration
+    # Compute probe positions from sensor height (see T1/T2 for details)
+    size_z = float(raw_size[2])
+    sensor_top_z = size_z / 2.0
+    probe_tip_offset = 0.013
+    rest_z = sensor_top_z + probe_tip_offset + 0.05
+    contact_z = sensor_top_z + probe_tip_offset - penetration
+    print(f"[DEBUG T3] size_z={size_z}, sensor_top={sensor_top_z:.4f}, rest_z={rest_z:.4f}, contact_z={contact_z:.4f}")
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Force probe '{probe_model}' not spawned"
@@ -635,9 +657,15 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
 
     probe_model = "force_probe"
     center_x, center_y = 0.0, 0.0
-    sensor_surface_z = 0.095
-    rest_z = sensor_surface_z + result["drop_height_m"]  # ~0.595
-    impact_z = sensor_surface_z - 0.005  # 5 mm penetration
+    # Compute sensor surface height dynamically from its size.
+    # Sensor body in SDF is centered at (0,0,0), top at z = size_z/2.
+    # Probe tip sits 13mm below probe_link origin.
+    size_z = float(raw_size[2])
+    probe_tip_offset = 0.013
+    sensor_surface_z = size_z / 2.0 + probe_tip_offset  # probe_link z when tip touches surface
+    rest_z = sensor_surface_z + result["drop_height_m"]  # drop from above
+    impact_z = sensor_surface_z - 0.005  # 5 mm penetration into surface
+    print(f"[DEBUG T4] size_z={size_z}, sensor_surface_z={sensor_surface_z:.4f}, rest_z={rest_z:.4f}, impact_z={impact_z:.4f}")
 
     if not simulator.wait_for_model_spawn(probe_model, 30):
         result["error"] = f"Force probe '{probe_model}' not spawned"
