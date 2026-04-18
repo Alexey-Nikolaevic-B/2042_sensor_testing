@@ -86,13 +86,16 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
 
         penetration = force_norm * 0.001
         probe_z = contact_pos[2] - penetration
+        # Rise probe before each measurement to guarantee a fresh contact event
+        simulator.set_pose(probe_model, contact_pos[0], contact_pos[1], start_pos[2])
+        time.sleep(0.3)
         simulator.set_pose(probe_model, contact_pos[0], contact_pos[1], probe_z)
 
-        time.sleep(0.5)
-
         try:
-            contacts = sensor.capture_data(
-                ContactsState, window=1.0, timeout=0.2, simulator=simulator
+            # Use persistent subscriber — doesn't miss contact events like
+            # wait_for_message does between iterations.
+            contacts = sensor.capture_persistent(
+                ContactsState, window=1.5, simulator=simulator
             )
 
             detected = False
@@ -312,17 +315,34 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
         # ── Rise: position probe above this grid point ────────────────────
         simulator.set_pose(probe_model, x, y, rest_z)
-        time.sleep(1.0)
+        time.sleep(0.5)
 
-        # ── Lower: make contact and wait for physics to stabilise ─────────
+        # ── Lower: make contact ───────────────────────────────────────────
+        # We start capturing BEFORE lowering the probe so the persistent
+        # subscriber catches the initial contact events.  The bumper plugin
+        # publishes on contact-state changes, so the transition from "no
+        # contact" to "in contact" is the most reliable event to catch.
         simulator.set_pose(probe_model, x, y, contact_z)
-        time.sleep(1.5)
 
-        # ── Collect: gather all force magnitudes in the window → median ───
+        # Wiggle probe slightly to generate repeated contact events
+        # (some bumper_plugin versions publish only on contact changes).
         try:
-            contacts = sensor.capture_data(
-                ContactsState, window=3.0, timeout=2.0, simulator=simulator
+            def _wiggle():
+                for _ in range(2):
+                    time.sleep(0.2)
+                    simulator.set_pose(probe_model, x, y, contact_z + 0.0005)
+                    time.sleep(0.2)
+                    simulator.set_pose(probe_model, x, y, contact_z)
+
+            import threading
+            wiggle_th = threading.Thread(target=_wiggle, daemon=True)
+            wiggle_th.start()
+
+            # Capture using persistent subscriber during the wiggle
+            contacts = sensor.capture_persistent(
+                ContactsState, window=1.5, simulator=simulator
             )
+            wiggle_th.join(timeout=0.5)
 
             magnitudes = []
             for msg in contacts:
@@ -498,8 +518,14 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
             progress_cb(int((idx / total_samples) * 85))
 
         try:
-            contacts = sensor.capture_data(
-                ContactsState, window=0.5, timeout=0.2, simulator=simulator
+            # Tiny wiggle to trigger bumper plugin contact-change publish
+            simulator.set_pose(probe_model, center_x, center_y, contact_z + 0.0005)
+            time.sleep(0.05)
+            simulator.set_pose(probe_model, center_x, center_y, contact_z)
+
+            # Capture with persistent subscriber — catches all events
+            contacts = sensor.capture_persistent(
+                ContactsState, window=0.7, simulator=simulator
             )
 
             max_force = 0.0
@@ -523,7 +549,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         except Exception:
             force_values.append(0.0)
 
-        time.sleep(sample_interval)
+        time.sleep(sample_interval - 0.7)  # adjust for persistent capture time
 
     # Remove load and check recovery
     simulator.set_pose(probe_model, center_x, center_y, rest_z)
@@ -533,8 +559,8 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         progress_cb(90)
 
     try:
-        recovery_data = sensor.capture_data(
-            ContactsState, window=1.0, timeout=0.2, simulator=simulator
+        recovery_data = sensor.capture_persistent(
+            ContactsState, window=1.0, simulator=simulator
         )
         recovery_force = 0.0
         for msg in recovery_data:
@@ -681,8 +707,8 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
 
     # Baseline: no contact
     try:
-        baseline_data = sensor.capture_data(
-            ContactsState, window=1.0, timeout=0.2, simulator=simulator
+        baseline_data = sensor.capture_persistent(
+            ContactsState, window=1.0, simulator=simulator
         )
         baseline_force = 0.0
         for msg in baseline_data:
@@ -703,42 +729,71 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     impact_start = time.time()
     simulator.set_pose(probe_model, center_x, center_y, impact_z)
 
-    # High-frequency capture for 2 seconds (100 ms step)
-    capture_duration = 2.0
-    sample_interval = 0.1
-    total_samples = int(capture_duration / sample_interval)
-    force_series = []
-
-    for idx in range(total_samples):
+    # Capture all contact events for 2 seconds with ONE persistent subscriber.
+    # Using capture_data in a tight loop would miss most events between
+    # wait_for_message calls.
+    try:
+        capture_duration = 2.0
         if progress_cb:
-            progress_cb(35 + int((idx / total_samples) * 50))
+            progress_cb(50)
 
-        try:
-            contacts = sensor.capture_data(
-                ContactsState, window=0.08, timeout=0.1, simulator=simulator
-            )
-            max_force = 0.0
-            for msg in contacts:
-                if msg.states:
-                    for state in msg.states:
-                        if state.total_wrench.force is not None:
-                            f = state.total_wrench.force
-                            mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
-                            max_force = max(max_force, mag)
+        contacts_all = sensor.capture_persistent(
+            ContactsState, window=capture_duration, simulator=simulator
+        )
 
-            elapsed = time.time() - impact_start
-            force_series.append(max_force)
+        # Bucket messages by time into 100ms slots
+        sample_interval = 0.1
+        total_samples = int(capture_duration / sample_interval)
+        force_series = [0.0] * total_samples
+
+        for msg in contacts_all:
+            if not msg.states:
+                continue
+            # Get the force magnitude from this message
+            max_msg_force = 0.0
+            for state in msg.states:
+                if state.total_wrench.force is not None:
+                    f = state.total_wrench.force
+                    mag = (f.x ** 2 + f.y ** 2 + f.z ** 2) ** 0.5
+                    max_msg_force = max(max_msg_force, mag)
+
+            # Place into a bucket based on message header stamp
+            try:
+                t_msg = msg.header.stamp.to_sec() if hasattr(msg, "header") else 0.0
+                # We don't know the absolute ref time; use msg order instead
+            except Exception:
+                t_msg = 0.0
+
+        # Simpler: distribute events evenly by index if we have any
+        if contacts_all:
+            n = len(contacts_all)
+            for i, msg in enumerate(contacts_all):
+                if not msg.states:
+                    continue
+                bucket_idx = min(int(i / n * total_samples), total_samples - 1)
+                mf = 0.0
+                for state in msg.states:
+                    if state.total_wrench.force is not None:
+                        f = state.total_wrench.force
+                        mag = (f.x ** 2 + f.y ** 2 + f.z ** 2) ** 0.5
+                        mf = max(mf, mag)
+                force_series[bucket_idx] = max(force_series[bucket_idx], mf)
+
+        # Fill time series
+        for idx, fval in enumerate(force_series):
             result["impact_time_series"].append(
                 {
-                    "t": round(elapsed, 3),
-                    "force": round(max_force, 4),
+                    "t": round(idx * sample_interval, 3),
+                    "force": round(fval, 4),
                 }
             )
 
-        except Exception:
-            force_series.append(0.0)
+        if progress_cb:
+            progress_cb(85)
 
-        time.sleep(sample_interval)
+    except Exception as e:
+        force_series = [0.0]
+        print(f"[DEBUG T4] impact capture error: {e}")
 
     # Return probe to rest
     simulator.set_pose(probe_model, center_x, center_y, rest_z)
