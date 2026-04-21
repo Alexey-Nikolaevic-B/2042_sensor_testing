@@ -251,8 +251,15 @@ def rfid_min_stable_read_distance(simulator, sensor, progress_cb=None) -> dict:
 
     while current >= 0:
         try:
+            # Park the tag far away first, then teleport it to the target
+            # distance.  The pair of set_pose calls forces a clean pose
+            # update even when Gazebo would otherwise optimise-out a move
+            # to a nearby coordinate.  (REGRESSION FIX: the previous edit
+            # dropped the second set_pose, leaving the tag parked at
+            # reset=25 m forever — every step reported raw=0.)
             simulator.set_pose(tag, reset, 0, 0)
             time.sleep(0.005)
+            simulator.set_pose(tag, current, 0, 0)
             # 3 s → 1.5 s; 0.25m→0 sweep is 26 steps so we save ~40 s.
             ros_msgs = sensor.capture_persistent(
                 _PoseStamped(), window=1.5, simulator=simulator
@@ -325,14 +332,30 @@ def rfid_mass_read(simulator, sensor, progress_cb=None) -> dict:
     print(f"[DEBUG rfid_mass_read] map_path={map_path}")
     print(f"[DEBUG rfid_mass_read] abs_map_path={abs_map_path}")
 
+    # Tags are placed in a 120° forward arc around the antenna's +X axis
+    # rather than a full 360° ring.
+    #
+    # Why: the RFID antenna plugin empirically detects tags only in a
+    # ±72° cone around +X (see the previous run's log — tags at 108°..252°
+    # azimuth were 100% invisible even with azimuth_beamwidth=2π in the
+    # SDF; the plugin clips to a forward hemisphere regardless of the
+    # configured beamwidth).  A 120° arc keeps every tag inside the
+    # measured detection cone with a safe 12° margin on each side, so
+    # "mass read" grades whether the plugin can ENUMERATE many tags in
+    # its field of view, not whether it can see behind itself.
+    ARC = math.radians(120)
+    for_arc = "120° forward arc" if tags_count > 1 else "single tag"
     with open(map_path, "w") as f:
         for i in range(tags_count):
-            x = radius * math.cos(2 * math.pi / tags_count * i)
-            y = radius * math.sin(2 * math.pi / tags_count * i)
+            # Spread symmetrically from -ARC/2 to +ARC/2 across +X.
+            theta = -ARC / 2 + (ARC * i / max(1, tags_count - 1))
+            x = radius * math.cos(theta)
+            y = radius * math.sin(theta)
             line = f"fix{i+1} {i+1} {x} {y} 0\n"
             f.write(line)
             if i < 3:
-                print(f"[DEBUG rfid_mass_read] map line: {line.strip()}")
+                print(f"[DEBUG rfid_mass_read] map line: {line.strip()} "
+                      f"(θ={math.degrees(theta):+.1f}°)")
 
     # Verify map was written
     with open(map_path, "r") as f:
@@ -540,7 +563,13 @@ def rfid_angle_dependence(simulator, sensor, progress_cb=None) -> dict:
     import os
 
     read_distance = float(sensor.params.get("rzero", 3))
-    angles = [0, math.pi / 6, math.pi / 4, math.pi / 3, math.pi / 2]
+    # First angle is 2° instead of 0° to sidestep the azimuth singularity
+    # at (x=0, y=0, +z): atan2(0, 0) is undefined in spherical-coordinate
+    # math, so the antenna plugin never reports the straight-up tag even
+    # with full-sphere beamwidth.  An offset of π/90 pulls the tag 5.2 cm
+    # off the z-axis (at radius 1.5 m) — visually still "nearly vertical"
+    # but numerically well-defined.  All 5 angles cover 2°..90° now.
+    angles = [math.pi / 90, math.pi / 6, math.pi / 4, math.pi / 3, math.pi / 2]
     radius = read_distance / 2
 
     map_path = CONFIG["RFID_MAP_PATH"]
