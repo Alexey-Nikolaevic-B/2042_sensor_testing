@@ -1,7 +1,7 @@
-2026-04-21 19:20:48 [INFO] __main__: === Headless Test Runner Started ===
-2026-04-21 19:20:48 [INFO] __main__: Found 1 sensor(s) to process.
-2026-04-21 19:20:48 [INFO] __main__: Starting ROS core...
-2026-04-21 19:20:49 [DEBUG] __main__: roscore port is open
-2026-04-21 19:20:49 [INFO] __main__: roscore ready.
-2026-04-21 19:20:49 [INFO] __main__: Initializing ROS node...
-2026-04-21 19:20:49 [INFO] rospy.topics: topicmanager initialized
+2026-04-21 21:48:09 [INFO] __main__: === Headless Test Runner Started ===
+2026-04-21 21:48:09 [INFO] __main__: Found 1 sensor(s) to process.
+2026-04-21 21:48:09 [INFO] __main__: Starting ROS core...
+2026-04-21 21:48:10 [DEBUG] __main__: roscore port is open
+2026-04-21 21:48:10 [INFO] __main__: roscore ready.
+2026-04-21 21:48:10 [INFO] __main__: Initializing ROS node...
+2026-04-21 21:48:10 [INFO] rospy.topics: topicmanager initialized
