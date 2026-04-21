@@ -1,0 +1,7 @@
+2026-04-21 03:17:21 [INFO] __main__: === Headless Test Runner Started ===
+2026-04-21 03:17:21 [INFO] __main__: Found 1 sensor(s) to process.
+2026-04-21 03:17:21 [INFO] __main__: Starting ROS core...
+2026-04-21 03:17:22 [DEBUG] __main__: roscore port is open
+2026-04-21 03:17:22 [INFO] __main__: roscore ready.
+2026-04-21 03:17:22 [INFO] __main__: Initializing ROS node...
+2026-04-21 03:17:22 [INFO] rospy.topics: topicmanager initialized

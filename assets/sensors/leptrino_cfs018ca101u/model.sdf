@@ -1,0 +1,104 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="leptrino_cfs018ca101u">
+    <!--
+      NOT static. Held in place by a joint to the Gazebo "world" pseudo-link
+      declared in tactile_force.world. This makes ODE compute real spring
+      forces (kp/kd scale with penetration depth) instead of constraint
+      reactions (which are constant regardless of depth).
+
+      Two-link design:
+        mount  – heavy, gravity=false, no collision. Acts as rigid base.
+        body   – the sensing cylinder. Has collision + bumper sensor.
+      A fixed joint connects mount→body with body offset 13 mm up so the
+      cylinder (26 mm tall) sits with its bottom face flush on the ground.
+    -->
+    <pose>0 0 0 0 0 0</pose>
+
+    <link name="mount">
+      <!--
+        mount sits at model origin (z=0). It has no collision so it cannot
+        interact with the ground plane. gravity=false + large mass keeps it
+        rock-solid even before the world joint is applied.
+      -->
+      <pose>0 0 0 0 0 0</pose>
+      <gravity>false</gravity>
+      <inertial>
+        <mass>1000.0</mass>
+        <inertia>
+          <ixx>1.0</ixx><iyy>1.0</iyy><izz>1.0</izz>
+          <ixy>0.0</ixy><ixz>0.0</ixz><iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+    </link>
+
+    <link name="body">
+      <!--
+        Cylinder centre at z=0.013 in MODEL frame (mount is at z=0).
+        → world z=0.013, bottom face z=0.000, top face z=0.026.
+        Previously no pose here → centre at z=0 → half underground →
+        constant ~10 N ground contact leaked into every bumper reading.
+      -->
+      <pose>0 0 0.013 0 0 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <inertia>
+          <ixx>1e-6</ixx><iyy>1e-6</iyy><izz>1e-6</izz>
+          <ixy>0.0</ixy><ixz>0.0</ixz><iyz>0.0</iyz>
+        </inertia>
+      </inertial>
+      <collision name="tactile_collision">
+        <geometry>
+          <cylinder>
+            <radius>0.009</radius>
+            <length>0.026</length>
+          </cylinder>
+        </geometry>
+        <surface>
+          <contact>
+            <ode>
+              <!--
+                kp=50000 → surface stiffness ~50 kN/m.
+                Probe tip kp=10000 → probe is softer contact partner →
+                ODE distributes deformation into probe → force ∝ depth.
+              -->
+              <kp>50000.0</kp>
+              <kd>100.0</kd>
+              <max_vel>0.01</max_vel>
+              <min_depth>0.0001</min_depth>
+            </ode>
+          </contact>
+        </surface>
+      </collision>
+      <sensor_size>0.018 0.018 0.026</sensor_size>
+      <visual name="visual">
+        <geometry>
+          <cylinder>
+            <radius>0.009</radius>
+            <length>0.026</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.2 0.5 0.8 1</ambient>
+          <diffuse>0.2 0.5 0.8 1</diffuse>
+        </material>
+      </visual>
+      <sensor name="tactile_bumper" type="contact">
+        <always_on>true</always_on>
+        <update_rate>50.0</update_rate>
+        <contact><collision>tactile_collision</collision></contact>
+        <plugin name="tactile_bumper_plugin" filename="libgazebo_ros_bumper.so">
+          <robotNamespace>/leptrino_cfs018ca101u</robotNamespace>
+          <topicName>bumper_states</topicName>
+          <frameName>body</frameName>
+        </plugin>
+      </sensor>
+    </link>
+
+    <joint name="ft_joint" type="fixed">
+      <parent>mount</parent>
+      <child>body</child>
+    </joint>
+
+  </model>
+</sdf>

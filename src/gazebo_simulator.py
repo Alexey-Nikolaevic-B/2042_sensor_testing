@@ -12,6 +12,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 import xml.etree.ElementTree as ET
 
 import logging
+import logging.config
 
 _log_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "log_config.json")
 if os.path.exists(_log_config_path):
