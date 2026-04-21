@@ -335,8 +335,14 @@ class Sensor:
                 "image_path": self.image_path,
                 "messages": results[-1:],  # only last message for UI rendering
             }
-            # Use cached observer frame — don't block test thread with
-            # wait_for_message on observer topic (was causing 2s delay per capture)
+            # Refresh observer cache so the UI gets a live scene frame
+            # instead of the None that _last_observer_frame holds on first
+            # run.  Cheap when Gazebo is publishing (<10 ms); falls back
+            # to the stale cache if the topic briefly stalls.
+            try:
+                simulator.capture_observer_frame()
+            except Exception as e:
+                logger.debug("capture_data: observer refresh failed: %s", e)
             simulator.notify_capture(sensor_data)
             simulator.wait_for_step()
 
@@ -383,6 +389,14 @@ class Sensor:
                 "image_path": self.image_path,
                 "messages": results[-1:],
             }
+            # Refresh the observer-camera cache so the UI gets a live
+            # scene frame instead of the None returned by
+            # simulator._last_observer_frame on first call.  Cheap when
+            # Gazebo is publishing — wait_for_message returns immediately.
+            try:
+                simulator.capture_observer_frame()
+            except Exception as e:
+                logger.debug("capture_persistent: observer refresh failed: %s", e)
             simulator.notify_capture(sensor_data)
             simulator.wait_for_step()
 
