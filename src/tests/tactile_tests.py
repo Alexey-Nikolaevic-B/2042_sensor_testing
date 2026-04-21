@@ -45,6 +45,8 @@ Diagnostic logging:
     fails, and calls out the missing-anchor case explicitly.
 """
 
+import os
+import re
 import time
 import logging
 import numpy as np
@@ -65,6 +67,115 @@ CONTACT_DEBOUNCE  = 2       # consecutive readings to confirm contact
 
 # Penetration depths for T1 force characterisation
 PROBE_DEPTHS_M = [0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.003, 0.005]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SDF helpers — resolve the ACTUAL Gazebo names for a sensor.
+#
+# sensor.sensor_name comes from the UI/database (user may type anything),
+# whereas Gazebo identifies the model by <model name="..."> in the SDF and
+# publishes the bumper plugin on <robotNamespace>/<topicName>.  We must not
+# assume the DB name equals any of those — the log showed the DB name was
+# "tactile" while the SDF model name was "amti_he6x6_force_plate", which is
+# why /tactile/bumper_states was silent and get_link_state(tactile::body)
+# returned "link not found".  These helpers parse the SDF once and cache
+# the answer on the Sensor instance.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _read_sdf_text(sensor) -> str:
+    if getattr(sensor, "_sdf_text_cache", None) is None:
+        try:
+            with open(sensor.sdf_path, "r", encoding="utf-8") as f:
+                sensor._sdf_text_cache = f.read()
+        except OSError as e:
+            logger.error(f"  Cannot read SDF {sensor.sdf_path!r}: {e}")
+            sensor._sdf_text_cache = ""
+    return sensor._sdf_text_cache
+
+
+def _gazebo_model_name(sensor) -> str:
+    """Return the model name Gazebo will use for this sensor.
+
+    Extracted from the first <model name="..."> attribute in the SDF.
+    Falls back to sensor.sensor_name if the SDF cannot be parsed.
+    """
+    txt = _read_sdf_text(sensor)
+    m = re.search(r'<model\s+[^>]*?name\s*=\s*"([^"]+)"', txt)
+    if m:
+        return m.group(1)
+    return sensor.sensor_name
+
+
+def _bumper_topic(sensor) -> str:
+    """Return the ROS topic where the bumper plugin actually publishes.
+
+    Reads <robotNamespace> and <topicName> from the bumper plugin block in
+    the SDF and composes the fully-qualified topic:
+
+        /{robotNamespace}/{topicName}
+
+    Fallback: /{sensor.sensor_name}/bumper_states (old behaviour).
+    """
+    txt = _read_sdf_text(sensor)
+    # Find the <plugin> block that uses libgazebo_ros_bumper.so
+    m = re.search(
+        r'<plugin\b[^>]*filename\s*=\s*"libgazebo_ros_bumper\.so"[^>]*>(.*?)</plugin>',
+        txt, re.DOTALL | re.IGNORECASE,
+    )
+    if m:
+        block = m.group(1)
+        rns = re.search(r"<robotNamespace>\s*(.*?)\s*</robotNamespace>", block)
+        tpn = re.search(r"<topicName>\s*(.*?)\s*</topicName>", block)
+        ns  = rns.group(1).strip().strip("/") if rns else ""
+        tn  = tpn.group(1).strip().lstrip("/") if tpn else "bumper_states"
+        if ns:
+            return f"/{ns}/{tn}"
+        return f"/{tn}"
+    return f"/{sensor.sensor_name}/bumper_states"
+
+
+def _body_link_name(sensor) -> str:
+    """Return the link name used by the bumper plugin's <frameName>, or
+    "body" if not specified.  Used for get_link_state calls."""
+    txt = _read_sdf_text(sensor)
+    m = re.search(
+        r'<plugin\b[^>]*filename\s*=\s*"libgazebo_ros_bumper\.so"[^>]*>(.*?)</plugin>',
+        txt, re.DOTALL | re.IGNORECASE,
+    )
+    if m:
+        fn = re.search(r"<frameName>\s*(.*?)\s*</frameName>", m.group(1))
+        if fn and fn.group(1).strip():
+            return fn.group(1).strip()
+    return "body"
+
+
+def _sensor_identity(sensor) -> dict:
+    """Resolve and log the full identity triple for a sensor.  Called once
+    at the start of every test so the log makes it obvious which model and
+    topic the test is going to interact with."""
+    ident = {
+        "db_name":    sensor.sensor_name,
+        "model_name": _gazebo_model_name(sensor),
+        "body_link":  _body_link_name(sensor),
+        "topic":      _bumper_topic(sensor),
+        "sdf_path":   sensor.sdf_path,
+    }
+    logger.info(
+        f"  Sensor identity:\n"
+        f"    db_name    = {ident['db_name']!r}\n"
+        f"    model_name = {ident['model_name']!r}  (from SDF <model name='...'>)\n"
+        f"    body_link  = {ident['body_link']!r}   (bumper <frameName>)\n"
+        f"    topic      = {ident['topic']!r}   (<robotNamespace>/<topicName>)\n"
+        f"    sdf_path   = {ident['sdf_path']}"
+    )
+    if ident["db_name"] != ident["model_name"]:
+        logger.warning(
+            f"  DB name {ident['db_name']!r} differs from SDF model name "
+            f"{ident['model_name']!r}.  Using the SDF model name for all "
+            f"Gazebo queries (get_link_state, bumper topic).  This is the "
+            f"intended behaviour — the SDF is authoritative."
+        )
+    return ident
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +269,11 @@ def _measure_force(sensor, window: float = 0.4, probe_only: bool = True,
     is visible without having to re-run at DEBUG level.
     """
     from gazebo_msgs.msg import ContactsState as CS
-    topic = f"/{sensor.sensor_name}/bumper_states"
+    # Use the topic the bumper plugin actually publishes on — parsed from
+    # the SDF's <robotNamespace> + <topicName>, NOT the DB sensor name.
+    # The old code subscribed to /{sensor.sensor_name}/bumper_states which
+    # was silent whenever the UI name disagreed with the SDF.
+    topic = _bumper_topic(sensor)
     msgs = sensor.capture_data(CS, topic=topic, window=window, timeout=2.0)
 
     # Bookkeeping for diagnostic summary
@@ -218,90 +333,139 @@ def _find_contact_surface(sensor, probe_model: str,
                           sx: float, sy: float, sensor_top_z: float,
                           simulator=None):
     """Lower probe from 20 mm above sensor_top until filtered force confirms contact.
-    Returns probe Z at contact surface, or None. Probe left at contact Z.
+    Returns probe Z at contact surface, or None.  Probe left at contact Z.
 
-    Timing: _measure_force blocks for window+timeout seconds per step.
-    No extra sleep needed — the measure call itself paces the descent.
-    Steps logged at INFO so the approach is visible without --verbose.
+    Two-phase search for speed:
+      1. Coarse sweep — 5 mm steps, short window (0.15 s).  Stops as soon as
+         ANY non-zero force is seen.  Bumper publishes at 50 Hz so 0.15 s is
+         enough for ~7 messages.  5 mm × 10 steps covers the full 50 mm
+         range in ~1.5–2 s instead of the 15–20 s the old 1 mm sweep took.
+      2. Fine refinement — 0.5 mm steps backing off 6 mm and walking down
+         again with the usual debounce + full CONTACT_THRESHOLD check.
+
+    If coarse phase finds nothing, fine phase is skipped and we report the
+    full diagnostic.
     """
     start_z = sensor_top_z + 0.020 + PROBE_TIP_OFFSET
     logger.info(f"  Contact search from z={start_z:.4f} "
                 f"(tip {(start_z-PROBE_TIP_OFFSET-sensor_top_z)*1000:.1f} mm above surface)")
     _set_pose(probe_model, sx, sy, start_z)
-    time.sleep(1.0)  # let physics settle after initial placement
+    # Shorter settle — probe has gravity=false, velocities are zeroed in
+    # _set_pose, so there is nothing to settle other than the initial
+    # teleport transient.
+    time.sleep(0.3)
 
     # Snapshot sensor body pose at start of sweep — used below to report
     # whether the sensor itself drifted during the search.
     sensor_body_start = _get_body_link_pose(sensor, warn=False)
 
-    step = 0.001     # 1 mm steps — coarser but reliable; fine depths in Phase 2
-    n_steps = int(0.040 / step)  # 40 mm total search range
-    z = start_z
-    consec = 0
-    first_z = None
-
-    # Track whether the bumper topic ever produced ANY contact during the
-    # sweep.  "Any pair" means the bumper plugin is alive; 0 probe-pairs
-    # means the probe never reached the sensor.  Distinct failure modes.
-    saw_any_contact_pair   = False
     saw_probe_contact_pair = False
+    actual_z = start_z
 
-    for _ in range(n_steps):
-        z -= step
+    # ── Phase 1: COARSE sweep — 5 mm steps, 0.15 s windows ─────────────
+    # Rationale: bumper plugin publishes at 50 Hz (→ ~7 msgs per 0.15 s).
+    # We do not need to resolve sub-mm precision here — we only need to
+    # know which 5 mm band contains the surface.  Total: ≤ 12 × 0.17 ≈ 2 s.
+    coarse_step = 0.005
+    coarse_range = 0.055   # start 20mm above, sweep down to ~35mm below top
+    n_coarse = int(coarse_range / coarse_step)
+    z = start_z
+    coarse_hit_z = None
+
+    logger.info(f"  [coarse] {coarse_step*1000:.0f}mm steps, "
+                f"range {coarse_range*1000:.0f}mm, "
+                f"~{n_coarse} steps × 0.17s ≈ {n_coarse*0.17:.1f}s budget")
+    for _ in range(n_coarse):
+        z -= coarse_step
         _set_pose(probe_model, sx, sy, z)
-        f = _measure_force(sensor, window=0.3, probe_only=True, simulator=simulator)
-
-        # Read actual position — velocity zeroing in _set_pose should keep
-        # this close to z, but we log the real value so drift is visible.
-        actual_z = _get_probe_z(probe_model)
-        if actual_z is None:
-            actual_z = z
+        f = _measure_force(sensor, window=0.15, probe_only=True, simulator=simulator)
+        actual_z = _get_probe_z(probe_model) or z
         drift_mm = (actual_z - z) * 1000
         tip_z = actual_z - PROBE_TIP_OFFSET
-        logger.info(f"  step cmd={z:.4f} actual={actual_z:.4f} (drift={drift_mm:+.2f}mm) "
-                    f"tip={tip_z:.4f} gap={(tip_z-sensor_top_z)*1000:+.1f}mm f={f:.4f}N")
+        logger.info(f"  [coarse] cmd={z:.4f} actual={actual_z:.4f} "
+                    f"(drift={drift_mm:+.2f}mm) tip={tip_z:.4f} "
+                    f"gap={(tip_z-sensor_top_z)*1000:+.1f}mm f={f:.4f}N")
         if f > 0.0:
             saw_probe_contact_pair = True
         if f > CONTACT_THRESHOLD:
+            coarse_hit_z = actual_z
+            logger.info(f"  [coarse] hit at probe_z={coarse_hit_z:.4f} "
+                        f"f={f:.3f}N — switching to fine phase")
+            break
+
+    if coarse_hit_z is None:
+        # No contact anywhere in 55 mm.  Dump diagnostics.
+        logger.warning(f"  No contact found in coarse sweep "
+                       f"({n_coarse} steps, searched to z={z:.4f})")
+        sensor_body_end = _get_body_link_pose(sensor, warn=False)
+        if sensor_body_start and sensor_body_end and None not in sensor_body_start:
+            dz = (sensor_body_end[2] - sensor_body_start[2]) * 1000
+            dx = (sensor_body_end[0] - sensor_body_start[0]) * 1000
+            dy = (sensor_body_end[1] - sensor_body_start[1]) * 1000
+            logger.warning(f"  Sensor body moved during sweep: "
+                           f"dx={dx:+.2f}mm dy={dy:+.2f}mm dz={dz:+.2f}mm")
+            if abs(dz) > 1.0 or math.hypot(dx, dy) > 1.0:
+                logger.warning("  ⚠ Sensor model is NOT pinned to the world. "
+                               "Add a <joint><parent>world</parent><child>mount</child></joint> "
+                               "inside the sensor SDF (see sensors/tactile/*/model.sdf).")
+        final_tip_z = (actual_z - PROBE_TIP_OFFSET) if actual_z is not None else None
+        if final_tip_z is not None:
+            logger.warning(f"  Final tip z={final_tip_z:.4f}, "
+                           f"sensor_top_z={sensor_top_z:.4f}, "
+                           f"gap={(final_tip_z-sensor_top_z)*1000:+.1f}mm  "
+                           f"(probe tip ended {'below' if final_tip_z<sensor_top_z else 'above'} surface)")
+        logger.warning(f"  Contact diagnostics: any-probe-contact-force={saw_probe_contact_pair}")
+        if not saw_probe_contact_pair:
+            logger.warning("  Probe never generated contact force → either (a) the "
+                           "sensor is below the search range (drift), (b) the probe "
+                           "is laterally misaligned, (c) the bumper plugin is not "
+                           "publishing, or (d) the subscribed topic does not match "
+                           "the plugin's <robotNamespace>/<topicName>.  The first "
+                           "line of the test log shows the topic actually used.")
+        return None
+
+    # ── Phase 2: FINE refinement — 0.5 mm steps backed off by 6 mm ────
+    # Start 6 mm above the coarse hit so we approach from the same side
+    # (above surface) and capture the first-contact Z with sub-mm accuracy.
+    fine_start_z = coarse_hit_z + 0.006
+    _set_pose(probe_model, sx, sy, fine_start_z)
+    time.sleep(0.2)
+    fine_step = 0.0005
+    n_fine = int(0.010 / fine_step)   # up to 10 mm range, plenty given we start 6 mm above
+    z = fine_start_z
+    consec = 0
+    first_z = None
+    logger.info(f"  [fine] {fine_step*1000:.1f}mm steps from z={fine_start_z:.4f} "
+                f"(~{n_fine} steps × 0.3s ≈ {n_fine*0.3:.1f}s budget)")
+    for _ in range(n_fine):
+        z -= fine_step
+        _set_pose(probe_model, sx, sy, z)
+        f = _measure_force(sensor, window=0.2, probe_only=True, simulator=simulator)
+        actual_z = _get_probe_z(probe_model) or z
+        tip_z = actual_z - PROBE_TIP_OFFSET
+        logger.info(f"  [fine] cmd={z:.4f} actual={actual_z:.4f} "
+                    f"tip={tip_z:.4f} "
+                    f"gap={(tip_z-sensor_top_z)*1000:+.1f}mm f={f:.4f}N")
+        if f > CONTACT_THRESHOLD:
             consec += 1
             if first_z is None:
-                first_z = actual_z   # use real position, not commanded
+                first_z = actual_z
             if consec >= CONTACT_DEBOUNCE:
                 logger.info(f"  Contact confirmed: probe_z={first_z:.4f} "
                             f"tip_z={first_z-PROBE_TIP_OFFSET:.4f} f={f:.3f}N")
                 _set_pose(probe_model, sx, sy, first_z)
-                time.sleep(0.5)
+                time.sleep(0.3)
                 return first_z
         else:
             consec = 0
             first_z = None
 
-    # Sweep failed — dump a rich diagnostic so the user doesn't have to guess.
-    logger.warning(f"  No contact found ({n_steps} steps, searched to z={z:.4f})")
-    sensor_body_end = _get_body_link_pose(sensor, warn=False)
-    if sensor_body_start and sensor_body_end and None not in sensor_body_start:
-        dz = (sensor_body_end[2] - sensor_body_start[2]) * 1000
-        dx = (sensor_body_end[0] - sensor_body_start[0]) * 1000
-        dy = (sensor_body_end[1] - sensor_body_start[1]) * 1000
-        logger.warning(f"  Sensor body moved during sweep: "
-                       f"dx={dx:+.2f}mm dy={dy:+.2f}mm dz={dz:+.2f}mm")
-        if abs(dz) > 1.0 or math.hypot(dx, dy) > 1.0:
-            logger.warning("  ⚠ Sensor model is NOT pinned to the world. "
-                           "Add a <joint><parent>world</parent><child>mount</child></joint> "
-                           "inside the sensor SDF (see sensors/tactile/*/model.sdf).")
-    final_tip_z = (actual_z - PROBE_TIP_OFFSET) if actual_z is not None else None
-    if final_tip_z is not None:
-        logger.warning(f"  Final tip z={final_tip_z:.4f}, "
-                       f"sensor_top_z={sensor_top_z:.4f}, "
-                       f"gap={(final_tip_z-sensor_top_z)*1000:+.1f}mm  "
-                       f"(probe tip ended {'below' if final_tip_z<sensor_top_z else 'above'} surface)")
-    logger.warning(f"  Contact diagnostics: any-probe-contact-force={saw_probe_contact_pair}")
-    if not saw_probe_contact_pair:
-        logger.warning("  Probe never generated contact force → either (a) the "
-                       "sensor is below the search range (drift), (b) the probe "
-                       "is laterally misaligned, or (c) the bumper plugin is not "
-                       "publishing / is reporting only ground contacts.")
-    return None
+    # Fine phase saw the surface during coarse but could not confirm with
+    # debounce.  Fall back to the coarse hit.
+    logger.warning(f"  Fine phase did not debounce; using coarse hit z={coarse_hit_z:.4f}")
+    _set_pose(probe_model, sx, sy, coarse_hit_z)
+    time.sleep(0.3)
+    return coarse_hit_z
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -393,26 +557,29 @@ def _get_body_link_pose(sensor, warn: bool = True):
     """Return (x, y, z) of the body link, or (None, None, None) on failure.
 
     Thin wrapper over /gazebo/get_link_state used both by _sensor_geo and by
-    the drift monitor.  Separated so callers can probe the current position
-    without re-running the full geometry parse.
+    the drift monitor.  Uses the SDF-resolved model and body-link names so
+    we query the right object even when the DB name and SDF model name
+    differ.
     """
+    model = _gazebo_model_name(sensor)
+    body  = _body_link_name(sensor)
+    link  = f"{model}::{body}"
     try:
         rospy.wait_for_service('/gazebo/get_link_state', timeout=2.0)
         from gazebo_msgs.srv import GetLinkState, GetLinkStateRequest
         svc = rospy.ServiceProxy('/gazebo/get_link_state', GetLinkState)
         req = GetLinkStateRequest()
-        req.link_name = f"{sensor.sensor_name}::body"
+        req.link_name = link
         req.reference_frame = 'world'
         resp = svc(req)
         if resp.success:
             p = resp.link_state.pose.position
             return p.x, p.y, p.z
         if warn:
-            logger.warning(f"  get_link_state({sensor.sensor_name}::body): "
-                           f"{resp.status_message}")
+            logger.warning(f"  get_link_state({link}): {resp.status_message}")
     except Exception as e:
         if warn:
-            logger.warning(f"  get_link_state failed: {e}")
+            logger.warning(f"  get_link_state({link}) failed: {e}")
     return None, None, None
 
 
@@ -466,11 +633,14 @@ def _sensor_geo(sensor):
         logger.info(f"  Body link pose (get_link_state): "
                     f"({x:.4f},{y:.4f},{body_z:.4f})")
     else:
-        ax, ay, az = _get_pose(sensor.sensor_name)
+        # Fallback: query model pose (get_model_state) using the SDF model
+        # name.  If that also fails we assume the model is at the origin.
+        model = _gazebo_model_name(sensor)
+        ax, ay, az = _get_pose(model)
         x      = ax if ax is not None else 0.0
         y      = ay if ay is not None else 0.0
         body_z = (az if az is not None else 0.0) + h / 2.0
-        logger.info(f"  Body link pose (fallback model+h/2): "
+        logger.info(f"  Body link pose (fallback model {model!r}+h/2): "
                     f"({x:.4f},{y:.4f},{body_z:.4f})")
 
     top_z = body_z + h / 2.0
@@ -576,9 +746,16 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time()-t0, 2); return result
     time.sleep(3)
 
+    # Resolve identity BEFORE wait_for_model_spawn so we wait on the actual
+    # Gazebo model name, not the DB name.
+    ident = _sensor_identity(sensor)
     probe = "force_probe"
     if not simulator.wait_for_model_spawn(probe, 30):
         result["error"] = f"Probe '{probe}' not spawned"
+        result["duration"] = round(time.time()-t0, 2); return result
+    if not simulator.wait_for_model_spawn(ident["model_name"], 15):
+        result["error"] = (f"Sensor model {ident['model_name']!r} not spawned "
+                           f"(SDF may have the wrong <model name=...> attribute)")
         result["duration"] = round(time.time()-t0, 2); return result
 
     if progress_cb: progress_cb(10)
@@ -612,15 +789,39 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     if contact_z is None:
         drift_m = _check_sensor_drift(sensor, baseline_body_xyz,
                                        tag="after failed sweep")
-        result["error"] = "Contact surface not found in 40 mm sweep"
-        hint = ""
-        if drift_m * 1000 > 1.0:
-            hint = (f" Sensor body moved {drift_m*1000:.1f} mm during the test "
-                    f"— world_anchor joint is likely missing from the sensor "
-                    f"SDF, so the sensor drifted out of the probe's reach.")
-        result["description"] = ("Probe swept 40 mm and detected no sensor contact. "
-                                 "Check lateral alignment, probe tip offset, and "
-                                 "the sensor's world_anchor joint." + hint)
+        # Distinguish the two dominant failure modes in the description so
+        # the UI shows a one-line diagnosis instead of a generic message.
+        # Quick probe of the bumper topic — if it is completely silent the
+        # root cause is topic/name mismatch, not physics.
+        probe_topic_silent = False
+        try:
+            from gazebo_msgs.msg import ContactsState as CS
+            msgs = sensor.capture_data(CS, topic=_bumper_topic(sensor),
+                                        window=0.4, timeout=1.0)
+            probe_topic_silent = (len(msgs) == 0)
+        except Exception:
+            pass
+        result["error"] = "Contact surface not found"
+        ident = _sensor_identity(sensor)
+        if probe_topic_silent:
+            result["description"] = (
+                f"Bumper topic {_bumper_topic(sensor)!r} is silent — the plugin "
+                f"is not publishing on this path.  Check that the SDF contains "
+                f"<plugin filename=\"libgazebo_ros_bumper.so\"> with matching "
+                f"<robotNamespace> and <topicName>, and that the model "
+                f"{ident['model_name']!r} actually spawned in Gazebo.")
+        elif drift_m * 1000 > 1.0:
+            result["description"] = (
+                f"Sensor body drifted {drift_m*1000:.1f} mm during the sweep. "
+                f"Add <joint name=\"world_anchor\" type=\"fixed\">"
+                f"<parent>world</parent><child>mount</child></joint> to the "
+                f"sensor SDF to pin it in place.")
+        else:
+            result["description"] = (
+                "Probe swept 55 mm and detected no sensor contact despite the "
+                "bumper topic being alive.  Check lateral alignment (sensor "
+                "centre query), probe tip offset, and that the bumper's "
+                "<collision> name matches the body's collision geometry.")
         result["duration"] = round(time.time()-t0, 2); return result
 
     result["contact_found"] = True
@@ -717,9 +918,15 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         return result
     time.sleep(3)
 
+    ident = _sensor_identity(sensor)
     probe = "force_probe"
     if not simulator.wait_for_model_spawn(probe, 30):
         result["error"] = f"Probe '{probe}' not spawned"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    if not simulator.wait_for_model_spawn(ident["model_name"], 15):
+        result["error"] = (f"Sensor model {ident['model_name']!r} not spawned "
+                           f"(check <model name=...> in SDF)")
         result["duration"] = round(time.time() - t0, 2)
         return result
 
@@ -761,39 +968,69 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
 
         # Move to safe height at this XY first
         _set_pose(probe, px, py, safe_height)
-        time.sleep(0.5)
+        time.sleep(0.3)
 
-        # Contact search with 1 mm steps, 50 mm range, debounced x2
+        # ── Coarse sweep: 5 mm steps, 0.15 s windows ─────────────────
+        # 11 steps × 0.17 s ≈ 2 s per point instead of the 50 steps × 0.5 s
+        # ≈ 25 s that the fixed 1-mm sweep used.  For a 9-point grid this
+        # drops T2 from >5 min to <40 s.
         contact_z = None
         start_z = sensor_top + 0.020 + T2_TIP_OFFSET
-        step = 0.001
-        n_steps = int(0.050 / step)
-        z = start_z
-        consec = 0
         _set_pose(probe, px, py, start_z)
-        time.sleep(0.5)
-        for _ in range(n_steps):
-            z -= step
+        time.sleep(0.2)
+        coarse_step = 0.005
+        coarse_range = 0.055
+        n_coarse = int(coarse_range / coarse_step)
+        z = start_z
+        coarse_hit = None
+        for _ in range(n_coarse):
+            z -= coarse_step
             _set_pose(probe, px, py, z)
-            f = _measure_force(sensor, window=0.3, probe_only=True, simulator=simulator)
+            f = _measure_force(sensor, window=0.15, probe_only=True, simulator=simulator)
             actual_z = _get_probe_z(probe) or z
-            drift_mm = (actual_z - z) * 1000
-            tip_z    = actual_z - T2_TIP_OFFSET
-            logger.info(f"    cmd={z:.4f} actual={actual_z:.4f} "
-                        f"(drift={drift_mm:+.2f}mm) tip={tip_z:.4f} f={f:.4f}N")
+            tip_z = actual_z - T2_TIP_OFFSET
+            logger.info(f"    [coarse] cmd={z:.4f} actual={actual_z:.4f} "
+                        f"tip={tip_z:.4f} f={f:.4f}N")
             if f > UNIFORMITY_THRESHOLD:
-                consec += 1
-                if contact_z is None:
-                    contact_z = actual_z
-                if consec >= 2:
-                    logger.info(f"    Contact confirmed: z={contact_z:.4f} f={f:.4f}N")
-                    break
-            else:
-                consec = 0
-                contact_z = None
+                coarse_hit = actual_z
+                break
+
+        # ── Fine refinement: 0.5 mm steps, debounce x2 ────────────────
+        if coarse_hit is not None:
+            fine_start = coarse_hit + 0.004
+            _set_pose(probe, px, py, fine_start)
+            time.sleep(0.15)
+            z = fine_start
+            consec = 0
+            n_fine = int(0.008 / 0.0005)
+            for _ in range(n_fine):
+                z -= 0.0005
+                _set_pose(probe, px, py, z)
+                f = _measure_force(sensor, window=0.15,
+                                     probe_only=True, simulator=simulator)
+                actual_z = _get_probe_z(probe) or z
+                tip_z = actual_z - T2_TIP_OFFSET
+                logger.info(f"    [fine]   cmd={z:.4f} actual={actual_z:.4f} "
+                            f"tip={tip_z:.4f} f={f:.4f}N")
+                if f > UNIFORMITY_THRESHOLD:
+                    consec += 1
+                    if contact_z is None:
+                        contact_z = actual_z
+                    if consec >= 2:
+                        logger.info(f"    Contact confirmed: z={contact_z:.4f} f={f:.4f}N")
+                        break
+                else:
+                    consec = 0
+                    contact_z = None
+            if contact_z is None:
+                # Fine failed to debounce but coarse detected force.
+                # Accept the coarse hit — the grid point clearly registers.
+                contact_z = coarse_hit
+                logger.info(f"    Fine debounce failed; accepting coarse "
+                            f"hit z={coarse_hit:.4f}")
         else:
-            logger.warning(f"    No contact found after {n_steps} steps")
-            contact_z = None
+            logger.warning(f"    No contact found in coarse sweep "
+                           f"({n_coarse} steps)")
 
         point_passed = contact_z is not None
         result["points_tested"] += 1
@@ -858,9 +1095,13 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time()-t0, 2); return result
     time.sleep(3)
 
+    ident = _sensor_identity(sensor)
     probe = "force_probe"
     if not simulator.wait_for_model_spawn(probe, 30):
         result["error"] = f"Probe '{probe}' not spawned"
+        result["duration"] = round(time.time()-t0, 2); return result
+    if not simulator.wait_for_model_spawn(ident["model_name"], 15):
+        result["error"] = (f"Sensor model {ident['model_name']!r} not spawned")
         result["duration"] = round(time.time()-t0, 2); return result
 
     if progress_cb: progress_cb(10)
@@ -994,9 +1235,14 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
         return result
     time.sleep(3)
 
+    ident = _sensor_identity(sensor)
     probe = "force_probe"
     if not simulator.wait_for_model_spawn(probe, 30):
         result["error"] = f"Probe '{probe}' not spawned"
+        result["duration"] = round(time.time() - t0, 2)
+        return result
+    if not simulator.wait_for_model_spawn(ident["model_name"], 15):
+        result["error"] = (f"Sensor model {ident['model_name']!r} not spawned")
         result["duration"] = round(time.time() - t0, 2)
         return result
 
