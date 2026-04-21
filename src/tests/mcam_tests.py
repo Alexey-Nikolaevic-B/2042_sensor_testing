@@ -124,8 +124,36 @@ def _mono_get_last_test_diagnostics(ctx) -> Dict[str, Any]:
 
 
 def _mono_build_description(func_name: str, result: dict, passed: bool) -> str:
-    """Build a human-readable description explaining WHY the test passed or failed."""
+    """Build a human-readable description explaining WHY the test passed or failed.
+
+    When a test fails via AssertionError, _mono_safe_wrapper synthesises
+    `result = {"passed": False, "error": ..., "diagnostics": diag}`
+    WITHOUT copying the test's measured metrics into `result["metrics"]`.
+    The diagnostics sub-dict DOES contain them — but under a test-specific
+    key (e.g. ``diag["c11_fps_stability"]["metrics"]``), so the old code
+    read `result.get("metrics", {})` and got an empty dict.  That is why
+    the UI showed "FPS: 0.0 Гц, Джиттер: 0.0000с, Пропуски: 0" for a run
+    that had perfectly good numbers inside the exception message.
+
+    Fix: fall back to diagnostics when `result["metrics"]` is empty.
+    Two shapes are in use across the test suite:
+      * nested: ``{<test>: {"metrics": {...}}}``   (c10, c11, …)
+      * flat:   ``{<test>: {...flat metrics...}}``  (c2, …)
+    Both are handled.
+    """
     metrics = result.get("metrics", {})
+    if not metrics:
+        diag = result.get("diagnostics") or {}
+        for _key, sub in diag.items():
+            if not isinstance(sub, dict):
+                continue
+            inner = sub.get("metrics")
+            if isinstance(inner, dict) and inner:
+                metrics = inner
+                break
+            # Flat case: the sub-dict IS the metrics bag.
+            metrics = sub
+            break
     prefix = "" if passed else "Датчик не прошёл тест. "
 
     try:
@@ -231,19 +259,38 @@ def _mono_build_description(func_name: str, result: dict, passed: bool) -> str:
                         f"(требовалось ≥{float(min_far):.1f}м)."
                     )
         elif func_name == "c11_fps_stability_test":
+            fps = metrics.get("fps_actual_hz", 0) or 0
+            jitter = metrics.get("jitter_s", 0) or 0
+            jitter_limit = metrics.get("jitter_limit_s", 0) or 0
+            dropouts = metrics.get("dropouts_count", 0) or 0
+            median_dt = metrics.get("median_dt_s", 0) or 0
+            off_sdf = metrics.get("median_offset_from_sdf_s", 0) or 0
+            checks = metrics.get("checks", {}) if isinstance(metrics.get("checks"), dict) else {}
+            # Which sub-check failed?  Useful context when the overall
+            # test fails but (say) the FPS part is fine.
+            failed_parts = []
+            if not checks.get("fps_ok", True):      failed_parts.append("FPS")
+            if not checks.get("jitter_ok", True):   failed_parts.append("джиттер")
+            if not checks.get("dropouts_ok", True): failed_parts.append("пропуски")
+            tail_off = f" (плагин отклоняется от SDF update_rate на {off_sdf*1000:.0f} мс)" if off_sdf > 0.005 else ""
             if passed:
                 desc = (
                     f"Тест пройден: FPS стабилен. "
-                    f"FPS: {metrics.get('fps_actual_hz', 0):.1f} Гц (≥95% от заданного). "
-                    f"Джиттер P95: {metrics.get('jitter_s', 0):.4f}с. "
-                    f"Пропуски кадров: {metrics.get('dropouts_count', 0)}."
+                    f"FPS: {fps:.1f} Гц (≥95% от заданного), "
+                    f"медианный кадр: {median_dt*1000:.1f} мс. "
+                    f"Джиттер P95: {jitter*1000:.1f} мс (лимит {jitter_limit*1000:.1f} мс). "
+                    f"Пропуски кадров: {dropouts}.{tail_off}"
                 )
             else:
+                fail_tag = (
+                    f" Не прошло: {', '.join(failed_parts)}."
+                    if failed_parts else ""
+                )
                 desc = (
-                    f"FPS нестабилен. "
-                    f"FPS: {metrics.get('fps_actual_hz', 0):.1f} Гц. "
-                    f"Джиттер P95: {metrics.get('jitter_s', 0):.4f}с (лимит {metrics.get('jitter_limit_s', 0):.4f}с). "
-                    f"Пропуски кадров: {metrics.get('dropouts_count', 0)}."
+                    f"FPS нестабилен.{fail_tag} "
+                    f"FPS: {fps:.1f} Гц, медианный кадр: {median_dt*1000:.1f} мс. "
+                    f"Джиттер P95: {jitter*1000:.1f} мс (лимит {jitter_limit*1000:.1f} мс). "
+                    f"Пропуски кадров: {dropouts}.{tail_off}"
                 )
         else:
             return None
@@ -2006,25 +2053,59 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
     ideal_dt = float(1.0 / float(ctx.update_rate))
     deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
 
-    abs_jitter = (
-        np.abs(deltas - ideal_dt) if deltas.size > 0 else np.array([], dtype=np.float64)
-    )
-    # Было раньше: jitter = max(|dt - ideal_dt|), что слишком чувствительно к единичным пикам.
-    # Теперь: устойчивый jitter = P95(|dt - ideal_dt|), max оставляем как диагностическую метрику.
+    # Reference frame-time for jitter / dropout detection.
+    #
+    # Previously we measured |dt - ideal_dt| where ideal_dt came from the
+    # SDF's <update_rate>.  In practice libgazebo_ros_camera almost never
+    # honours that rate exactly — at 5 Hz configured we often see 13 Hz
+    # actual publication — so |dt - ideal_dt| was dominated by the
+    # SYSTEMATIC offset between SDF and plugin, not by real frame-time
+    # variation.  A perfectly-stable 13 Hz stream reported ~0.125 s of
+    # "jitter" (= 0.2 - 0.0752) and tripped the 0.1 s limit despite being
+    # metronomically regular.
+    #
+    # The physically meaningful "FPS stability" is the spread of dt
+    # around its own CENTRE, not around a paper target.  Use the median
+    # of the observed deltas as the reference — it's robust to a few
+    # outlier frames (unlike mean) and matches what the frame-rate
+    # integrator would see.
+    if deltas.size > 0:
+        median_dt = float(np.median(deltas))
+        abs_jitter = np.abs(deltas - median_dt)
+        # Also record |dt - ideal_dt| for diagnostics — makes it obvious
+        # when a plugin is publishing off-rate from its SDF claim.
+        abs_offset_from_sdf = np.abs(deltas - ideal_dt)
+    else:
+        median_dt = ideal_dt
+        abs_jitter = np.array([], dtype=np.float64)
+        abs_offset_from_sdf = np.array([], dtype=np.float64)
+
+    # P95 of |dt - median(dt)|: robust against isolated spikes, sensitive
+    # to sustained irregularity.  max retained for diagnostics.
     jitter = (
         float(np.percentile(abs_jitter, ctx.C11_JITTER_PERCENTILE))
         if abs_jitter.size > 0
         else 0.0
     )
     jitter_max_abs = float(np.max(abs_jitter)) if abs_jitter.size > 0 else 0.0
+    median_offset_from_sdf = (
+        float(np.median(abs_offset_from_sdf)) if abs_offset_from_sdf.size > 0 else 0.0
+    )
     max_dt = float(np.max(deltas)) if deltas.size > 0 else 0.0
-    dropouts = int(np.sum(deltas > (2.0 * ideal_dt))) if deltas.size > 0 else 0
+    # Dropouts: a frame is "dropped" when the gap is more than 2x the
+    # actual median frame time (same logic as before but scaled to the
+    # real rate so a 13 Hz stream isn't held to 5 Hz expectations).
+    dropout_threshold_s = 2.0 * median_dt
+    dropouts = (
+        int(np.sum(deltas > dropout_threshold_s)) if deltas.size > 0 else 0
+    )
 
     fps_ok = fps_actual >= (0.95 * float(ctx.update_rate))
-    # Jitter limit: use the larger of the hardcoded limit or 50% of the ideal frame time.
-    # This prevents false failures on low-FPS cameras where even small timing
-    # variations exceed the absolute 15ms threshold.
-    jitter_limit = max(float(ctx.C11_MAX_JITTER_S), ideal_dt * 0.5)
+    # Jitter limit: hardcoded floor OR 50% of median frame time.  Using
+    # median_dt (not ideal_dt) means a camera actually running at 13 Hz
+    # gets a 0.5 × 0.075 ≈ 0.038 s jitter budget, matching its real
+    # cadence — not the 0.1 s budget the SDF's 5 Hz would suggest.
+    jitter_limit = max(float(ctx.C11_MAX_JITTER_S), median_dt * 0.5)
     jitter_ok = jitter <= jitter_limit
     dropouts_ok = dropouts == 0
 
@@ -2037,9 +2118,17 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             "timestamps_interval_s": total_dt,
             "fps_actual_hz": fps_actual,
             "ideal_dt_s": ideal_dt,
+            "median_dt_s": median_dt,
+            # How far the plugin's actual median cadence is from the
+            # <update_rate> declared in the SDF.  A large value here (and
+            # the test PASSING) tells the user the plugin is not honouring
+            # its configured rate — useful for SDF debugging without
+            # failing the test for it.
+            "median_offset_from_sdf_s": median_offset_from_sdf,
             "jitter_limit_s": float(jitter_limit),
             "jitter_s": jitter,
-            "jitter_old_max_abs_s": jitter_max_abs,
+            "jitter_max_abs_s": jitter_max_abs,
+            "dropout_threshold_s": float(dropout_threshold_s),
             "max_dt_s": max_dt,
             "dropouts_count": dropouts,
             "checks": {
