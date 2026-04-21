@@ -14,6 +14,8 @@
       </inertial>
     </link>
     <link name="body">
+      <!-- Lift body so cylinder (length 0.0216) sits flush on ground. -->
+      <pose>0 0 0.0108 0 0 0</pose>
       <inertial>
         <mass>0.0634</mass>
         <inertia>
@@ -31,6 +33,7 @@
       </collision>
       <!-- Bounding size for test framework -->
       <sensor_size>0.025 0.025 0.0216</sensor_size>
+      <shape>cylinder</shape>
       <visual name="visual">
         <geometry>
           <cylinder>
@@ -64,6 +67,10 @@
           <measure_direction>child_to_parent</measure_direction>
         </force_torque>
       </sensor>
+    </joint>
+    <joint name="world_anchor" type="fixed">
+      <parent>world</parent>
+      <child>mount</child>
     </joint>
   </model>
 </sdf>

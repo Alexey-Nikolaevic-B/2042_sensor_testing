@@ -99,15 +99,25 @@
     </model>
 
     <!--
-      Pins sensor mount rigidly to world — replaces static=true.
-      static=true gives ODE infinite-mass wall behaviour: contact forces
-      become constant constraint reactions regardless of penetration depth.
-      A world joint lets ODE compute real spring forces (kp × depth).
+      ══════════════════════════════════════════════════════════════════
+      SENSOR WORLD ANCHOR
+      ══════════════════════════════════════════════════════════════════
+      Previously there was a hard-coded joint pinning
+        leptrino_cfs018ca101u::mount  ↔  world
+      That only worked for leptrino.  For every other tactile sensor the
+      joint silently failed (parent refers to a model that isn't in the
+      scene), so `mount` was free-floating.  With <static>false</static>
+      on the model, the fixed ft_joint transferred body gravity onto the
+      mount, and heavier sensors (e.g. amti, body mass 0.73 kg) drifted
+      several centimetres down during the 3 s scene-settle, making the
+      probe sweep miss the sensor entirely — the probe appeared to pass
+      through the model in the UI.
+
+      The fix is per-sensor: each tactile model SDF now ships with its
+      own <joint><parent>world</parent><child>mount</child></joint> at
+      model scope.  The world no longer needs to know which sensor will
+      be spawned.  Any sensor with a `mount` link will be anchored.
     -->
-    <joint name="sensor_world_joint" type="fixed">
-      <parent>world</parent>
-      <child>leptrino_cfs018ca101u::mount</child>
-    </joint>
 
     <physics type="ode">
       <real_time_update_rate>1000</real_time_update_rate>

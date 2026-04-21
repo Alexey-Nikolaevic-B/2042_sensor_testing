@@ -1,14 +1,25 @@
 """
 Tactile sensor tests.
 
-Geometry assumptions (sensor NOT static, world_anchor fixed joint, body pose z=0.013):
-  - body cylinder centre  z = +0.013  (body link pose in model.sdf)
-  - sensor top surface    z = +0.026  (centre + half of 0.026 length)
-  - sensor bottom surface z =  0.000  (sits flush on ground plane)
+Scene geometry (every tactile SDF now ships with):
+  * body link pose  <pose>0 0 H/2 0 0 0</pose>  → collision sits flush on
+    ground plane (no half-buried geometry, no constant ground contact noise).
+  * world_anchor fixed joint  <parent>world</parent><child>mount</child> →
+    the mount is pinned to the world frame, so the entire assembly cannot
+    drift under probe contact or body gravity regardless of body mass.
 
-  NOTE: Previously the body had no pose (centre at z=0) so the bottom half was
-  underground, causing constant ground-plane contact noise (~10 N) that leaked
-  into every bumper reading regardless of probe depth.
+  Concrete numbers for leptrino (H=0.026):
+    - body centre     z = +0.013
+    - sensor top      z = +0.026
+    - sensor bottom   z =  0.000
+
+  HISTORY: Earlier the mount was pinned by a hard-coded joint in
+  tactile_force.world that referenced leptrino_cfs018ca101u::mount.  For
+  every other sensor the joint silently failed and the body (mass up to
+  0.73 kg) pulled the whole model down through the fixed ft_joint during
+  scene settle.  Heavy/box sensors (amti_he6x6_force_plate) drifted several
+  cm out of the probe's search range — probe appeared to pass through the
+  model.  The per-sensor world_anchor joint fixes this.
 
 Force probe (flat disc, no stick):
   - disc radius 8 mm, thickness 2 mm, centred at link origin
@@ -18,9 +29,20 @@ Force probe (flat disc, no stick):
   - probe bottom face Z = probe_link Z - PROBE_TIP_OFFSET
   - to place face above sensor top: probe_link Z = sensor_top + gap + PROBE_TIP_OFFSET
 
-Contact detection uses FILTERED force (probe-only contacts).
-With the sensor no longer static, ground-plane contacts no longer produce
-spurious constant forces in the bumper output.
+Contact detection uses FILTERED force (probe-only contacts).  With the
+sensor no longer half-submerged in the ground plane, ground-plane contacts
+no longer produce spurious constant forces in the bumper output.
+
+Diagnostic logging:
+  - _measure_force logs msg/event/probe-pair counts whenever peak force = 0
+    (reports "topic silent", "no contacts at all", "N contacts, 0 probe
+    pairs" or "probe pairs but zero force") so a test failure points at the
+    real cause instead of a generic "no contact".
+  - _check_sensor_drift compares current body pose to the baseline recorded
+    at test start; >1 mm drift triggers a WARNING that names the likely
+    cause (missing world_anchor joint).
+  - _find_contact_surface dumps sensor drift + probe tip gap when the sweep
+    fails, and calls out the missing-anchor case explicitly.
 """
 
 import time
@@ -129,23 +151,63 @@ def _measure_force(sensor, window: float = 0.4, probe_only: bool = True,
         "leptrino_cfs018ca101u::body::tactile_collision"
       Both contain 'probe' on at least one side when probe touches sensor.
       All seen pairs are logged at DEBUG so name mismatches are visible.
+
+    DIAGNOSTICS:
+    When no probe contact force is found the call logs a summary so the
+    failure mode (empty topic / no-contact messages / ground-only contacts)
+    is visible without having to re-run at DEBUG level.
     """
     from gazebo_msgs.msg import ContactsState as CS
     topic = f"/{sensor.sensor_name}/bumper_states"
     msgs = sensor.capture_data(CS, topic=topic, window=window, timeout=2.0)
+
+    # Bookkeeping for diagnostic summary
+    n_msgs = len(msgs)
+    n_with_states = 0
+    n_contact_events = 0
+    n_probe_pairs = 0
+    sample_pairs = []   # first few raw pairs for the diagnostic line
+
     magnitudes = []
     for msg in msgs:
         if not msg.states:
             continue
+        n_with_states += 1
         for state in msg.states:
+            n_contact_events += 1
             c1 = state.collision1_name.lower()
             c2 = state.collision2_name.lower()
+            if len(sample_pairs) < 3:
+                sample_pairs.append(f"[{c1}]x[{c2}]")
             logger.debug(f"  contact pair: [{c1}] x [{c2}]")
             if probe_only and 'probe' not in c1 and 'probe' not in c2:
                 continue
+            n_probe_pairs += 1
             f = state.total_wrench.force
             magnitudes.append((f.x**2 + f.y**2 + f.z**2) ** 0.5)
-    return float(max(magnitudes)) if magnitudes else 0.0
+
+    peak = float(max(magnitudes)) if magnitudes else 0.0
+
+    # One-line diagnostic — INFO only when the result is suspicious, DEBUG
+    # otherwise.  Silent on the happy path (probe contact found), verbose on
+    # zero-force so the cause (no msgs / no-probe pairs / empty topic) is
+    # immediately visible in the log.
+    if peak == 0.0 and probe_only:
+        reason = (
+            "no bumper msgs (topic silent?)" if n_msgs == 0
+            else "all msgs empty (no contacts at all)" if n_with_states == 0
+            else f"{n_contact_events} contacts, 0 with 'probe' in names "
+                 f"(samples: {', '.join(sample_pairs)})" if n_probe_pairs == 0
+            else f"{n_probe_pairs} probe pairs but zero force magnitude"
+        )
+        logger.info(f"    [force=0] topic={topic}  "
+                    f"msgs={n_msgs}  with_states={n_with_states}  "
+                    f"events={n_contact_events}  probe_pairs={n_probe_pairs}  "
+                    f"→ {reason}")
+    else:
+        logger.debug(f"    [force={peak:.4f}] msgs={n_msgs} "
+                     f"with_states={n_with_states} probe_pairs={n_probe_pairs}")
+    return peak
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,11 +230,21 @@ def _find_contact_surface(sensor, probe_model: str,
     _set_pose(probe_model, sx, sy, start_z)
     time.sleep(1.0)  # let physics settle after initial placement
 
+    # Snapshot sensor body pose at start of sweep — used below to report
+    # whether the sensor itself drifted during the search.
+    sensor_body_start = _get_body_link_pose(sensor, warn=False)
+
     step = 0.001     # 1 mm steps — coarser but reliable; fine depths in Phase 2
     n_steps = int(0.040 / step)  # 40 mm total search range
     z = start_z
     consec = 0
     first_z = None
+
+    # Track whether the bumper topic ever produced ANY contact during the
+    # sweep.  "Any pair" means the bumper plugin is alive; 0 probe-pairs
+    # means the probe never reached the sensor.  Distinct failure modes.
+    saw_any_contact_pair   = False
+    saw_probe_contact_pair = False
 
     for _ in range(n_steps):
         z -= step
@@ -188,6 +260,8 @@ def _find_contact_surface(sensor, probe_model: str,
         tip_z = actual_z - PROBE_TIP_OFFSET
         logger.info(f"  step cmd={z:.4f} actual={actual_z:.4f} (drift={drift_mm:+.2f}mm) "
                     f"tip={tip_z:.4f} gap={(tip_z-sensor_top_z)*1000:+.1f}mm f={f:.4f}N")
+        if f > 0.0:
+            saw_probe_contact_pair = True
         if f > CONTACT_THRESHOLD:
             consec += 1
             if first_z is None:
@@ -202,7 +276,31 @@ def _find_contact_surface(sensor, probe_model: str,
             consec = 0
             first_z = None
 
+    # Sweep failed — dump a rich diagnostic so the user doesn't have to guess.
     logger.warning(f"  No contact found ({n_steps} steps, searched to z={z:.4f})")
+    sensor_body_end = _get_body_link_pose(sensor, warn=False)
+    if sensor_body_start and sensor_body_end and None not in sensor_body_start:
+        dz = (sensor_body_end[2] - sensor_body_start[2]) * 1000
+        dx = (sensor_body_end[0] - sensor_body_start[0]) * 1000
+        dy = (sensor_body_end[1] - sensor_body_start[1]) * 1000
+        logger.warning(f"  Sensor body moved during sweep: "
+                       f"dx={dx:+.2f}mm dy={dy:+.2f}mm dz={dz:+.2f}mm")
+        if abs(dz) > 1.0 or math.hypot(dx, dy) > 1.0:
+            logger.warning("  ⚠ Sensor model is NOT pinned to the world. "
+                           "Add a <joint><parent>world</parent><child>mount</child></joint> "
+                           "inside the sensor SDF (see sensors/tactile/*/model.sdf).")
+    final_tip_z = (actual_z - PROBE_TIP_OFFSET) if actual_z is not None else None
+    if final_tip_z is not None:
+        logger.warning(f"  Final tip z={final_tip_z:.4f}, "
+                       f"sensor_top_z={sensor_top_z:.4f}, "
+                       f"gap={(final_tip_z-sensor_top_z)*1000:+.1f}mm  "
+                       f"(probe tip ended {'below' if final_tip_z<sensor_top_z else 'above'} surface)")
+    logger.warning(f"  Contact diagnostics: any-probe-contact-force={saw_probe_contact_pair}")
+    if not saw_probe_contact_pair:
+        logger.warning("  Probe never generated contact force → either (a) the "
+                       "sensor is below the search range (drift), (b) the probe "
+                       "is laterally misaligned, or (c) the bumper plugin is not "
+                       "publishing / is reporting only ground contacts.")
     return None
 
 
@@ -291,6 +389,61 @@ def _parse_sensor_shape(sensor):
                 "width_m": w, "depth_m": d}
 
 
+def _get_body_link_pose(sensor, warn: bool = True):
+    """Return (x, y, z) of the body link, or (None, None, None) on failure.
+
+    Thin wrapper over /gazebo/get_link_state used both by _sensor_geo and by
+    the drift monitor.  Separated so callers can probe the current position
+    without re-running the full geometry parse.
+    """
+    try:
+        rospy.wait_for_service('/gazebo/get_link_state', timeout=2.0)
+        from gazebo_msgs.srv import GetLinkState, GetLinkStateRequest
+        svc = rospy.ServiceProxy('/gazebo/get_link_state', GetLinkState)
+        req = GetLinkStateRequest()
+        req.link_name = f"{sensor.sensor_name}::body"
+        req.reference_frame = 'world'
+        resp = svc(req)
+        if resp.success:
+            p = resp.link_state.pose.position
+            return p.x, p.y, p.z
+        if warn:
+            logger.warning(f"  get_link_state({sensor.sensor_name}::body): "
+                           f"{resp.status_message}")
+    except Exception as e:
+        if warn:
+            logger.warning(f"  get_link_state failed: {e}")
+    return None, None, None
+
+
+def _check_sensor_drift(sensor, baseline_xyz, tag: str = "",
+                         warn_mm: float = 1.0) -> float:
+    """Compare current body pose against baseline and log any drift.
+
+    Returns the total 3-D drift in metres.  Emits INFO for drift <= warn_mm
+    and WARN for larger drift — large drift almost always means the sensor
+    isn't pinned to the world (missing world_anchor joint) and the probe
+    sweep will not find the surface reliably.
+    """
+    if not baseline_xyz or any(v is None for v in baseline_xyz):
+        return 0.0
+    bx, by, bz = baseline_xyz
+    cx, cy, cz = _get_body_link_pose(sensor, warn=False)
+    if cx is None:
+        return 0.0
+    dx, dy, dz = cx - bx, cy - by, cz - bz
+    drift = math.sqrt(dx * dx + dy * dy + dz * dz) * 1000   # mm
+    msg = (f"  [drift{' ' + tag if tag else ''}] body now "
+           f"({cx:.4f},{cy:.4f},{cz:.4f})  "
+           f"Δ=({dx*1000:+.2f},{dy*1000:+.2f},{dz*1000:+.2f})mm  "
+           f"total={drift:.2f}mm")
+    if drift > warn_mm:
+        logger.warning(msg + "  ← sensor is MOVING (check world_anchor joint)")
+    else:
+        logger.info(msg)
+    return drift / 1000.0
+
+
 def _sensor_geo(sensor):
     """Return sensor geometry dict or None.
 
@@ -308,25 +461,11 @@ def _sensor_geo(sensor):
     h = shape["height_m"]
 
     # ── query body link pose ──────────────────────────────────────────
-    body_z = None
-    x, y = 0.0, 0.0
-    try:
-        rospy.wait_for_service('/gazebo/get_link_state', timeout=2.0)
-        from gazebo_msgs.srv import GetLinkState, GetLinkStateRequest
-        svc = rospy.ServiceProxy('/gazebo/get_link_state', GetLinkState)
-        req = GetLinkStateRequest()
-        req.link_name = f"{sensor.sensor_name}::body"
-        req.reference_frame = 'world'
-        resp = svc(req)
-        if resp.success:
-            p = resp.link_state.pose.position
-            x, y, body_z = p.x, p.y, p.z
-            logger.info(f"  Body link pose (get_link_state): "
-                        f"({x:.4f},{y:.4f},{body_z:.4f})")
-    except Exception as e:
-        logger.debug(f"  get_link_state failed: {e}")
-
-    if body_z is None:
+    x, y, body_z = _get_body_link_pose(sensor, warn=True)
+    if body_z is not None:
+        logger.info(f"  Body link pose (get_link_state): "
+                    f"({x:.4f},{y:.4f},{body_z:.4f})")
+    else:
         ax, ay, az = _get_pose(sensor.sensor_name)
         x      = ax if ax is not None else 0.0
         y      = ay if ay is not None else 0.0
@@ -335,6 +474,13 @@ def _sensor_geo(sensor):
                     f"({x:.4f},{y:.4f},{body_z:.4f})")
 
     top_z = body_z + h / 2.0
+    expected_body_z = h / 2.0   # with world_anchor pinning mount at z=0
+    mismatch_mm = (body_z - expected_body_z) * 1000
+    if abs(mismatch_mm) > 1.0:
+        logger.warning(
+            f"  Body Z {body_z*1000:.1f}mm differs from expected "
+            f"{expected_body_z*1000:.1f}mm by {mismatch_mm:+.1f}mm  "
+            f"← sensor NOT pinned to world, or model <pose> set elsewhere")
     logger.info(f"  top_z={top_z:.4f}  height={h*1000:.1f}mm  "
                 f"safe_xy_radius={shape['safe_xy_radius']*1000:.1f}mm")
     return {"x": x, "y": y, "z": body_z, "top_z": top_z, "shape_info": shape}
@@ -441,6 +587,7 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
         result["error"] = "No sensor_size in params"
         result["duration"] = round(time.time()-t0, 2); return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    baseline_body_xyz = (geo["x"], geo["y"], geo["z"])
     result["sensor_top_z"] = round(sensor_top, 4)
     safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET   # 50mm above surface
 
@@ -454,14 +601,26 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
     logger.info(f"  Filtered noise = {noise:.4f} N  "
                 f"({'OK' if noise < 0.3 else 'HIGH — check collision names'})")
 
+    # Confirm the sensor hasn't drifted during the probe placement + noise
+    # window.  If it has, the sweep below will miss the surface.
+    _check_sensor_drift(sensor, baseline_body_xyz, tag="before Phase 1")
+
     # Phase 1: find surface
     if progress_cb: progress_cb(15)
     logger.info("  Phase 1: finding contact surface ...")
     contact_z = _find_contact_surface(sensor, probe, sx, sy, sensor_top, simulator=simulator)
     if contact_z is None:
-        result["error"] = "Contact surface not found in 30 mm sweep"
-        result["description"] = ("Probe swept 30 mm and detected no sensor contact. "
-                                 "Check lateral alignment and probe tip offset.")
+        drift_m = _check_sensor_drift(sensor, baseline_body_xyz,
+                                       tag="after failed sweep")
+        result["error"] = "Contact surface not found in 40 mm sweep"
+        hint = ""
+        if drift_m * 1000 > 1.0:
+            hint = (f" Sensor body moved {drift_m*1000:.1f} mm during the test "
+                    f"— world_anchor joint is likely missing from the sensor "
+                    f"SDF, so the sensor drifted out of the probe's reach.")
+        result["description"] = ("Probe swept 40 mm and detected no sensor contact. "
+                                 "Check lateral alignment, probe tip offset, and "
+                                 "the sensor's world_anchor joint." + hint)
         result["duration"] = round(time.time()-t0, 2); return result
 
     result["contact_found"] = True
@@ -573,6 +732,8 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time() - t0, 2)
         return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    baseline_body_xyz = (geo["x"], geo["y"], geo["z"])
+    _check_sensor_drift(sensor, baseline_body_xyz, tag="T2 start")
 
     # Sphere probe tip offset (sphere radius in tactile_uniformity.world)
     T2_TIP_OFFSET = 0.002  # metres — sphere radius
@@ -590,6 +751,10 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         r_from_centre = math.hypot(px - sx, py - sy)
         logger.info(f"  ── Point {i+1}/{len(grid)}: {label} "
                     f"({px:.4f},{py:.4f})  r={r_from_centre*1000:.1f}mm ──")
+        # Drift check — if the sensor moved between points the grid becomes
+        # invalid and every subsequent point will fail for the wrong reason.
+        _check_sensor_drift(sensor, baseline_body_xyz,
+                             tag=f"before {label}", warn_mm=1.0)
 
         if progress_cb:
             progress_cb(10 + int((i / len(grid)) * 80))
@@ -704,6 +869,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         result["error"] = "No sensor_size in params"
         result["duration"] = round(time.time()-t0, 2); return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    baseline_body_xyz = (geo["x"], geo["y"], geo["z"])
     safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET
 
     # Baseline noise
@@ -714,6 +880,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     noise = _measure_force(sensor, window=0.6, probe_only=True, simulator=simulator)
     logger.info(f"  Filtered noise = {noise:.4f} N  "
                 f"({'OK' if noise < 0.3 else 'HIGH — check collision names'})")
+    _check_sensor_drift(sensor, baseline_body_xyz, tag="T3 before Phase 1")
 
     # Phase 1: find surface (exactly as T1)
     if progress_cb: progress_cb(15)
@@ -842,7 +1009,9 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time() - t0, 2)
         return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    baseline_body_xyz = (geo["x"], geo["y"], geo["z"])
     safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET
+    _check_sensor_drift(sensor, baseline_body_xyz, tag="T4 start")
 
     # Phase 1: Find contact surface
     logger.info("  Phase 1: Finding contact surface...")
