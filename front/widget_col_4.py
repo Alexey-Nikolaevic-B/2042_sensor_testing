@@ -366,36 +366,75 @@ class ColCapture(QWidget):
         return None
 
     def _render_tactile_heatmap(self, msgs: list) -> bytes | None:
-        """Aggregate ContactsState messages into a spatial force heatmap."""
+        """Aggregate ContactsState messages into a spatial force heatmap.
+
+        Coordinate system:
+          Contact points come from the bumper plugin in the WORLD frame
+          (state.contact_positions[i].x/y).  The old code used min/max
+          normalisation which spread a single-cluster press across the
+          whole canvas — the top-left corner of the probe disc always
+          landed at pixel (10, 10) regardless of where on the sensor the
+          probe actually was.  A press at the physical sensor centre
+          therefore appeared in the top-left of the UI.
+
+          New approach:
+            1. Compute the centroid (cx, cy) of all contact points.
+               For a probe pressing a single spot, this IS the press
+               location; for multi-point grids it's the average press.
+            2. Use a fixed pixels-per-metre scale so the blob is drawn
+               at canvas CENTRE relative to the centroid.  No dynamic
+               stretching — a hard press and a light press render at the
+               same pixel coordinates, only the colour differs.
+            3. Overlay a faint crosshair + circle at the canvas centre so
+               the viewer has a visual reference for "sensor centre".
+
+          With this the common case (probe tapping centre of the sensor)
+          renders as a hot blob precisely in the middle of the image.
+        """
         try:
             import numpy as np, cv2
 
-            # Collect contact points (x, y, force_magnitude)
+            H, W = 256, 256
+            canvas = np.zeros((H, W), dtype=np.float32)
+
+            # Collect contact points (x, y, force_magnitude) in world frame.
             points = []
             for msg in msgs:
                 for state in msg.states or []:
                     f = state.total_wrench.force
-                    mag = (f.x**2 + f.y**2 + f.z**2) ** 0.5
-                    # Use contact position from normals if available
+                    mag = (f.x ** 2 + f.y ** 2 + f.z ** 2) ** 0.5
                     if state.contact_positions:
                         for pos in state.contact_positions:
                             points.append((pos.x, pos.y, mag))
                     else:
+                        # No position data — just register "something
+                        # pressed" at centroid (→ canvas centre).
                         points.append((0.0, 0.0, mag))
 
-            H, W = 256, 256
-            if not points:
-                canvas = np.zeros((H, W), dtype=np.uint8)
-            else:
-                xs = np.array([p[0] for p in points])
-                ys = np.array([p[1] for p in points])
-                fs = np.array([p[2] for p in points])
-                # Normalise coordinates to pixel space
-                x_range = xs.max() - xs.min() or 1.0
-                y_range = ys.max() - ys.min() or 1.0
-                pxs = ((xs - xs.min()) / x_range * (W - 20) + 10).astype(int)
-                pys = ((ys - ys.min()) / y_range * (H - 20) + 10).astype(int)
-                canvas = np.zeros((H, W), dtype=np.float32)
+            if points:
+                xs = np.array([p[0] for p in points], dtype=np.float64)
+                ys = np.array([p[1] for p in points], dtype=np.float64)
+                fs = np.array([p[2] for p in points], dtype=np.float64)
+
+                # Centroid of the contact cloud → canvas centre.
+                cx = float(np.mean(xs))
+                cy = float(np.mean(ys))
+
+                # Fixed scale: 2000 px/m  →  1 px ≈ 0.5 mm.
+                # 256 px canvas therefore shows a ±64 mm view around the
+                # contact centroid, plenty for any probe disc (r=8mm) and
+                # for showing the sensor-sized area around it.
+                PX_PER_M = 2000.0
+
+                # Invert Y so that +Y in world (forward) points up in the
+                # image — matches the observer camera's "bird's-eye" feel.
+                pxs = ((xs - cx) * PX_PER_M + W / 2).astype(np.int32)
+                pys = ((cy - ys) * PX_PER_M + H / 2).astype(np.int32)
+
+                # Clip to canvas (defensive — points should already fit).
+                pxs = np.clip(pxs, 0, W - 1)
+                pys = np.clip(pys, 0, H - 1)
+
                 for px, py, fv in zip(pxs, pys, fs):
                     cv2.circle(
                         canvas,
@@ -404,14 +443,29 @@ class ColCapture(QWidget):
                         color=float(fv),
                         thickness=-1,
                     )
-                # Gaussian blur for smooth heatmap
                 canvas = cv2.GaussianBlur(canvas, (31, 31), 0)
                 if canvas.max() > 0:
                     canvas = (canvas / canvas.max() * 255).astype(np.uint8)
                 else:
                     canvas = canvas.astype(np.uint8)
+            else:
+                canvas = canvas.astype(np.uint8)
 
             heatmap = cv2.applyColorMap(canvas, cv2.COLORMAP_JET)
+
+            # Reference crosshair + circle at the canvas centre so the
+            # user can see the "sensor centre" relative to the heat blob.
+            # Drawn in BGR on the 3-channel heatmap.  Faint grey so it
+            # doesn't fight with the colormap.
+            cx_px, cy_px = W // 2, H // 2
+            grey = (160, 160, 160)
+            cv2.line(heatmap, (cx_px - 10, cy_px), (cx_px + 10, cy_px),
+                     grey, 1, lineType=cv2.LINE_AA)
+            cv2.line(heatmap, (cx_px, cy_px - 10), (cx_px, cy_px + 10),
+                     grey, 1, lineType=cv2.LINE_AA)
+            cv2.circle(heatmap, (cx_px, cy_px), 3, grey, 1,
+                       lineType=cv2.LINE_AA)
+
             ok, buf = cv2.imencode(".jpg", heatmap)
             return bytes(buf) if ok else None
         except Exception:
