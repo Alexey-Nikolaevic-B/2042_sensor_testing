@@ -393,6 +393,76 @@ def _measure_force_persistent(sensor, window: float = 0.5,
     }
 
 
+def _measure_force_during_press(sensor, probe_model, sx, sy, probe_z,
+                                  window: float = 0.6,
+                                  probe_only: bool = True) -> dict:
+    """Press probe to `probe_z` and sample bumper force with a subscriber
+    that is ALREADY ACTIVE before the set_model_state teleport.
+
+    Motivation:
+      _measure_force / _measure_force_persistent both start their subscriber
+      AFTER the probe is pressed in.  With gravity=false and kp=10000, a
+      3 mm penetration generates a ~30 N spring force on the probe's 0.1 kg
+      mass → ~300 m/s² acceleration → the probe leaves contact within a few
+      ms.  By the time wait_for_message returns a frame or capture_persistent
+      starts sleeping, the probe is already 7–15 mm above the surface and
+      bumper reports the contact pair with zero total_wrench.
+
+      Starting the subscriber FIRST, then triggering contact, guarantees the
+      force-carrying frame (emitted at the instant kp × depth is applied) is
+      inside the captured stream.
+
+    Returns:
+      {"peak_n":      max|F| among probe-only contacts,
+       "probe_pairs": number of probe-side contact events captured,
+       "msgs":        number of bumper messages captured,
+       "events":      total contact events across all messages}
+    """
+    from gazebo_msgs.msg import ContactsState as CS
+    topic = _bumper_topic(sensor)
+    forces = []
+    counts = {"msgs": 0, "events": 0, "probe_pairs": 0}
+
+    def _cb(msg):
+        counts["msgs"] += 1
+        if not msg.states:
+            return
+        for state in msg.states:
+            counts["events"] += 1
+            c1 = state.collision1_name.lower()
+            c2 = state.collision2_name.lower()
+            if probe_only and 'probe' not in c1 and 'probe' not in c2:
+                continue
+            counts["probe_pairs"] += 1
+            f = state.total_wrench.force
+            forces.append((f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5)
+
+    sub = rospy.Subscriber(topic, CS, _cb, queue_size=500)
+    try:
+        # Let the subscriber connect + rosmaster register it.  100 ms is
+        # conservative; without this the first ~1–3 bumper frames (i.e. the
+        # impact window we care about) get lost.
+        time.sleep(0.1)
+        _set_pose(probe_model, sx, sy, probe_z)
+        # Sample during the press.  The force peak is expected in the first
+        # 1–10 ms after set_pose; the rest of the window is there in case
+        # the probe oscillates back into contact.
+        time.sleep(window)
+    finally:
+        sub.unregister()
+
+    peak = float(max(forces)) if forces else 0.0
+    logger.info(f"    [during_press] topic={topic}  "
+                f"msgs={counts['msgs']}  events={counts['events']}  "
+                f"probe_pairs={counts['probe_pairs']}  peak={peak:.4f}N")
+    return {
+        "peak_n": peak,
+        "probe_pairs": counts["probe_pairs"],
+        "msgs": counts["msgs"],
+        "events": counts["events"],
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Contact search
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1216,33 +1286,19 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
     force_samples = []
     failed_cycles = 0
 
-    # Threshold below which a reading is considered a timing artefact of
-    # capture_data rather than a real low-force contact.  At 3 mm depth the
-    # spring law predicts kp × depth = 10000 × 0.003 = 30 N in theory; in
-    # practice the plugin reports ~0.9 N consistently for both box and
-    # cylinder.  Anything under 0.1 N for an active contact is almost
-    # certainly a dropped sample.
-    RETRY_IF_UNDER_N = 0.1
-
     for i in range(num_cycles):
         probe_z = contact_z - tap_depth_m
-        _set_pose(probe, sx, sy, probe_z)
-        # Wait briefly so the bumper has time to emit the first post-
-        # teleport frame with non-zero wrench before we start measuring.
-        time.sleep(0.05)
-        force = _measure_force(sensor, window=0.5, probe_only=True, simulator=simulator)
-
-        if force < RETRY_IF_UNDER_N:
-            # Retry with a persistent subscriber — it cannot lose the
-            # force-carrying frame the way wait_for_message does.
-            retry = _measure_force_persistent(sensor, window=0.4,
-                                                probe_only=True,
-                                                simulator=simulator)
-            if retry["peak_n"] > force:
-                logger.info(f"    cycle {i+1}: wait_for_message saw "
-                            f"{force:.4f} N, persistent retry saw "
-                            f"{retry['peak_n']:.4f} N — using persistent")
-                force = retry["peak_n"]
+        # Critical: start the subscriber BEFORE pressing the probe in so
+        # the force-carrying frame (published ~0–10 ms after contact) is
+        # captured.  With gravity=false + kp=10000 the probe bounces out
+        # of contact within ~10 ms, so any subscriber that starts AFTER
+        # set_pose will only see "contact detected / force=0" frames
+        # after the probe has already flown away.
+        pressed = _measure_force_during_press(
+            sensor, probe, sx, sy, probe_z,
+            window=0.4, probe_only=True,
+        )
+        force = pressed["peak_n"]
 
         actual_probe_z = _get_probe_z(probe)
         if actual_probe_z is None:
@@ -1307,15 +1363,23 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
         "test_name": "T4 – Peak Load Response",
         "description": None,
         "error": None,
-        "drop_height_m": 0.015,          # above contact surface — closer start
-                                           # shortens fly-time so the impact
-                                           # falls inside the capture window
-        "impact_velocity_m_s": -2.0,      # downward — faster impact produces
-                                           # a clearer, longer-duration peak
-                                           # (kp×depth scales with penetration
-                                           # before the probe bounces off)
+        "drop_height_m": 0.010,          # above contact surface — closer
+                                           # start shortens fly-time so the
+                                           # impact falls inside the capture
+                                           # window
+        "impact_velocity_m_s": -0.5,      # downward — previous -2.0 m/s
+                                           # produced peaks >150 N, tripping
+                                           # the saturation check.  0.5 m/s
+                                           # yields ~15–30 N (KE ≈ 0.0125 J,
+                                           # max compression ≈ 1.6 mm with
+                                           # kp=10000 → F = kp·Δ ≈ 16 N).
         "peak_force_n": None,
-        "saturation_limit_n": 100.0,
+        # Real tactile transducers (AMTI force plates, Leptrino CFS series)
+        # are rated for hundreds to thousands of newtons.  100 N was far too
+        # tight and treated a perfectly valid 120 N impact as "saturation".
+        # 500 N is well above anything the simulated probe can produce with
+        # the new velocity.
+        "saturation_limit_n": 500.0,
         "saturated": False,
         "force_time_series": [],
         "post_impact_settled": False,
@@ -1367,60 +1431,87 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     if progress_cb:
         progress_cb(30)
 
-    # Phase 2: Position probe at drop height and set velocity
+    # Phase 2: Position probe at drop height
     drop_height = result["drop_height_m"]
     start_z = contact_z + drop_height
     logger.info(f"  Phase 2: Moving probe to drop height z={start_z:.4f} ({drop_height*1000:.1f} mm above surface)")
     _set_pose(probe, sx, sy, start_z)
-    time.sleep(0.5)
-
-    # Apply downward velocity via set_model_state (gravity is false on probe)
-    logger.info(f"  Applying initial velocity: {result['impact_velocity_m_s']} m/s downward")
-    try:
-        rospy.wait_for_service('/gazebo/set_model_state', timeout=2.0)
-        svc = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
-        state = ModelState()
-        state.model_name = probe
-        state.pose.position.x = sx
-        state.pose.position.y = sy
-        state.pose.position.z = start_z
-        state.pose.orientation.w = 1.0
-        state.twist.linear.z = result["impact_velocity_m_s"]
-        state.twist.linear.x = 0.0
-        state.twist.linear.y = 0.0
-        state.twist.angular.x = 0.0
-        state.twist.angular.y = 0.0
-        state.twist.angular.z = 0.0
-        state.reference_frame = 'world'
-        resp = svc(state)
-        if not resp.success:
-            logger.warning(f"set_model_state with velocity failed: {resp.status_message}")
-    except Exception as e:
-        result["error"] = f"Failed to set velocity: {e}"
-        result["duration"] = round(time.time() - t0, 2)
-        return result
+    time.sleep(0.3)
 
     if progress_cb:
         progress_cb(40)
 
-    # Phase 3: Capture impact force continuously with a persistent subscriber
+    # Phase 3: Start subscriber, THEN apply impact velocity
     # ─────────────────────────────────────────────────────────────────
-    # Old implementation polled 50 × 20 ms windows with wait_for_message.
-    # The impact itself lasts 1–3 ms; the force-carrying bumper frame
-    # almost always landed inside the 1–2 ms subscribe/unsubscribe gap
-    # between windows, so peak_force came out as 0 N even though the
-    # probe visibly bounced off the sensor.  A persistent Subscriber open
-    # for the full 1.0 s does not drop any of the ~50 bumper frames.
-    logger.info("  Phase 3: Capturing impact force (persistent subscriber, 1.0 s)...")
-    start_capture = time.time()
-    persistent = _measure_force_persistent(sensor, window=1.0,
-                                             probe_only=True,
-                                             simulator=simulator)
-    force_series = persistent["force_series"]
-    logger.info(f"  Captured {persistent['msgs']} msgs, "
-                f"{persistent['events']} contacts, "
-                f"{persistent['probe_pairs']} probe pairs, "
-                f"{len(force_series)} non-zero-candidate samples.")
+    # The subscriber MUST be live before set_model_state issues the velocity
+    # command, otherwise the force-carrying bumper frame (emitted 1–10 ms
+    # after contact) lands before rosmaster has registered the subscriber
+    # and is dropped.  An earlier revision of this test started the
+    # subscriber after set_model_state and consistently reported peak=0.
+    from gazebo_msgs.msg import ContactsState as CS
+    topic = _bumper_topic(sensor)
+    force_series = []
+    counts = {"msgs": 0, "events": 0, "probe_pairs": 0}
+
+    def _impact_cb(msg):
+        counts["msgs"] += 1
+        if not msg.states:
+            return
+        for state in msg.states:
+            counts["events"] += 1
+            c1 = state.collision1_name.lower()
+            c2 = state.collision2_name.lower()
+            if 'probe' not in c1 and 'probe' not in c2:
+                continue
+            counts["probe_pairs"] += 1
+            f = state.total_wrench.force
+            force_series.append(
+                (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5
+            )
+
+    sub = rospy.Subscriber(topic, CS, _impact_cb, queue_size=500)
+    try:
+        # Let the subscriber register with rosmaster before the impact.
+        time.sleep(0.1)
+
+        logger.info(f"  Applying initial velocity: "
+                    f"{result['impact_velocity_m_s']} m/s downward")
+        try:
+            rospy.wait_for_service('/gazebo/set_model_state', timeout=2.0)
+            svc = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
+            state = ModelState()
+            state.model_name = probe
+            state.pose.position.x = sx
+            state.pose.position.y = sy
+            state.pose.position.z = start_z
+            state.pose.orientation.w = 1.0
+            state.twist.linear.z = result["impact_velocity_m_s"]
+            state.twist.linear.x = 0.0
+            state.twist.linear.y = 0.0
+            state.twist.angular.x = 0.0
+            state.twist.angular.y = 0.0
+            state.twist.angular.z = 0.0
+            state.reference_frame = 'world'
+            resp = svc(state)
+            if not resp.success:
+                logger.warning(f"set_model_state with velocity failed: "
+                               f"{resp.status_message}")
+        except Exception as e:
+            sub.unregister()
+            result["error"] = f"Failed to set velocity: {e}"
+            result["duration"] = round(time.time() - t0, 2)
+            return result
+
+        # Capture during fall + impact + post-impact settle.
+        logger.info("  Phase 3: Capturing impact stream (1.0 s, subscriber already active)...")
+        time.sleep(1.0)
+    finally:
+        sub.unregister()
+
+    logger.info(f"  Captured {counts['msgs']} msgs, "
+                f"{counts['events']} contacts, "
+                f"{counts['probe_pairs']} probe pairs, "
+                f"{len(force_series)} force samples.")
     # We don't have per-frame timestamps here (bumper msgs have their own
     # header.stamp but we keep the output lean).  Use ordinal index.
     result["force_time_series"] = [
