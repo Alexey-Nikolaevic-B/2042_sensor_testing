@@ -274,7 +274,14 @@ def _measure_force(sensor, window: float = 0.4, probe_only: bool = True,
     # The old code subscribed to /{sensor.sensor_name}/bumper_states which
     # was silent whenever the UI name disagreed with the SDF.
     topic = _bumper_topic(sensor)
+    # NOTE: we deliberately do NOT pass simulator= to capture_data here,
+    # because capture_data's built-in notify path uses self.topic (the
+    # sensor's default, not our resolved bumper topic) when building
+    # sensor_data.  Instead we call _ui_push AFTER capture so the UI gets
+    # the right topic, the right bumper messages, and a refreshed observer
+    # frame — see the _ui_push docstring.
     msgs = sensor.capture_data(CS, topic=topic, window=window, timeout=2.0)
+    _ui_push(simulator, sensor, msgs)
 
     # Bookkeeping for diagnostic summary
     n_msgs = len(msgs)
@@ -310,6 +317,58 @@ def _measure_force(sensor, window: float = 0.4, probe_only: bool = True,
     _emit_measure_diag(topic, peak, n_msgs, n_with_states, n_contact_events,
                         n_probe_pairs, sample_pairs, probe_only)
     return peak
+
+
+def _ui_push(simulator, sensor, messages: list) -> None:
+    """Refresh the observer-camera cache and push a tactile capture update
+    to the UI.
+
+    The UI (front/widget_col_4.py) displays:
+      - observer image — taken from simulator._last_observer_frame
+      - sensor image   — rendered from sensor_data["messages"] as a contact
+        heatmap (_render_tactile_heatmap for gazebo_msgs/ContactsState)
+
+    Neither is fed automatically by the bumper-only capture path we use in
+    tactile tests:
+      * _measure_force called sensor.capture_data WITHOUT simulator, so
+        notify_capture never fired.
+      * _measure_force_during_press uses a raw rospy.Subscriber, bypassing
+        sensor.capture_* altogether.
+      * capture_observer_frame is never called anywhere in the repo, so
+        _last_observer_frame stays None for the entire run.
+
+    This helper does both in one place:
+      1. simulator.capture_observer_frame() — refreshes the observer cache.
+         Fast when Gazebo is publishing (wait_for_message returns almost
+         immediately); falls back to stale cache if the topic stalls.
+      2. Builds sensor_data and calls simulator.notify_capture so the UI
+         can rebuild the heatmap from the freshest bumper message.
+    """
+    if simulator is None:
+        return
+    try:
+        simulator.capture_observer_frame()
+    except Exception as e:
+        logger.debug(f"_ui_push: capture_observer_frame failed: {e}")
+    # Keep only the last message — the UI only renders the most recent
+    # state and accumulating a full window would leak memory over long tests.
+    last = messages[-1:] if messages else []
+    sensor_data = {
+        "sensor_type": sensor.sensor_type,
+        "sensor_name": sensor.sensor_name,
+        "topic":       _bumper_topic(sensor),
+        "count":       len(messages),
+        "image_path":  getattr(sensor, "image_path", ""),
+        "messages":    last,
+    }
+    try:
+        simulator.notify_capture(sensor_data)
+    except Exception as e:
+        logger.debug(f"_ui_push: notify_capture failed: {e}")
+    try:
+        simulator.wait_for_step()
+    except Exception:
+        pass
 
 
 def _emit_measure_diag(topic, peak, n_msgs, n_with_states, n_contact_events,
@@ -354,8 +413,12 @@ def _measure_force_persistent(sensor, window: float = 0.5,
     """
     from gazebo_msgs.msg import ContactsState as CS
     topic = _bumper_topic(sensor)
+    # capture_persistent's built-in notify uses self.topic instead of our
+    # resolved bumper topic, so we skip it (simulator=None) and call
+    # _ui_push ourselves with the correct topic + observer refresh.
     msgs = sensor.capture_persistent(CS, topic=topic, window=window,
-                                       simulator=simulator)
+                                       simulator=None)
+    _ui_push(simulator, sensor, msgs)
 
     n_msgs = len(msgs)
     n_with_states = 0
@@ -395,7 +458,8 @@ def _measure_force_persistent(sensor, window: float = 0.5,
 
 def _measure_force_during_press(sensor, probe_model, sx, sy, probe_z,
                                   window: float = 0.6,
-                                  probe_only: bool = True) -> dict:
+                                  probe_only: bool = True,
+                                  simulator=None) -> dict:
     """Press probe to `probe_z` and sample bumper force with a subscriber
     that is ALREADY ACTIVE before the set_model_state teleport.
 
@@ -422,9 +486,16 @@ def _measure_force_during_press(sensor, probe_model, sx, sy, probe_z,
     topic = _bumper_topic(sensor)
     forces = []
     counts = {"msgs": 0, "events": 0, "probe_pairs": 0}
+    captured_msgs = []   # keep raw msgs for the UI heatmap
 
     def _cb(msg):
         counts["msgs"] += 1
+        # Keep only the last few messages — UI renders the most recent
+        # one, but we retain a small tail in case the very last frame is
+        # empty (post-bounce) so the heatmap still shows the contact.
+        captured_msgs.append(msg)
+        if len(captured_msgs) > 20:
+            del captured_msgs[:len(captured_msgs) - 20]
         if not msg.states:
             return
         for state in msg.states:
@@ -455,6 +526,15 @@ def _measure_force_during_press(sensor, probe_model, sx, sy, probe_z,
     logger.info(f"    [during_press] topic={topic}  "
                 f"msgs={counts['msgs']}  events={counts['events']}  "
                 f"probe_pairs={counts['probe_pairs']}  peak={peak:.4f}N")
+    # Prefer the first message that HAS contacts — if the last frame fell
+    # in a post-bounce gap it would show an empty heatmap in the UI even
+    # though the press did register force.
+    best = None
+    for m in reversed(captured_msgs):
+        if m.states:
+            best = m
+            break
+    _ui_push(simulator, sensor, [best] if best else captured_msgs[-1:])
     return {
         "peak_n": peak,
         "probe_pairs": counts["probe_pairs"],
@@ -896,6 +976,10 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
                            f"(SDF may have the wrong <model name=...> attribute)")
         result["duration"] = round(time.time()-t0, 2); return result
 
+    # Prime the UI: fetch one observer frame so widget_col_4 has a scene
+    # preview before the first force measurement arrives.
+    _ui_push(simulator, sensor, [])
+
     if progress_cb: progress_cb(10)
     geo = _sensor_geo(sensor)
     if geo is None:
@@ -1067,6 +1151,9 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
                            f"(check <model name=...> in SDF)")
         result["duration"] = round(time.time() - t0, 2)
         return result
+
+    # Prime the UI so the observer panel is populated before measurements.
+    _ui_push(simulator, sensor, [])
 
     if progress_cb:
         progress_cb(10)
@@ -1242,6 +1329,8 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         result["error"] = (f"Sensor model {ident['model_name']!r} not spawned")
         result["duration"] = round(time.time()-t0, 2); return result
 
+    _ui_push(simulator, sensor, [])   # prime observer panel
+
     if progress_cb: progress_cb(10)
     geo = _sensor_geo(sensor)
     if geo is None:
@@ -1297,6 +1386,7 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         pressed = _measure_force_during_press(
             sensor, probe, sx, sy, probe_z,
             window=0.4, probe_only=True,
+            simulator=simulator,
         )
         force = pressed["peak_n"]
 
@@ -1406,6 +1496,8 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time() - t0, 2)
         return result
 
+    _ui_push(simulator, sensor, [])   # prime observer panel
+
     if progress_cb:
         progress_cb(10)
 
@@ -1452,11 +1544,18 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
     topic = _bumper_topic(sensor)
     force_series = []
     counts = {"msgs": 0, "events": 0, "probe_pairs": 0}
+    # Keep the raw bumper message at the moment of peak force so the UI
+    # can render a heatmap of the actual impact instead of a post-impact
+    # empty frame.
+    impact_msg_ref = [None]           # best ContactsState captured so far
+    impact_peak_ref = [0.0]
 
     def _impact_cb(msg):
         counts["msgs"] += 1
         if not msg.states:
             return
+        frame_peak = 0.0
+        frame_has_probe = False
         for state in msg.states:
             counts["events"] += 1
             c1 = state.collision1_name.lower()
@@ -1464,10 +1563,17 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
             if 'probe' not in c1 and 'probe' not in c2:
                 continue
             counts["probe_pairs"] += 1
+            frame_has_probe = True
             f = state.total_wrench.force
-            force_series.append(
-                (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5
-            )
+            mag = (f.x * f.x + f.y * f.y + f.z * f.z) ** 0.5
+            force_series.append(mag)
+            if mag > frame_peak:
+                frame_peak = mag
+        # Remember the bumper frame that held the hardest probe contact —
+        # that's what the user wants to see in the UI.
+        if frame_has_probe and frame_peak >= impact_peak_ref[0]:
+            impact_peak_ref[0] = frame_peak
+            impact_msg_ref[0] = msg
 
     sub = rospy.Subscriber(topic, CS, _impact_cb, queue_size=500)
     try:
@@ -1512,6 +1618,9 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
                 f"{counts['events']} contacts, "
                 f"{counts['probe_pairs']} probe pairs, "
                 f"{len(force_series)} force samples.")
+    # Push the peak-force frame into the UI with a refreshed observer image.
+    _ui_push(simulator, sensor,
+              [impact_msg_ref[0]] if impact_msg_ref[0] else [])
     # We don't have per-frame timestamps here (bumper msgs have their own
     # header.stamp but we keep the output lean).  Use ordinal index.
     result["force_time_series"] = [
