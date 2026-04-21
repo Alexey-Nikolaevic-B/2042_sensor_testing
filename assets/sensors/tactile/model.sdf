@@ -73,6 +73,9 @@
 
       <!-- Bounding size for test framework -->
       <sensor_size>0.152 0.152 0.029</sensor_size>
+      <!-- shape param: tells test framework this is a box, not a cylinder.
+           Without this, equal w=d would be misclassified as cylinder. -->
+      <shape>box</shape>
 
       <visual name="visual">
         <geometry>
@@ -98,6 +101,17 @@
         </plugin>
       </sensor>
     </link>
+
+    <!--
+      World joint: pins mount to the Gazebo world frame.
+      Declared here in the model SDF so the world file needs no hardcoded
+      sensor name — any sensor using this pattern is automatically held.
+      SDF 1.6 supports <parent>world</parent> inside a model-level joint.
+    -->
+    <joint name="world_fixed" type="fixed">
+      <parent>world</parent>
+      <child>mount</child>
+    </joint>
 
     <!--  Fixed joint connecting mount to body  -->
     <joint name="ft_joint" type="fixed">

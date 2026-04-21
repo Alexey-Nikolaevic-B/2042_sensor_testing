@@ -78,11 +78,10 @@
 
     </model>
 
-    <joint name="sensor_world_joint" type="fixed">
-      <parent>world</parent>
-      <child>leptrino_cfs018ca101u::mount</child>
-    </joint>
-
+    <!--
+      The sensor is pinned to world via its own model SDF joint.
+      No hardcoded sensor name needed here.
+    -->
     <physics type="ode">
       <real_time_update_rate>1000</real_time_update_rate>
       <max_step_size>0.001</max_step_size>

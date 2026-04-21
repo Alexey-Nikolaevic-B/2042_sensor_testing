@@ -2,25 +2,20 @@
 <sdf version="1.6">
   <model name="leptrino_cfs018ca101u">
     <!--
-      NOT static. Held in place by a joint to the Gazebo "world" pseudo-link
-      declared in tactile_force.world. This makes ODE compute real spring
-      forces (kp/kd scale with penetration depth) instead of constraint
-      reactions (which are constant regardless of depth).
+      Two-link design: mount (rigid base) + body (sensing cylinder).
+      Held in place by world_fixed joint below — NOT static=true.
 
-      Two-link design:
-        mount  – heavy, gravity=false, no collision. Acts as rigid base.
-        body   – the sensing cylinder. Has collision + bumper sensor.
-      A fixed joint connects mount→body with body offset 13 mm up so the
-      cylinder (26 mm tall) sits with its bottom face flush on the ground.
+      static=true makes ODE treat the body as infinite-mass wall: contact
+      forces become constant constraint reactions regardless of penetration
+      depth. A world joint lets ODE compute real spring forces (kp × depth).
+
+      Geometry:
+        Cylinder radius 9mm, length 26mm.
+        Body link pose: centre at z=0.013 → bottom z=0, top z=0.026.
     -->
     <pose>0 0 0 0 0 0</pose>
 
     <link name="mount">
-      <!--
-        mount sits at model origin (z=0). It has no collision so it cannot
-        interact with the ground plane. gravity=false + large mass keeps it
-        rock-solid even before the world joint is applied.
-      -->
       <pose>0 0 0 0 0 0</pose>
       <gravity>false</gravity>
       <inertial>
@@ -33,12 +28,7 @@
     </link>
 
     <link name="body">
-      <!--
-        Cylinder centre at z=0.013 in MODEL frame (mount is at z=0).
-        → world z=0.013, bottom face z=0.000, top face z=0.026.
-        Previously no pose here → centre at z=0 → half underground →
-        constant ~10 N ground contact leaked into every bumper reading.
-      -->
+      <!-- Centre at z=0.013 → bottom z=0, top z=0.026 -->
       <pose>0 0 0.013 0 0 0</pose>
       <inertial>
         <mass>0.02</mass>
@@ -47,6 +37,7 @@
           <ixy>0.0</ixy><ixz>0.0</ixz><iyz>0.0</iyz>
         </inertia>
       </inertial>
+
       <collision name="tactile_collision">
         <geometry>
           <cylinder>
@@ -57,20 +48,27 @@
         <surface>
           <contact>
             <ode>
-              <!--
-                kp=50000 → surface stiffness ~50 kN/m.
-                Probe tip kp=10000 → probe is softer contact partner →
-                ODE distributes deformation into probe → force ∝ depth.
-              -->
               <kp>50000.0</kp>
               <kd>100.0</kd>
               <max_vel>0.01</max_vel>
               <min_depth>0.0001</min_depth>
             </ode>
           </contact>
+          <friction>
+            <ode><mu>0.5</mu><mu2>0.5</mu2></ode>
+          </friction>
         </surface>
       </collision>
+
+      <!--
+        sensor_size: used by test framework to determine geometry.
+        For cylindrical sensors, width=depth=diameter, height=length.
+        shape=cylinder tells _parse_sensor_shape() not to use the
+        square-vs-cylinder heuristic.
+      -->
       <sensor_size>0.018 0.018 0.026</sensor_size>
+      <shape>cylinder</shape>
+
       <visual name="visual">
         <geometry>
           <cylinder>
@@ -83,6 +81,7 @@
           <diffuse>0.2 0.5 0.8 1</diffuse>
         </material>
       </visual>
+
       <sensor name="tactile_bumper" type="contact">
         <always_on>true</always_on>
         <update_rate>50.0</update_rate>
@@ -94,6 +93,16 @@
         </plugin>
       </sensor>
     </link>
+
+    <!--
+      Pins mount to the Gazebo world frame.
+      Declared here so world files need no hardcoded sensor name.
+      SDF 1.6 supports <parent>world</parent> inside a model joint.
+    -->
+    <joint name="world_fixed" type="fixed">
+      <parent>world</parent>
+      <child>mount</child>
+    </joint>
 
     <joint name="ft_joint" type="fixed">
       <parent>mount</parent>

@@ -207,25 +207,109 @@ def _find_contact_surface(sensor, probe_model: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sensor geometry
+# Sensor geometry — shape-agnostic
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_sensor_shape(sensor):
+    """Extract shape geometry from sensor.params. Returns dict or None.
+
+    Priority order for shape determination:
+      1. Explicit radius+length params           → cylinder
+      2. Explicit shape="cylinder"/"box" param   → use that, get dims from sensor_size/size
+      3. sensor_size/size = [w, d, h] fallback:
+           w != d (>5% difference)               → box
+           w == d but radius param also exists   → cylinder (diameter check)
+           w == d, no radius param               → AMBIGUOUS: default to box with warning.
+             A square sensor_size like [0.152,0.152,0.029] is almost certainly a box
+             force plate, not a cylinder. Only classify as cylinder if explicitly told.
+
+    Returned dict keys:
+      shape           "box" | "cylinder"
+      height_m        total body height (metres)
+      safe_xy_radius  largest circle fully inside active area × 0.80 margin
+      width_m         (box) full x size
+      depth_m         (box) full y size
+      radius_m        (cylinder) outer radius
+    """
+    # ── 1. explicit radius + length params ───────────────────────────
+    r_raw = sensor.params.get("radius")
+    l_raw = sensor.params.get("length")
+    if r_raw is not None and l_raw is not None:
+        r, l = float(r_raw), float(l_raw)
+        logger.info(f"  Shape: cylinder  r={r*1000:.1f}mm  l={l*1000:.1f}mm  "
+                    f"[from radius+length params]")
+        return {"shape": "cylinder", "height_m": l,
+                "safe_xy_radius": r * 0.80, "radius_m": r}
+
+    # ── 2. explicit shape string param ───────────────────────────────
+    explicit_shape = (sensor.params.get("shape") or "").strip().lower()
+
+    # ── 3. sensor_size / size list ───────────────────────────────────
+    raw = sensor.params.get("sensor_size") or sensor.params.get("size")
+    if raw is None:
+        logger.error("  No shape params found. Sensor SDF needs sensor_size, size, "
+                     "or radius+length params.")
+        return None
+    sz = [float(v) for v in raw]
+    if len(sz) < 3:
+        logger.error(f"  sensor_size has {len(sz)} values, need at least 3: {sz}")
+        return None
+    w, d, h = sz[0], sz[1], sz[2]
+
+    # Explicit shape param overrides heuristic
+    if explicit_shape == "cylinder":
+        r = w / 2.0
+        logger.info(f"  Shape: cylinder  r={r*1000:.1f}mm  h={h*1000:.1f}mm  "
+                    f"[explicit shape=cylinder, sensor_size={[round(v*1000,1) for v in sz]}mm]")
+        return {"shape": "cylinder", "height_m": h,
+                "safe_xy_radius": r * 0.80, "radius_m": r}
+
+    if explicit_shape == "box":
+        logger.info(f"  Shape: box  w={w*1000:.1f}mm  d={d*1000:.1f}mm  h={h*1000:.1f}mm  "
+                    f"[explicit shape=box]")
+        return {"shape": "box", "height_m": h,
+                "safe_xy_radius": min(w, d) / 2.0 * 0.80,
+                "width_m": w, "depth_m": d}
+
+    # Fallback heuristic — only used if shape param is missing from SDF
+    w_d_ratio = abs(w - d) / max(w, d)
+    if w_d_ratio > 0.05:
+        # Clearly rectangular
+        logger.info(f"  Shape: box (w≠d, ratio={w_d_ratio:.2f})  "
+                    f"w={w*1000:.1f}mm d={d*1000:.1f}mm h={h*1000:.1f}mm")
+        return {"shape": "box", "height_m": h,
+                "safe_xy_radius": min(w, d) / 2.0 * 0.80,
+                "width_m": w, "depth_m": d}
+    else:
+        # w ≈ d — could be square box or cylinder.
+        # Default to BOX. A cylinder should have shape=cylinder in its SDF.
+        logger.warning(f"  sensor_size has w≈d ({w*1000:.1f}mm) but no shape param — "
+                       f"defaulting to BOX. Add <shape>cylinder</shape> to sensor SDF "
+                       f"if this is a cylindrical sensor.")
+        return {"shape": "box", "height_m": h,
+                "safe_xy_radius": min(w, d) / 2.0 * 0.80,
+                "width_m": w, "depth_m": d}
+
 
 def _sensor_geo(sensor):
     """Return sensor geometry dict or None.
 
-    With the new model.sdf the body link has <pose>0 0 0.013 0 0 0</pose>,
-    so _get_pose('leptrino_cfs018ca101u') returns the MODEL origin (0,0,0)
-    not the body link centre. We query the body link directly via
-    get_link_state, or fall back to model pose + known body offset.
-    """
-    raw = sensor.params.get("sensor_size") or sensor.params.get("size")
-    if not raw:
-        logger.error("No sensor_size in params")
-        return None
-    sz = [float(v) for v in raw]
+    Queries /gazebo/get_link_state for the body link (most accurate).
+    Falls back to model pose + half-height offset if unavailable.
 
-    # Try to read body link pose directly (most accurate)
+    Returned dict keys:
+      x, y, z    — body link centre in world frame
+      top_z      — z of the top contact surface
+      shape_info — dict from _parse_sensor_shape()
+    """
+    shape = _parse_sensor_shape(sensor)
+    if shape is None:
+        return None
+    h = shape["height_m"]
+
+    # ── query body link pose ──────────────────────────────────────────
     body_z = None
+    x, y = 0.0, 0.0
     try:
         rospy.wait_for_service('/gazebo/get_link_state', timeout=2.0)
         from gazebo_msgs.srv import GetLinkState, GetLinkStateRequest
@@ -237,22 +321,80 @@ def _sensor_geo(sensor):
         if resp.success:
             p = resp.link_state.pose.position
             x, y, body_z = p.x, p.y, p.z
-            logger.info(f"  Body link pose: ({x:.4f},{y:.4f},{body_z:.4f})")
+            logger.info(f"  Body link pose (get_link_state): "
+                        f"({x:.4f},{y:.4f},{body_z:.4f})")
     except Exception as e:
         logger.debug(f"  get_link_state failed: {e}")
 
     if body_z is None:
-        # Fallback: model origin + body offset from SDF (0.013 m)
         ax, ay, az = _get_pose(sensor.sensor_name)
-        x  = ax if ax is not None else 0.0
-        y  = ay if ay is not None else 0.0
-        body_z = (az if az is not None else 0.0) + sz[2] / 2.0
-        logger.info(f"  Body pose (fallback, model+offset): ({x:.4f},{y:.4f},{body_z:.4f})")
+        x      = ax if ax is not None else 0.0
+        y      = ay if ay is not None else 0.0
+        body_z = (az if az is not None else 0.0) + h / 2.0
+        logger.info(f"  Body link pose (fallback model+h/2): "
+                    f"({x:.4f},{y:.4f},{body_z:.4f})")
 
-    top_z = body_z + sz[2] / 2.0
-    logger.info(f"  Sensor centre z={body_z:.4f} top_z={top_z:.4f} "
-                f"size={[round(v*1000,1) for v in sz]}mm")
-    return {"x": x, "y": y, "z": body_z, "top_z": top_z, "size": sz}
+    top_z = body_z + h / 2.0
+    logger.info(f"  top_z={top_z:.4f}  height={h*1000:.1f}mm  "
+                f"safe_xy_radius={shape['safe_xy_radius']*1000:.1f}mm")
+    return {"x": x, "y": y, "z": body_z, "top_z": top_z, "shape_info": shape}
+
+
+def _grid_points(geo: dict, probe_radius_m: float) -> list:
+    """Generate test points covering the sensor active area.
+
+    For both box and cylinder sensors, produces:
+      - 1 centre point
+      - For cylinder: 6 points on a ring at 65% of safe_xy_radius
+      - For box: 8 points on a ring + centre, or a 3x3 grid fitting inside
+        the box with the probe radius as margin
+
+    Each point is (label, world_x, world_y).
+    Ring radius is chosen so the probe (radius probe_radius_m) stays fully
+    inside the sensor boundary with margin.
+    """
+    sx, sy = geo["x"], geo["y"]
+    shape  = geo["shape_info"]
+    safe_r = shape["safe_xy_radius"] - probe_radius_m
+
+    if safe_r <= 0:
+        logger.warning(f"  Probe radius {probe_radius_m*1000:.1f}mm >= "
+                       f"safe_xy_radius {shape['safe_xy_radius']*1000:.1f}mm — "
+                       f"using centre only")
+        return [("C", sx, sy)]
+
+    points = [("C", sx, sy)]
+
+    if shape["shape"] == "cylinder":
+        # 6 points on a hexagonal ring at 65% of safe_r
+        ring_r = safe_r * 0.65
+        for i in range(6):
+            a = math.radians(i * 60)
+            points.append((f"P{i+1}",
+                           sx + ring_r * math.cos(a),
+                           sy + ring_r * math.sin(a)))
+    else:
+        # Box: 3×3 grid with probe_radius margin from edges
+        # Grid spans ±grid_r in both axes
+        w_half = shape["width_m"]  / 2.0 - probe_radius_m
+        d_half = shape["depth_m"]  / 2.0 - probe_radius_m
+        # Use 60% of half-extents for inner ring to stay safely away from edges
+        gw = w_half * 0.60
+        gd = d_half * 0.60
+        offsets = [(-gw, -gd), (0, -gd), (gw, -gd),
+                   (-gw,  0 ),            (gw,  0 ),
+                   (-gw,  gd), (0,  gd), (gw,  gd)]
+        for i, (dx, dy) in enumerate(offsets):
+            points.append((f"P{i+1}", sx + dx, sy + dy))
+
+    logger.info(f"  Grid: {len(points)} points  "
+                f"(shape={shape['shape']}  safe_r={safe_r*1000:.1f}mm  "
+                f"probe_r={probe_radius_m*1000:.1f}mm)")
+    for label, px, py in points:
+        r = math.hypot(px - sx, py - sy)
+        logger.info(f"    {label}: world=({px:.4f},{py:.4f})  "
+                    f"r={r*1000:.1f}mm from centre")
+    return points
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -300,11 +442,12 @@ def tactile_min_force_threshold(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time()-t0, 2); return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
     result["sensor_top_z"] = round(sensor_top, 4)
+    safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET   # 50mm above surface
 
     # Baseline noise
     if progress_cb: progress_cb(12)
-    logger.info("  Baseline noise (probe at z=0.30) ...")
-    _set_pose(probe, sx, sy, 0.30)
+    logger.info(f"  Baseline noise (probe at safe height z={safe_height:.3f}) ...")
+    _set_pose(probe, sx, sy, safe_height)
     time.sleep(1.5)
     noise = _measure_force(sensor, window=0.6, probe_only=True, simulator=simulator)
     result["noise_n"] = round(noise, 4)
@@ -431,61 +574,60 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
         return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
 
-    # Uniformity grid for a cylindrical sensor (radius ~9 mm)
-    # Centre + 6 points on a 5 mm radius ring (well within active area)
-    ring_radius_m = 0.005
-    angles = [0, 60, 120, 180, 240, 300]
-    points = [(0.0, 0.0)]  # centre
-    for ang in angles:
-        rad = math.radians(ang)
-        points.append((ring_radius_m * math.cos(rad), ring_radius_m * math.sin(rad)))
+    # Sphere probe tip offset (sphere radius in tactile_uniformity.world)
+    T2_TIP_OFFSET = 0.002  # metres — sphere radius
 
-    logger.info(f"  Testing {len(points)} grid points:")
-    for i, (dx, dy) in enumerate(points):
-        logger.info(f"    Point {i+1}: x={sx+dx:.4f}, y={sy+dy:.4f}")
+    # Generate grid from actual sensor shape/size
+    grid = _grid_points(geo, probe_radius_m=T2_TIP_OFFSET)
+    safe_height = sensor_top + 0.050 + T2_TIP_OFFSET
 
-    # For uniformity test we use a lower threshold (sphere contact area smaller)
-    UNIFORMITY_THRESHOLD = 0.3  # N
-    PROBE_TIP_OFFSET_SPHERE = 0.002  # sphere radius
+    logger.info(f"  Grid: {len(grid)} points  sensor={geo['shape_info']['shape']}  "
+                f"safe_xy_radius={geo['shape_info']['safe_xy_radius']*1000:.1f}mm")
 
-    for i, (dx, dy) in enumerate(points):
-        px = sx + dx
-        py = sy + dy
-        logger.info(f"--- Point {i+1}/{len(points)}: ({px:.4f}, {py:.4f}) ---")
+    UNIFORMITY_THRESHOLD = 0.3  # N — lower threshold for small sphere probe
+
+    for i, (label, px, py) in enumerate(grid):
+        r_from_centre = math.hypot(px - sx, py - sy)
+        logger.info(f"  ── Point {i+1}/{len(grid)}: {label} "
+                    f"({px:.4f},{py:.4f})  r={r_from_centre*1000:.1f}mm ──")
 
         if progress_cb:
-            progress_cb(10 + int((i / len(points)) * 80))
+            progress_cb(10 + int((i / len(grid)) * 80))
 
-        # Contact search (similar to T1 but with finer step)
-        start_z = sensor_top + 0.020 + PROBE_TIP_OFFSET_SPHERE
-        _set_pose(probe, px, py, start_z)
+        # Move to safe height at this XY first
+        _set_pose(probe, px, py, safe_height)
         time.sleep(0.5)
 
+        # Contact search with 1 mm steps, 50 mm range, debounced x2
         contact_z = None
-        step = 0.0005  # 0.5 mm steps
-        n_steps = int(0.040 / step)
+        start_z = sensor_top + 0.020 + T2_TIP_OFFSET
+        step = 0.001
+        n_steps = int(0.050 / step)
         z = start_z
         consec = 0
+        _set_pose(probe, px, py, start_z)
+        time.sleep(0.5)
         for _ in range(n_steps):
             z -= step
             _set_pose(probe, px, py, z)
-            f = _measure_force(sensor, window=0.2, probe_only=True, simulator=simulator)
-            actual_z = _get_probe_z(probe)
-            if actual_z is None:
-                actual_z = z
-            tip_z = actual_z - PROBE_TIP_OFFSET_SPHERE
-            logger.debug(f"    z={z:.4f} actual={actual_z:.4f} tip={tip_z:.4f} f={f:.4f}N")
+            f = _measure_force(sensor, window=0.3, probe_only=True, simulator=simulator)
+            actual_z = _get_probe_z(probe) or z
+            drift_mm = (actual_z - z) * 1000
+            tip_z    = actual_z - T2_TIP_OFFSET
+            logger.info(f"    cmd={z:.4f} actual={actual_z:.4f} "
+                        f"(drift={drift_mm:+.2f}mm) tip={tip_z:.4f} f={f:.4f}N")
             if f > UNIFORMITY_THRESHOLD:
                 consec += 1
                 if contact_z is None:
                     contact_z = actual_z
                 if consec >= 2:
-                    logger.info(f"    Contact found at z={contact_z:.4f} (f={f:.4f}N)")
+                    logger.info(f"    Contact confirmed: z={contact_z:.4f} f={f:.4f}N")
                     break
             else:
                 consec = 0
                 contact_z = None
         else:
+            logger.warning(f"    No contact found after {n_steps} steps")
             contact_z = None
 
         point_passed = contact_z is not None
@@ -494,15 +636,17 @@ def tactile_response_uniformity(simulator, sensor, progress_cb=None) -> dict:
             result["points_passed"] += 1
 
         result["point_results"].append({
-            "index": i+1,
-            "x": px,
-            "y": py,
+            "index": i + 1,
+            "label": label,
+            "x": round(px, 5),
+            "y": round(py, 5),
+            "r_mm": round(r_from_centre * 1000, 2),
             "passed": point_passed,
             "contact_z": round(contact_z, 5) if contact_z else None,
         })
 
-        # Lift probe high before moving to next point
-        _set_pose(probe, px, py, 0.30)
+        # Lift to safe height before next point
+        _set_pose(probe, px, py, safe_height)
         time.sleep(0.3)
 
     # Overall pass/fail
@@ -560,14 +704,16 @@ def tactile_temporal_stability(simulator, sensor, progress_cb=None) -> dict:
         result["error"] = "No sensor_size in params"
         result["duration"] = round(time.time()-t0, 2); return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET
 
-    # Baseline noise (same as T1)
+    # Baseline noise
     if progress_cb: progress_cb(12)
-    logger.info("  Baseline noise (probe at z=0.30) ...")
-    _set_pose(probe, sx, sy, 0.30)
+    logger.info(f"  Baseline noise (probe at safe height z={safe_height:.3f}) ...")
+    _set_pose(probe, sx, sy, safe_height)
     time.sleep(1.5)
     noise = _measure_force(sensor, window=0.6, probe_only=True, simulator=simulator)
-    logger.info(f"  Filtered noise = {noise:.4f} N")
+    logger.info(f"  Filtered noise = {noise:.4f} N  "
+                f"({'OK' if noise < 0.3 else 'HIGH — check collision names'})")
 
     # Phase 1: find surface (exactly as T1)
     if progress_cb: progress_cb(15)
@@ -696,6 +842,7 @@ def tactile_peak_load_response(simulator, sensor, progress_cb=None) -> dict:
         result["duration"] = round(time.time() - t0, 2)
         return result
     sx, sy, sensor_top = geo["x"], geo["y"], geo["top_z"]
+    safe_height = sensor_top + 0.050 + PROBE_TIP_OFFSET
 
     # Phase 1: Find contact surface
     logger.info("  Phase 1: Finding contact surface...")
