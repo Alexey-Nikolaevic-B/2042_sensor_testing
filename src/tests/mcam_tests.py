@@ -1859,9 +1859,19 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         except Exception: pass
 
     # ── Step 2: Binary search for max visible distance ────────────────
-    # Start from a known visible point, find where cube disappears
+    # Start from a known visible point, find where cube disappears.
+    #
+    # Search ceiling = far_target + 10 m (per user request).  Rationale:
+    # a well-behaved camera should clip exactly at <far>, so testing up
+    # to 10 m past that gives a small diagnostic window:
+    #   - max_visible ≈ far_target      → clipping works
+    #   - max_visible == far_target+10  → clipping broken (plugin ignores
+    #     <far>) — reported value in UI becomes meaningful instead of a
+    #     fixed 600 m cap that told the user nothing about their SDF.
+    # The previous cap (600 m, or far*1.2) was arbitrary and hid real
+    # clipping failures behind a generic "visible at 526 m" result.
     search_lo = near_check_x
-    search_hi = min(600.0, far_target * 1.2)  # cap at 600m (sub-pixel limit)
+    search_hi = float(far_target) + 10.0
 
     # Quick check: is cube visible at search_hi?
     if _is_visible(search_hi):
