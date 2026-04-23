@@ -240,19 +240,24 @@ class SensorRepository(QObject):
         s = self._sensors.get(sensor_id)
         if s is None:
             raise KeyError(f"No sensor with id {sensor_id!r}")
-        # Build kwargs — only pass topics if db.update_sensor supports it
+        # Build kwargs — only pass topics if db.update_sensor supports it.
+        # Only include a field in the DB call if it's EXPLICITLY present
+        # in `fields` (checked with `in`, not `.get()` which would return
+        # None for both "absent" and "present but None").  This keeps
+        # callers like `core.update_sensor_params({"params": ...})` from
+        # implicitly asserting "description=None, image_path=None, …"
+        # and — combined with the description-preservation logic in the
+        # add-sensor dialog — prevents accidental metadata loss when
+        # editing params.
         import inspect as _inspect
 
         _upd_sig = _inspect.signature(db.update_sensor).parameters
-        _kwargs = dict(
-            sensor_name=s.name,
-            description=fields.get("description"),
-            image_path=fields.get("image_path"),
-            params=fields.get("params"),
-            sdf_path=fields.get("sdf_path"),
-        )
-        if "topics" in _upd_sig:
-            _kwargs["topics"] = fields.get("topics")
+        _kwargs = {"sensor_name": s.name}
+        for _k in ("description", "image_path", "params", "sdf_path"):
+            if _k in fields:
+                _kwargs[_k] = fields[_k]
+        if "topics" in _upd_sig and "topics" in fields:
+            _kwargs["topics"] = fields["topics"]
         db.update_sensor(**_kwargs)
         s.update_fields(fields)
         self.sensor_updated.emit(s.to_dict())

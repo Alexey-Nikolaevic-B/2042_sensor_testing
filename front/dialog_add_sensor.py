@@ -132,12 +132,25 @@ class AddSensorDialog(QDialog):
                 else:
                     shutil.copy2(self._image_source, image_dest)
 
+        # Description preservation rule:
+        #   - If the user actually edited the description field, take
+        #     what's in the widget (including an empty string — that's
+        #     an explicit "clear this").
+        #   - If the user did not touch the field in edit-mode, keep
+        #     the original description from _sensor_data.  This guards
+        #     against accidentally wiping a long description while
+        #     only editing a single param.
+        if self.input_description.document().isModified():
+            desc_final = self.input_description.toPlainText().strip()
+        else:
+            desc_final = self._sensor_data.get("description", "")
+
         result = {
             "name": name,
             "type": self._detected_type or "unknown",
             "sdf_path": _to_relative(sdf_dest),
             "image_path": _to_relative(image_dest),
-            "description": self.input_description.toPlainText().strip(),
+            "description": desc_final,
             "params": dict(self._params),
             "topics": self._collect_topics(),
         }
@@ -229,6 +242,13 @@ class AddSensorDialog(QDialog):
         self._set_detected_type(d.get("type", "unknown"))
         self._populate_params(d.get("params", {}))
         self.input_description.setPlainText(d.get("description", ""))
+        # Reset the "modified" flag on the document so we can tell in
+        # _on_save whether the user actually touched the description
+        # field.  Without this, untouched edits still round-trip the
+        # description through .toPlainText() and — if the widget happens
+        # to show empty due to timing or focus quirks — overwrite the
+        # stored description with an empty string on save.
+        self.input_description.document().setModified(False)
         for t in d.get("topics", []):
             self._add_topic_row(t)
 
