@@ -260,6 +260,18 @@ class SensorRepository(QObject):
             _kwargs["topics"] = fields["topics"]
         db.update_sensor(**_kwargs)
         s.update_fields(fields)
+        # Refresh the in-memory Sensor from DB.  Without this, the
+        # `tests` list (including each test's description/display_name
+        # from SensorTypeTests, fetched via LEFT JOIN in
+        # get_latest_test_results) stays frozen at whatever was in the
+        # DB at APP STARTUP.  If anything — the user, a CLI script,
+        # another window — wrote to SensorTypeTests after launch, those
+        # changes would never reach col_3 until the next restart.  The
+        # visible symptom is exactly "I edited sensor params and now
+        # the test descriptions are gone / stale" because load_sensor
+        # reads tests straight out of in-memory _data["tests"].
+        self._reload_sensor_from_db(sensor_id)
+        s = self._sensors.get(sensor_id, s)
         self.sensor_updated.emit(s.to_dict())
         return s.to_dict()
 

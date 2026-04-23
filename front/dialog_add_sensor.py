@@ -132,18 +132,30 @@ class AddSensorDialog(QDialog):
                 else:
                     shutil.copy2(self._image_source, image_dest)
 
-        # Description preservation rule:
-        #   - If the user actually edited the description field, take
-        #     what's in the widget (including an empty string — that's
-        #     an explicit "clear this").
-        #   - If the user did not touch the field in edit-mode, keep
-        #     the original description from _sensor_data.  This guards
-        #     against accidentally wiping a long description while
-        #     only editing a single param.
-        if self.input_description.document().isModified():
-            desc_final = self.input_description.toPlainText().strip()
+        # Description preservation rule (strict):
+        #   In edit mode, a non-empty description in the DB MUST NOT be
+        #   silently replaced by an empty one at save time.  The only
+        #   way to change the description is to TYPE A NEW ONE — which
+        #   by definition makes the widget non-empty.
+        #
+        # Why strict: the previous rule used QTextDocument.isModified()
+        # to detect user edits, but that flag can flip to True from
+        # purely cosmetic events (focus change, style recomputation,
+        # programmatic setPlainText internals).  An isModified=True with
+        # an empty widget then wiped the real description.
+        #
+        # Trade-off:
+        #   - Users can't clear a description via the dialog.  That's
+        #     OK — it's a rare operation and can be done by editing DB
+        #     or re-adding the sensor.  Accidentally losing a carefully
+        #     written description while editing one param is far more
+        #     painful than not being able to blank it from the UI.
+        widget_text = self.input_description.toPlainText().strip()
+        original = (self._sensor_data.get("description") or "").strip()
+        if self._edit_mode and not widget_text and original:
+            desc_final = original
         else:
-            desc_final = self._sensor_data.get("description", "")
+            desc_final = widget_text
 
         result = {
             "name": name,
