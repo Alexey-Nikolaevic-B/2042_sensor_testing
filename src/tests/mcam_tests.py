@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import time
+import math
 import xml.etree.ElementTree as ET
 from math import atan, degrees
 from pathlib import Path
@@ -54,10 +55,13 @@ def _mono_build_ctx(sensor):
     ctx.C4_MIN_PIXELS = 1500
     ctx.C7_CASES = {"occ_25": 0.20, "occ_50": 0.10}
     ctx.C7_MIN_PIXELS = 800
-    ctx.C9_STEP = 0.05
-    ctx.C9_MAX_Y = 4.0
+    ctx.C9_CUBE_H_NAME = "fov_cube_h"
+    ctx.C9_CUBE_V_NAME = "fov_cube_v"
+    ctx.C9_MAX_Y       = 4.0
+    ctx.C9_MAX_Z       = 4.0
     ctx.C9_MIN_CONTOUR_AREA = 120
-    ctx.C9_SPHERE_RADIUS_M = 0.1
+    ctx.C9_HALF_SIZE_H = 0.01
+    ctx.C9_HALF_SIZE_V = 0.01
     ctx.C10_NEAR_START_X = 0.05
     ctx.C10_NEAR_SEARCH_END_X = 2.0
     ctx.C10_NEAR_STEP = 0.01
@@ -1753,24 +1757,44 @@ def _mono_c9_fov_test(ctx, simulator) -> Dict[str, Any]:
     return {"id": "C9", "passed": True, "metrics": metrics}
 
 
+import logging
+# assuming the module has a logger; otherwise create one:
+logger = logging.getLogger(__name__)
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Half the X‑size of the clip_cube box (world file now uses 0.04 m thickness)
+CLIP_CUBE_HALF_X = 0.02
+
+
 def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
-    clip_cfg = _mono__read_clip_from_sdf(ctx, ctx.sensor_sdf_path)
-    near_target = (
-        float(clip_cfg["near_m"])
-        if clip_cfg.get("near_m") is not None
-        else float(ctx.clip_near)
-    )
-    far_target = (
-        float(clip_cfg["far_m"])
-        if clip_cfg.get("far_m") is not None
-        else float(ctx.clip_far)
+    # ------------------------------------------------------------------
+    # 1.  Read near / far from sensor.params (the reliable source)
+    # ------------------------------------------------------------------
+    sensor = ctx.sensor
+    near_target = float(sensor.params.get("near", None) or ctx.clip_near)
+    far_target  = float(sensor.params.get("far",  None) or ctx.clip_far)
+
+    logger.info(
+        "C10: sensor.params near=%s far=%s  =>  near_target=%.3f m  far_target=%.3f m",
+        sensor.params.get("near"), sensor.params.get("far"),
+        near_target, far_target,
     )
 
-    # Simplified approach: check visibility at a few key distances,
-    # then binary-search for the max visible distance.
-    # Pass criteria: cube visible at near_target and max_visible >= min_far_m.
-    min_far_m = min(50.0, far_target * 0.3)  # reasonable minimum far distance
+    FAR_CLIP_MARGIN_M = 2.0          # pass/fail margin for far
+    NEAR_CLIP_MARGIN_M = 0.05        # pass/fail margin for near (must be invisible this far in front)
+    CLIP_CUBE_HALF_X = 0.02          # half of the 0.04 m X dimension
 
+    # ------------------------------------------------------------------
+    # 2.  Metrics dict
+    # ------------------------------------------------------------------
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c10_clipping_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -1778,10 +1802,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         "scene_open_success": False,
         "topic_mapping_changed": False,
         "display_env": {},
-        "near_clip_target_m": float(near_target),
-        "far_clip_target_m": float(far_target),
-        "clip_source": clip_cfg,
-        "min_far_required_m": float(min_far_m),
+        "near_clip_target_m": near_target,
+        "far_clip_target_m": far_target,
+        "clip_source": "sensor.params / ctx fallback",
         "min_red_pixels": int(ctx.C10_MIN_RED_PIXELS),
         "status": "ERROR",
         "error_reason": "",
@@ -1794,6 +1817,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
     metrics["display_env"] = _mono__ensure_render_display_env(ctx)
     _store_c10_diag()
 
+    # ------------------------------------------------------------------
+    # 3.  Open scene and get image topic
+    # ------------------------------------------------------------------
     try:
         _mono__open_test_scene(ctx, simulator, "c10_clipping_test")
     except Exception as exc:
@@ -1812,6 +1838,9 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
         _store_c10_diag()
         raise RuntimeError(f"Model not spawned: {ctx.C10_CUBE_NAME}")
 
+    # ------------------------------------------------------------------
+    # 4.  Warmup image
+    # ------------------------------------------------------------------
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
@@ -1824,105 +1853,237 @@ def _mono_c10_clipping_test(ctx, simulator) -> Dict[str, Any]:
     if _c10_pcb:
         try: _c10_pcb(30)
         except Exception: pass
-    print(f"[DEBUG C10] near_target={near_target:.3f}m  far_target={far_target:.3f}m  min_far={min_far_m:.1f}m")
 
+    logger.info("C10: near_target=%.3f m  far_target=%.3f m  near_margin=%.3f m  far_margin=%.1f m",
+                near_target, far_target, NEAR_CLIP_MARGIN_M, FAR_CLIP_MARGIN_M)
+
+    # ------------------------------------------------------------------
+    # 5.  Visibility helper (plane centered vertically at z = 0)
+    # ------------------------------------------------------------------
     def _is_visible(x: float, settle_s: float = 0.2) -> bool:
         nonlocal prev_stamp_s
-        _mono__move_and_settle(ctx, simulator, ctx.C10_CUBE_NAME, x=float(x), y=0.0, z=0.25, settle_s=settle_s)
+        _mono__move_and_settle(ctx, simulator, ctx.C10_CUBE_NAME,
+                               x=float(x), y=0.0, z=0.0, settle_s=settle_s)
         msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
         red_stats = _mono__red_stats(ctx, frame)
         visible = bool(red_stats["visible_by_pixels"])
-        print(f"[DEBUG C10] x={x:.3f}m  red_pixels={int(red_stats['red_pixels'])}  visible={visible}")
+        logger.debug("C10 is_visible: x=%.3f m  red_pixels=%d  visible=%s",
+                     x, int(red_stats['red_pixels']), visible)
         return visible
 
-    # ── Step 1: Check near clip — cube visible at near_target ─────────
-    near_check_x = max(0.3, near_target + 0.1)  # slightly beyond near clip
-    near_visible = _is_visible(near_check_x)
-    metrics["near_check_x_m"] = near_check_x
-    metrics["near_visible"] = near_visible
+    # ------------------------------------------------------------------
+    # 6.  Near clip check – must be visible beyond, invisible in front
+    # ------------------------------------------------------------------
 
-    if not near_visible:
-        # Try a few more distances to find where cube appears
-        for try_x in [0.5, 1.0, 2.0]:
+    # 6a.  Safe visible position: cube entire volume beyond near plane
+    near_safe_x = max(0.3, near_target + CLIP_CUBE_HALF_X + 0.05)
+    near_visible_safe = _is_visible(near_safe_x, settle_s=1.0)
+    metrics["near_safe_x_m"] = near_safe_x
+    metrics["near_visible_safe"] = near_visible_safe
+    logger.info("C10 near safe check: x=%.3f m  visible=%s", near_safe_x, near_visible_safe)
+
+    # 6b.  Dangerously close position: cube completely in front of near plane
+    near_danger_x = max(0.01, near_target - CLIP_CUBE_HALF_X - NEAR_CLIP_MARGIN_M)
+    if near_danger_x >= near_safe_x:
+        # If margin pushes it too close, use a hardcoded minimal safe distance
+        near_danger_x = 0.05
+    # Move to the dangerous position from the safe position (small jump)
+    near_visible_danger = _is_visible(near_danger_x, settle_s=1.0)
+    metrics["near_danger_x_m"] = near_danger_x
+    metrics["near_visible_danger"] = near_visible_danger
+    logger.info("C10 near danger check: x=%.3f m  visible=%s", near_danger_x, near_visible_danger)
+
+    # Near clip is OK only if the object is invisible when too close AND visible when safely beyond
+    near_ok = near_visible_safe and (not near_visible_danger)
+
+    # 6c.  Exact near transition diagnostic (binary search)
+    min_visible_near = None
+    if near_visible_safe and not near_visible_danger:
+        # Good sensors: find the precise boundary
+        lo = near_danger_x
+        hi = near_safe_x
+        # Binary search for the smallest x where cube is visible
+        while (hi - lo) > 0.01:   # 1 cm precision
+            mid = (lo + hi) / 2.0
+            if _is_visible(mid, settle_s=0.3):
+                hi = mid          # visible at mid, push upper bound down
+            else:
+                lo = mid
+        min_visible_near = hi     # first visible distance
+        logger.info("C10 near transition: first visible at x=%.4f m", min_visible_near)
+    elif not near_visible_safe:
+        # Cube not even visible at safe distance – near clip broken (cuts too far)
+        # Try to find where it becomes visible by moving further out
+        for try_x in [near_target + 0.5, near_target + 1.0, near_target + 2.0]:
             if _is_visible(try_x):
-                near_visible = True
-                near_check_x = try_x
-                metrics["near_check_x_m"] = try_x
-                metrics["near_visible"] = True
+                min_visible_near = try_x
+                logger.info("C10 near became visible only at x=%.3f m", try_x)
                 break
+        if min_visible_near is None:
+            logger.warning("C10 near check: cube never became visible")
+    else:
+        # near_visible_safe True but near_visible_danger also True → clip broken (doesn't cut)
+        # min_visible_near can be set to the danger_x since it was visible even there
+        min_visible_near = near_danger_x
+        logger.info("C10 near clip broken: visible even at x=%.3f m", near_danger_x)
 
-    near_ok = near_visible
+    metrics["near_min_visible_x"] = min_visible_near
+
     if _c10_pcb:
         try: _c10_pcb(50)
         except Exception: pass
 
-    # ── Step 2: Binary search for max visible distance ────────────────
-    # Start from a known visible point, find where cube disappears.
-    #
-    # Search ceiling = far_target + 10 m (per user request).  Rationale:
-    # a well-behaved camera should clip exactly at <far>, so testing up
-    # to 10 m past that gives a small diagnostic window:
-    #   - max_visible ≈ far_target      → clipping works
-    #   - max_visible == far_target+10  → clipping broken (plugin ignores
-    #     <far>) — reported value in UI becomes meaningful instead of a
-    #     fixed 600 m cap that told the user nothing about their SDF.
-    # The previous cap (600 m, or far*1.2) was arbitrary and hid real
-    # clipping failures behind a generic "visible at 526 m" result.
-    search_lo = near_check_x
-    search_hi = float(far_target) + 10.0
-
-    # Quick check: is cube visible at search_hi?
-    if _is_visible(search_hi):
-        # Visible even at max search distance — far clip is beyond render limit
-        max_visible_x = search_hi
-        print(f"[DEBUG C10] cube visible at max search distance {search_hi:.1f}m")
+    # ------------------------------------------------------------------
+    # 7.  3‑point diagnostic check around far_target (moving outward)
+    #     Start from the current position (which is near_danger_x or near_safe_x?
+    #     To be safe, move back to near_safe_x first so we are definitely visible.
+    # ------------------------------------------------------------------
+    if not near_visible_safe:
+        # If near safe was not visible, we can't proceed with far test meaningfully
+        # but let's still try; move to a known far position that is visible if possible
+        # Actually we already searched for a visible point; if none, far test will fail anyway.
+        far_start_x = near_target + 2.0   # arbitrary safe distance
     else:
-        # Binary search between last visible and first not visible
-        lo, hi = search_lo, search_hi
-        print(f"[DEBUG C10] binary search for far boundary: [{lo:.1f}, {hi:.1f}]")
-        while (hi - lo) > 1.0:
-            mid = (lo + hi) / 2.0
-            if _is_visible(mid, settle_s=0.15):
-                lo = mid
-            else:
-                hi = mid
-        max_visible_x = lo
+        far_start_x = near_safe_x
 
-    metrics["x_near_m"] = near_check_x
-    metrics["x_far_m"] = max_visible_x
-    far_ok = max_visible_x >= min_far_m
+    # Ensure cube is at a visible point before starting outward sweep
+    _is_visible(far_start_x, settle_s=1.0)
 
+    points = [far_target - 0.5, far_target, far_target + 0.1]
+    logger.info("C10 3‑point check (moving outward): %s", points)
+    vis_3pt = []
+    for i, p in enumerate(points):
+        settle = 1.0 if i == 0 else 0.5
+        v = _is_visible(p, settle_s=settle)
+        vis_3pt.append(v)
+    logger.info("C10 3‑point visibility: %s", vis_3pt)
+
+    max_visible_3pt = None
+    for p, v in zip(points, vis_3pt):
+        if v:
+            max_visible_3pt = p
+
+    # ------------------------------------------------------------------
+    # 8.  Far‑clip pass/fail check (cube at far_target + margin)
+    # ------------------------------------------------------------------
+    far_check_x = far_target + FAR_CLIP_MARGIN_M
+    logger.info("C10 far check: moving cube to x=%.3f m (far_target + margin)", far_check_x)
+    far_visible = _is_visible(far_check_x, settle_s=0.5)
+    metrics["far_check_x_m"] = far_check_x
+    metrics["far_visible"] = far_visible
+    logger.info("C10 far check: x=%.3f m  visible=%s", far_check_x, far_visible)
+
+    # ------------------------------------------------------------------
+    # 9.  Determine max_visible_x for far
+    # ------------------------------------------------------------------
+    max_visible_x = None
+    if max_visible_3pt is not None and not vis_3pt[-1]:
+        max_visible_x = max_visible_3pt
+        logger.info("C10 3‑point resolved: max visible = %.2f m", max_visible_x)
+    elif far_visible:
+        logger.info("C10 far clip broken – running binary search for actual limit")
+    else:
+        logger.info("C10 3‑point unresolvable, running binary search from near")
+
+    if max_visible_x is None:
+        search_lo = far_start_x
+        search_hi = far_target + 10.0
+        if _is_visible(search_hi):
+            max_visible_x = search_hi
+            logger.info("C10 binary: visible at search ceiling %.1f m", search_hi)
+        else:
+            lo, hi = search_lo, search_hi
+            step_threshold = 0.5 if not far_visible else 1.0
+            while (hi - lo) > step_threshold:
+                mid = (lo + hi) / 2.0
+                if _is_visible(mid, settle_s=0.15):
+                    lo = mid
+                else:
+                    hi = mid
+            max_visible_x = lo
+            logger.info("C10 binary result: max visible = %.2f m", max_visible_x)
+
+    # ------------------------------------------------------------------
+    # 10.  Final pass/fail evaluation – Russian descriptions
+    # ------------------------------------------------------------------
+    far_ok = not far_visible
+    metrics["near_ok"] = near_ok
+    metrics["far_ok"] = far_ok
+    metrics["x_near_min_visible"] = min_visible_near
+    metrics["x_far_max_visible"] = max_visible_x
     metrics["checks"] = {
-        "near_visible": bool(near_ok),
-        "far_max_visible_m": float(max_visible_x),
-        "far_min_required_m": float(min_far_m),
-        "far_ok": bool(far_ok),
+        "near_safe_visible": near_visible_safe,
+        "near_danger_invisible": not near_visible_danger,
+        "near_ok": near_ok,
+        "far_visible": far_visible,
+        "far_max_visible_m": max_visible_x,
+        "far_ok": far_ok,
     }
 
-    print(
-        f"[DEBUG C10] result: near_visible={near_ok} at {near_check_x:.3f}m, "
-        f"max_visible={max_visible_x:.1f}m (need >={min_far_m:.1f}m, ok={far_ok})"
-    )
+    logger.info("C10 result: near_ok=%s, far_ok=%s, near_trans=%.4f m, far_trans=%.2f m -> %s",
+                near_ok, far_ok, min_visible_near or 0.0, max_visible_x or 0.0,
+                "PASS" if (near_ok and far_ok) else "FAIL")
 
-    metrics["status"] = "PASS" if (near_ok and far_ok) else "FAIL"
-    if not (near_ok and far_ok):
+    if near_ok and far_ok:
+        desc = (
+            f"Ближняя плоскость отсечения (near) работает: "
+            f"объект становится видимым на расстоянии {min_visible_near:.3f} м "
+            f"(задано near={near_target:.3f} м). "
+            f"Дальняя плоскость (far) работает: "
+            f"объект виден вплоть до {max_visible_x:.1f} м "
+            f"и пропадает на {far_check_x:.1f} м "
+            f"(задано far={far_target:.1f} м, проверочный запас +{FAR_CLIP_MARGIN_M:.1f} м)."
+        )
+        metrics["status"] = "PASS"
+        _store_c10_diag()
+        return {"id": "C10", "passed": True, "metrics": metrics, "description": desc}
+
+    # Failure path – Russian description
+    if not near_ok:
+        if not near_visible_safe:
+            metrics["error_reason"] = (
+                f"Ближняя плоскость отсечения (near) НЕ работает: "
+                f"объект не виден даже на безопасном расстоянии {near_safe_x:.2f} м "
+                f"(ожидалась видимость за near={near_target:.3f} м)."
+            )
+        else:
+            metrics["error_reason"] = (
+                f"Ближняя плоскость отсечения (near) НЕ работает: "
+                f"объект всё ещё виден на слишком близком расстоянии {near_danger_x:.3f} м "
+                f"(должен быть невидим перед near={near_target:.3f} м)."
+            )
+    else:
         metrics["error_reason"] = (
-            f"clipping_mismatch: near_visible={near_ok}, "
-            f"max_visible={max_visible_x:.1f}m (need >={min_far_m:.1f}m)"
+            f"Дальняя плоскость отсечения (far) НЕ работает: "
+            f"объект всё ещё виден на расстоянии {far_check_x:.1f} м "
+            f"(должен был исчезнуть за far={far_target:.1f} м, "
+            f"проверочный запас +{FAR_CLIP_MARGIN_M:.1f} м)."
         )
+    metrics["status"] = "FAIL"
     _store_c10_diag()
-    if not (near_ok and far_ok):
-        raise AssertionError(
-            f"C10 failed: near_visible={near_ok} at {near_check_x:.3f}m, "
-            f"max_visible={max_visible_x:.1f}m (need >={min_far_m:.1f}m)"
-        )
 
-    return {"id": "C10", "passed": True, "metrics": metrics}
+    logger.warning("C10 FAILED: %s", metrics["error_reason"])
+
+    return {
+        "id": "C10",
+        "passed": False,
+        "metrics": metrics,
+        "description": metrics["error_reason"],
+    }
 
 
 def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
+    """
+    Проверка стабильности FPS в течение длительного окна (обычно 60 с).
+    Оценивается фактическая частота, джиттер (P95 отклонения от медианы
+    интервалов) и отсутствие дропов (пропусков кадров > 2×медиана).
+    """
+    logger.info("=" * 60)
+    logger.info("  C11: FPS Stability Test")
+    logger.info("=" * 60)
+
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c11_fps_stability_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -1939,55 +2100,52 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         "error_reason": "",
     }
 
-    def _store_c11_diag() -> None:
-        _mono__set_test_diagnostics(
-            ctx,
-            c11_fps_stability={
-                "metrics": dict(metrics),
-            },
-        )
-        return None
+    def _store_c11_diag():
+        _mono__set_test_diagnostics(ctx, c11_fps_stability={"metrics": dict(metrics)})
 
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(
-        ctx,
-    )
+    metrics["display_env"] = _mono__ensure_render_display_env(ctx)
     _store_c11_diag()
 
+    # ------------------------------------------------------------------
+    # 1.  Открываем сцену
+    # ------------------------------------------------------------------
     try:
         _mono__open_test_scene(ctx, simulator, "c11_fps_stability_test")
-    except Exception:
-        resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
-        metrics["resolved_topic"] = str(resolved_topic)
-        metrics["topic_mapping_changed"] = bool(
-            str(resolved_topic) != str(ctx.IMAGE_TOPIC)
-        )
-        metrics["scene_open_success"] = False
-        reason = "unknown"
-        if isinstance(scene_diag, dict):
-            reason = str(scene_diag.get("reason", "unknown"))
-        metrics["error_reason"] = f"scene_open_failed:{reason}"
+    except Exception as exc:
+        metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c11_diag()
-        raise
+        raise  # wrapper превратит в passed=False
 
     metrics["scene_open_success"] = True
-    resolved_topic, _ = _mono__resolved_image_topic(ctx, simulator)
+    resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
     _store_c11_diag()
 
+    logger.info("C11: scene open OK, topic=%s", resolved_topic)
+
+    # ------------------------------------------------------------------
+    # 2.  Прогрев – одно изображение для подтверждения работы камеры
+    # ------------------------------------------------------------------
     try:
         _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
-        metrics["error_reason"] = f"warmup_image_receive_failed:{exc}"
+        metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c11_diag()
-        raise RuntimeError(
-            f"Failed to receive warmup image for C11 from topic {resolved_topic}: {exc}"
-        ) from exc
+        return {
+            "id": "C11",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Не удалось получить первый кадр: {exc}",
+        }
 
+    logger.info("C11: первое изображение получено, начинаем накопление меток")
+
+    # ------------------------------------------------------------------
+    # 3.  Сбор временных меток в течение duration_target_s
+    # ------------------------------------------------------------------
     timestamps: List[float] = []
-    first_msg: Dict[str, Optional[Image]] = {"msg": None}
-    last_msg: Dict[str, Optional[Image]] = {"msg": None}
     header_stamp_missing_count = 0
 
     def _on_image(msg: Image) -> None:
@@ -1997,13 +2155,11 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
             header_stamp_missing_count += 1
             stamp = float(rospy.Time.now().to_sec())
         timestamps.append(stamp)
-        if first_msg["msg"] is None:
-            first_msg["msg"] = msg
-        last_msg["msg"] = msg
 
     sub = rospy.Subscriber(resolved_topic, Image, _on_image, queue_size=2000)
     started_wall = time.perf_counter()
     _c11_pcb = getattr(ctx, "_progress_cb", None)
+
     try:
         while (time.perf_counter() - started_wall) < float(ctx.C11_DURATION_S):
             time.sleep(0.1)
@@ -2011,87 +2167,88 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
                 elapsed = time.perf_counter() - started_wall
                 pct = 25 + int(65 * elapsed / float(ctx.C11_DURATION_S))
                 try: _c11_pcb(min(pct, 90))
-                except Exception: pass
+                except: pass
     finally:
         sub.unregister()
 
-    metrics["duration_actual_s"] = round(time.perf_counter() - started_wall, 4)
-    metrics["raw_frames_captured"] = int(len(timestamps))
-    metrics["header_stamp_missing_count"] = int(header_stamp_missing_count)
-    metrics["first_raw_stamp_s"] = float(timestamps[0]) if timestamps else None
-    metrics["last_raw_stamp_s"] = float(timestamps[-1]) if timestamps else None
+    duration_actual = time.perf_counter() - started_wall
+    logger.info("C11: сбор завершён, длительность=%.1f с, получено %d сырых меток",
+                duration_actual, len(timestamps))
+
+    metrics["duration_actual_s"] = round(duration_actual, 4)
+    metrics["raw_frames_captured"] = len(timestamps)
+    metrics["header_stamp_missing_count"] = header_stamp_missing_count
+
+    # ------------------------------------------------------------------
+    # 4.  Фильтрация: только монотонные метки, исключение warm‑up
+    # ------------------------------------------------------------------
     if len(timestamps) < 2:
-        metrics["error_reason"] = f"not_enough_frames_captured:{len(timestamps)}"
+        metrics["error_reason"] = f"not_enough_frames:{len(timestamps)}"
         _store_c11_diag()
-        raise AssertionError(
-            f"C11 failed: not enough frames captured ({len(timestamps)})"
-        )
+        return {
+            "id": "C11",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Слишком мало кадров ({len(timestamps)}), невозможно оценить FPS.",
+        }
 
     monotonic_stamps: List[float] = []
     for ts in timestamps:
         if not monotonic_stamps or ts > monotonic_stamps[-1]:
             monotonic_stamps.append(float(ts))
 
-    metrics["monotonic_frames_captured"] = int(len(monotonic_stamps))
-    metrics["non_monotonic_dropped"] = int(len(timestamps) - len(monotonic_stamps))
-    if len(monotonic_stamps) < 2:
-        metrics["error_reason"] = "no_monotonic_timestamp_sequence"
-        _store_c11_diag()
-        raise AssertionError("C11 failed: no monotonic timestamp sequence")
+    metrics["monotonic_frames_captured"] = len(monotonic_stamps)
+    metrics["non_monotonic_dropped"] = len(timestamps) - len(monotonic_stamps)
 
-    warmup_frames = int(
-        max(1, round(float(ctx.update_rate) * float(ctx.C11_WARMUP_SECONDS)))
-    )
-    if len(monotonic_stamps) <= (warmup_frames + 1):
-        metrics["error_reason"] = (
-            f"not_enough_frames_after_warmup:{len(monotonic_stamps)} total,warmup={warmup_frames}"
-        )
+    if len(monotonic_stamps) < 2:
+        metrics["error_reason"] = "no_monotonic_sequence"
         _store_c11_diag()
-        raise AssertionError(
-            f"C11 failed: not enough frames after warmup ({len(monotonic_stamps)} total, warmup={warmup_frames})"
-        )
+        return {
+            "id": "C11",
+            "passed": False,
+            "metrics": metrics,
+            "description": "Нет монотонной последовательности меток.",
+        }
+
+    warmup_frames = int(max(1, round(float(ctx.update_rate) * float(ctx.C11_WARMUP_SECONDS))))
+    if len(monotonic_stamps) <= (warmup_frames + 1):
+        metrics["error_reason"] = f"not_enough_after_warmup:{len(monotonic_stamps)}"
+        _store_c11_diag()
+        return {
+            "id": "C11",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Недостаточно кадров после разогрева (всего {len(monotonic_stamps)}, "
+                           f"требуется > {warmup_frames}).",
+        }
 
     eval_stamps = monotonic_stamps[warmup_frames:]
-    total_dt = float(eval_stamps[-1] - eval_stamps[0])
+    total_dt = eval_stamps[-1] - eval_stamps[0]
     if total_dt <= 0.0:
-        metrics["error_reason"] = f"invalid_timestamps_interval:{total_dt}"
+        metrics["error_reason"] = f"invalid_interval:{total_dt}"
         _store_c11_diag()
-        raise AssertionError(f"C11 failed: invalid timestamps interval ({total_dt})")
+        return {
+            "id": "C11",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Некорректный интервал меток ({total_dt:.3f} с).",
+        }
 
     n_frames = len(eval_stamps)
-    fps_actual = float((n_frames - 1) / total_dt)
-    ideal_dt = float(1.0 / float(ctx.update_rate))
+    fps_actual = (n_frames - 1) / total_dt
+    ideal_dt = 1.0 / float(ctx.update_rate)
     deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
 
-    # Reference frame-time for jitter / dropout detection.
-    #
-    # Previously we measured |dt - ideal_dt| where ideal_dt came from the
-    # SDF's <update_rate>.  In practice libgazebo_ros_camera almost never
-    # honours that rate exactly — at 5 Hz configured we often see 13 Hz
-    # actual publication — so |dt - ideal_dt| was dominated by the
-    # SYSTEMATIC offset between SDF and plugin, not by real frame-time
-    # variation.  A perfectly-stable 13 Hz stream reported ~0.125 s of
-    # "jitter" (= 0.2 - 0.0752) and tripped the 0.1 s limit despite being
-    # metronomically regular.
-    #
-    # The physically meaningful "FPS stability" is the spread of dt
-    # around its own CENTRE, not around a paper target.  Use the median
-    # of the observed deltas as the reference — it's robust to a few
-    # outlier frames (unlike mean) and matches what the frame-rate
-    # integrator would see.
+    # Медиана интервалов как эталон (устойчива к отдельным выбросам)
     if deltas.size > 0:
         median_dt = float(np.median(deltas))
         abs_jitter = np.abs(deltas - median_dt)
-        # Also record |dt - ideal_dt| for diagnostics — makes it obvious
-        # when a plugin is publishing off-rate from its SDF claim.
         abs_offset_from_sdf = np.abs(deltas - ideal_dt)
     else:
         median_dt = ideal_dt
         abs_jitter = np.array([], dtype=np.float64)
         abs_offset_from_sdf = np.array([], dtype=np.float64)
 
-    # P95 of |dt - median(dt)|: robust against isolated spikes, sensitive
-    # to sustained irregularity.  max retained for diagnostics.
     jitter = (
         float(np.percentile(abs_jitter, ctx.C11_JITTER_PERCENTILE))
         if abs_jitter.size > 0
@@ -2102,81 +2259,76 @@ def _mono_c11_fps_stability_test(ctx, simulator) -> Dict[str, Any]:
         float(np.median(abs_offset_from_sdf)) if abs_offset_from_sdf.size > 0 else 0.0
     )
     max_dt = float(np.max(deltas)) if deltas.size > 0 else 0.0
-    # Dropouts: a frame is "dropped" when the gap is more than 2x the
-    # actual median frame time (same logic as before but scaled to the
-    # real rate so a 13 Hz stream isn't held to 5 Hz expectations).
+
     dropout_threshold_s = 2.0 * median_dt
-    dropouts = (
-        int(np.sum(deltas > dropout_threshold_s)) if deltas.size > 0 else 0
-    )
+    dropouts = int(np.sum(deltas > dropout_threshold_s)) if deltas.size > 0 else 0
 
     fps_ok = fps_actual >= (0.95 * float(ctx.update_rate))
-    # Jitter limit: hardcoded floor OR 50% of median frame time.  Using
-    # median_dt (not ideal_dt) means a camera actually running at 13 Hz
-    # gets a 0.5 × 0.075 ≈ 0.038 s jitter budget, matching its real
-    # cadence — not the 0.1 s budget the SDF's 5 Hz would suggest.
     jitter_limit = max(float(ctx.C11_MAX_JITTER_S), median_dt * 0.5)
     jitter_ok = jitter <= jitter_limit
     dropouts_ok = dropouts == 0
 
-    metrics.update(
-        {
-            "frames_captured": int(n_frames),
-            "frames_skipped_warmup": int(warmup_frames),
-            "first_eval_stamp_s": float(eval_stamps[0]),
-            "last_eval_stamp_s": float(eval_stamps[-1]),
-            "timestamps_interval_s": total_dt,
-            "fps_actual_hz": fps_actual,
-            "ideal_dt_s": ideal_dt,
-            "median_dt_s": median_dt,
-            # How far the plugin's actual median cadence is from the
-            # <update_rate> declared in the SDF.  A large value here (and
-            # the test PASSING) tells the user the plugin is not honouring
-            # its configured rate — useful for SDF debugging without
-            # failing the test for it.
-            "median_offset_from_sdf_s": median_offset_from_sdf,
-            "jitter_limit_s": float(jitter_limit),
-            "jitter_s": jitter,
-            "jitter_max_abs_s": jitter_max_abs,
-            "dropout_threshold_s": float(dropout_threshold_s),
-            "max_dt_s": max_dt,
-            "dropouts_count": dropouts,
-            "checks": {
-                "fps_ok": bool(fps_ok),
-                "jitter_ok": bool(jitter_ok),
-                "dropouts_ok": bool(dropouts_ok),
-            },
-        }
-    )
+    logger.info("C11: fps=%.2f Hz (lim=%.2f), jitter=%.4f s (lim=%.4f s), dropouts=%d",
+                fps_actual, 0.95 * ctx.update_rate, jitter, jitter_limit, dropouts)
 
-    if first_msg["msg"] is not None:
-        frame_first = _mono__msg_to_bgr(ctx, first_msg["msg"])
-        debug_first = _mono__annotate(
-            ctx,
-            frame_first,
-            ["C11 first frame", f"fps={fps_actual:.2f}", f"jitter={jitter:.4f}s"],
-        )
-    if last_msg["msg"] is not None:
-        frame_last = _mono__msg_to_bgr(ctx, last_msg["msg"])
-        debug_last = _mono__annotate(
-            ctx,
-            frame_last,
-            ["C11 last frame", f"dropouts={dropouts}", f"max_dt={max_dt:.4f}s"],
-        )
+    metrics.update({
+        "frames_captured": n_frames,
+        "frames_skipped_warmup": warmup_frames,
+        "first_eval_stamp_s": float(eval_stamps[0]),
+        "last_eval_stamp_s": float(eval_stamps[-1]),
+        "timestamps_interval_s": total_dt,
+        "fps_actual_hz": fps_actual,
+        "ideal_dt_s": ideal_dt,
+        "median_dt_s": median_dt,
+        "median_offset_from_sdf_s": median_offset_from_sdf,
+        "jitter_limit_s": float(jitter_limit),
+        "jitter_s": jitter,
+        "jitter_max_abs_s": jitter_max_abs,
+        "dropout_threshold_s": float(dropout_threshold_s),
+        "max_dt_s": max_dt,
+        "dropouts_count": dropouts,
+        "checks": {
+            "fps_ok": bool(fps_ok),
+            "jitter_ok": bool(jitter_ok),
+            "dropouts_ok": bool(dropouts_ok),
+        },
+    })
 
-    metrics["status"] = "PASS" if (fps_ok and jitter_ok and dropouts_ok) else "FAIL"
-    if not (fps_ok and jitter_ok and dropouts_ok):
-        metrics["error_reason"] = (
-            f"fps_jitter_or_dropout_failed: fps={fps_actual:.3f}, jitter={jitter:.4f}, dropouts={dropouts}"
+    # ------------------------------------------------------------------
+    # 5.  Оценка результата и русскоязычное описание
+    # ------------------------------------------------------------------
+    passed = fps_ok and jitter_ok and dropouts_ok
+    if passed:
+        desc = (
+            f"Стабильность FPS в порядке: фактическая частота {fps_actual:.2f} Гц "
+            f"(≥{0.95 * ctx.update_rate:.2f} Гц), джиттер {jitter:.4f} с "
+            f"(≤{jitter_limit:.4f} с), дропов нет."
         )
+        metrics["status"] = "PASS"
+    else:
+        reasons = []
+        if not fps_ok:
+            reasons.append(
+                f"частота {fps_actual:.2f} Гц ниже порога {0.95 * ctx.update_rate:.2f} Гц"
+            )
+        if not jitter_ok:
+            reasons.append(
+                f"джиттер {jitter:.4f} с превышает лимит {jitter_limit:.4f} с"
+            )
+        if not dropouts_ok:
+            reasons.append(f"обнаружено {dropouts} дропов (пропусков кадров)")
+        desc = "Проблемы стабильности FPS: " + "; ".join(reasons) + "."
+        metrics["error_reason"] = desc
+        metrics["status"] = "FAIL"
+
     _store_c11_diag()
-    if not (fps_ok and jitter_ok and dropouts_ok):
-        raise AssertionError(
-            f"C11 failed: fps={fps_actual:.3f} (target>={0.95 * ctx.update_rate:.3f}), "
-            f"jitter={jitter:.4f}s (limit<={jitter_limit:.4f}s), dropouts={dropouts}"
-        )
 
-    return {"id": "C11", "passed": True, "metrics": metrics}
+    return {
+        "id": "C11",
+        "passed": passed,
+        "metrics": metrics,
+        "description": desc,
+    }
 
 
 @_mono_safe_wrapper
@@ -2567,14 +2719,21 @@ def c4_geometries_presence_test(simulator, sensor, progress_cb=None) -> dict:
 
 @_mono_safe_wrapper
 def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
+    """
+    Проверка корректности occlusion (перекрытия объектов).
+    Синий задний куб частично закрывается передним кубом,
+    смещаемым на два разных расстояния от оси.
+    Ожидается, что при меньшем смещении (больше перекрытия)
+    видимых синих пикселей меньше.
+    """
     if progress_cb:
-        try:
-            progress_cb(5)
-        except Exception:
-            pass
+        try: progress_cb(5)
+        except: pass
+
     ctx = _mono_build_ctx(sensor)
     ctx._progress_cb = progress_cb
     ctx._simulator = simulator
+
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c7_occlusion_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -2589,136 +2748,177 @@ def c7_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
         "error_reason": "",
     }
 
-    def _store_c7_diag() -> None:
-        _mono__set_test_diagnostics(
-            ctx,
-            c7_occlusion={
-                "metrics": dict(metrics),
-            },
-        )
-        return None
+    def _store_c7_diag():
+        _mono__set_test_diagnostics(ctx, c7_occlusion={"metrics": dict(metrics)})
 
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(
-        ctx,
-    )
+    metrics["display_env"] = _mono__ensure_render_display_env(ctx)
     _store_c7_diag()
 
+    # ---------- открытие сцены ----------
     try:
         _mono__open_test_scene(ctx, simulator, "c7_occlusion_test")
     except Exception as exc:
         metrics["error_reason"] = f"scene_open_failed:{exc}"
         _store_c7_diag()
-        raise
+        return {
+            "id": "C7",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Не удалось открыть сцену: {exc}",
+        }
 
     metrics["scene_open_success"] = True
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
-    metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c7_diag()
 
-    if not simulator.wait_for_model_spawn(ctx.C7_FRONT_CUBE_NAME, timeout=20):
-        metrics["error_reason"] = f"model_not_spawned:{ctx.C7_FRONT_CUBE_NAME}"
-        _store_c7_diag()
-        raise RuntimeError(f"Model not spawned: {ctx.C7_FRONT_CUBE_NAME}")
-    if not simulator.wait_for_model_spawn(ctx.C7_BACK_CUBE_NAME, timeout=20):
-        metrics["error_reason"] = f"model_not_spawned:{ctx.C7_BACK_CUBE_NAME}"
-        _store_c7_diag()
-        raise RuntimeError(f"Model not spawned: {ctx.C7_BACK_CUBE_NAME}")
+    # ожидаем появления обоих кубов
+    for name in (ctx.C7_FRONT_CUBE_NAME, ctx.C7_BACK_CUBE_NAME):
+        if not simulator.wait_for_model_spawn(name, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{name}"
+            _store_c7_diag()
+            return {
+                "id": "C7",
+                "passed": False,
+                "metrics": metrics,
+                "description": f"Модель '{name}' не появилась в симуляции.",
+            }
 
+    # ---------- прогрев ----------
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c7_diag()
-        raise RuntimeError(
-            f"Failed to receive warmup image for C7 from topic {resolved_topic}: {exc}"
-        ) from exc
+        return {
+            "id": "C7",
+            "passed": False,
+            "metrics": metrics,
+            "description": f"Не удалось получить первый кадр: {exc}",
+        }
 
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
+    logger.info("C7: прогрев ОК, топик=%s", resolved_topic)
 
-    def _move_and_capture(
-        model_name: str, x: float, y: float, z: float, settle_s: float = 0.35
-    ) -> np.ndarray:
+    # ---------- вспомогательная функция захвата с перемещением ----------
+    def _move_and_capture(model_name: str, x: float, y: float, z: float,
+                          settle_s: float = 0.35) -> np.ndarray:
         nonlocal prev_stamp_s
-
-        _mono__move_and_settle(
-            ctx,
-            simulator,
-            model_name,
-            x=float(x),
-            y=float(y),
-            z=float(z),
-            settle_s=settle_s,
-        )
-        msg = _mono__wait_image_after(
-            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
-        )
+        _mono__move_and_settle(ctx, simulator, model_name,
+                               x=float(x), y=float(y), z=float(z),
+                               settle_s=settle_s)
+        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         return _mono__msg_to_bgr(ctx, msg)
 
-    _move_and_capture(ctx.C7_BACK_CUBE_NAME, x=3.6, y=0.0, z=0.25)
+    # ---------- фиксируем задний куб ----------
+    _move_and_capture(ctx.C7_BACK_CUBE_NAME, x=3.6, y=0.0, z=0.25, settle_s=0.5)
+    logger.info("C7: задний куб зафиксирован на x=3.6, y=0.0")
 
+    # ---------- два случая перекрытия ----------
     for case_name, y in ctx.C7_CASES.items():
         frame = _move_and_capture(ctx.C7_FRONT_CUBE_NAME, x=3.0, y=float(y), z=0.25)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        blue = _mono__color_mask(ctx, hsv, "blue")
-        blue_count = _mono__count_pixels(ctx, blue)
+        blue_mask = _mono__color_mask(ctx, hsv, "blue")
+        blue_count = _mono__count_pixels(ctx, blue_mask)
         metrics["blue_pixels"][case_name] = int(blue_count)
 
-        debug = _mono__annotate(
-            ctx,
-            frame,
-            [
-                f"topic={resolved_topic}",
-                f"{case_name}: blue={blue_count}",
-                f"front_y={float(y):.2f}",
-            ],
-        )
+        logger.info("C7 случай '%s': передний куб y=%.2f → синих пикселей=%d",
+                    case_name, float(y), blue_count)
 
     blue_25 = metrics["blue_pixels"].get("occ_25", 0)
     blue_50 = metrics["blue_pixels"].get("occ_50", 0)
+
     relation_ok = blue_25 > blue_50
     threshold_ok = blue_25 > ctx.C7_MIN_PIXELS and blue_50 > ctx.C7_MIN_PIXELS
+
+    logger.info("C7: blue_25=%d, blue_50=%d, relation_ok=%s, threshold_ok=%s",
+                blue_25, blue_50, relation_ok, threshold_ok)
+
     metrics["checks"] = {
         "occlusion_relation": bool(relation_ok),
         "threshold_ok": bool(threshold_ok),
     }
-    metrics["status"] = "PASS" if (relation_ok and threshold_ok) else "FAIL"
-    if not (relation_ok and threshold_ok):
-        metrics["error_reason"] = (
-            f"occlusion_mismatch: occ_25={blue_25}, occ_50={blue_50}, threshold={ctx.C7_MIN_PIXELS}"
+    passed = relation_ok and threshold_ok
+
+    # ---------- русскоязычное описание ----------
+    if passed:
+        desc = (
+            f"Occlusion работает корректно: синих пикселей при меньшем перекрытии "
+            f"(occ_25, y=0.20) = {blue_25}, при большем (occ_50, y=0.10) = {blue_50}. "
+            f"Соотношение соблюдается, оба значения выше порога {ctx.C7_MIN_PIXELS}."
         )
+        metrics["status"] = "PASS"
+    else:
+        reasons = []
+        if not relation_ok:
+            reasons.append(
+                f"нарушено соотношение видимости: occ_25={blue_25} должно быть > occ_50={blue_50}"
+            )
+        if not threshold_ok:
+            reasons.append(
+                f"слишком мало синих пикселей (порог {ctx.C7_MIN_PIXELS}): "
+                f"occ_25={blue_25}, occ_50={blue_50}"
+            )
+        desc = "Проблема occlusion: " + "; ".join(reasons) + "."
+        metrics["error_reason"] = desc
+        metrics["status"] = "FAIL"
+
     _store_c7_diag()
 
-    if not (relation_ok and threshold_ok):
-        raise AssertionError(
-            f"C7 checks failed: {metrics['checks']}, blue_pixels={metrics['blue_pixels']}, "
-            f"threshold={ctx.C7_MIN_PIXELS}"
-        )
-
     if progress_cb:
-        try:
-            progress_cb(100)
-        except Exception:
-            pass
-    return {"id": "C7", "passed": True, "metrics": metrics}
+        try: progress_cb(100)
+        except: pass
+
+    return {
+        "id": "C7",
+        "passed": passed,
+        "metrics": metrics,
+        "description": desc,
+    }
 
 
 @_mono_safe_wrapper
-def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
+def c9_fov_test(simulator, sensor, progress_cb=None) -> Dict[str, Any]:
+    """
+    Одновременное измерение горизонтального и вертикального FOV
+    с помощью бинарного поиска по двум цветным панелям.
+    Быстро (≈12 итераций) и точно.
+    """
     if progress_cb:
-        try:
-            progress_cb(5)
-        except Exception:
-            pass
+        try: progress_cb(5)
+        except: pass
+
     ctx = _mono_build_ctx(sensor)
     ctx._progress_cb = progress_cb
     ctx._simulator = simulator
-    x_fixed = 2.0
 
+    # ------------------------------------------------------------------
+    # 1.  Целевые FOV
+    # ------------------------------------------------------------------
+    target_hfov = float(sensor.params.get("horizontal_fov", None) or ctx.horizontal_fov)
+    img_w = int(ctx.image_width)
+    img_h = int(ctx.image_height)
+    target_vfov = 2.0 * math.atan(math.tan(target_hfov / 2.0) * (img_h / img_w))
+
+    logger.info("C9: target_hfov=%.5f rad (%.2f°), target_vfov=%.5f rad (%.2f°)",
+                target_hfov, math.degrees(target_hfov),
+                target_vfov, math.degrees(target_vfov))
+
+    HALF_SIZE_H = ctx.C9_HALF_SIZE_H       # 0.01 м (половина размера красной панели по Y)
+    HALF_SIZE_V = ctx.C9_HALF_SIZE_V       # 0.01 м (половина размера синей панели по Z)
+    X_FIXED     = 2.0
+    MAX_Y       = float(ctx.C9_MAX_Y)
+    MAX_Z       = float(ctx.C9_MAX_Z)
+    TOLERANCE   = 0.002
+    REL_ERROR_THRESHOLD = 0.05
+
+    # ------------------------------------------------------------------
+    # 2.  Метрики
+    # ------------------------------------------------------------------
     metrics: Dict[str, Any] = {
         "world_file": str(ctx.test_to_world["c9_fov_test"]),
         "expected_topic": str(ctx.IMAGE_TOPIC),
@@ -2726,30 +2926,27 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
         "scene_open_success": False,
         "topic_mapping_changed": False,
         "display_env": {},
-        "x_fixed_m": float(x_fixed),
-        "step_y_m": float(ctx.C9_STEP),
-        "target_fov_rad": float(ctx.horizontal_fov),
-        "sphere_radius_m": float(ctx.C9_SPHERE_RADIUS_M),
-        "samples": [],
+        "target_hfov_rad": target_hfov,
+        "target_hfov_deg": math.degrees(target_hfov),
+        "target_vfov_rad": target_vfov,
+        "target_vfov_deg": math.degrees(target_vfov),
+        "half_size_h_m": HALF_SIZE_H,
+        "half_size_v_m": HALF_SIZE_V,
+        "x_fixed_m": X_FIXED,
         "status": "ERROR",
         "error_reason": "",
     }
 
-    def _store_c9_diag() -> None:
-        _mono__set_test_diagnostics(
-            ctx,
-            c9_fov={
-                "metrics": dict(metrics),
-            },
-        )
-        return None
+    def _store_c9_diag():
+        _mono__set_test_diagnostics(ctx, c9_fov={"metrics": dict(metrics)})
 
     ctx._last_test_diagnostics = {}
-    metrics["display_env"] = _mono__ensure_render_display_env(
-        ctx,
-    )
+    metrics["display_env"] = _mono__ensure_render_display_env(ctx)
     _store_c9_diag()
 
+    # ------------------------------------------------------------------
+    # 3.  Открываем сцену
+    # ------------------------------------------------------------------
     try:
         _mono__open_test_scene(ctx, simulator, "c9_fov_test")
     except Exception as exc:
@@ -2761,132 +2958,253 @@ def c9_fov_test(simulator, sensor, progress_cb=None) -> dict:
     resolved_topic, scene_diag = _mono__resolved_image_topic(ctx, simulator)
     metrics["resolved_topic"] = str(resolved_topic)
     metrics["topic_mapping_changed"] = bool(str(resolved_topic) != str(ctx.IMAGE_TOPIC))
-    metrics["scene_reason"] = str(scene_diag.get("reason", "")) if scene_diag else ""
     _store_c9_diag()
 
-    if not simulator.wait_for_model_spawn(ctx.C9_SPHERE_NAME, timeout=20):
-        metrics["error_reason"] = f"model_not_spawned:{ctx.C9_SPHERE_NAME}"
-        _store_c9_diag()
-        raise RuntimeError(f"Model not spawned: {ctx.C9_SPHERE_NAME}")
+    for name in (ctx.C9_CUBE_H_NAME, ctx.C9_CUBE_V_NAME):
+        if not simulator.wait_for_model_spawn(name, timeout=20):
+            metrics["error_reason"] = f"model_not_spawned:{name}"
+            _store_c9_diag()
+            raise RuntimeError(f"Model not spawned: {name}")
 
+    # ------------------------------------------------------------------
+    # 4.  Прогревочное изображение
+    # ------------------------------------------------------------------
     try:
         warmup_msg = _mono__wait_image(ctx, timeout=35.0, topic=resolved_topic)
     except Exception as exc:
         metrics["error_reason"] = f"warmup_image_failed:{exc}"
         _store_c9_diag()
-        raise RuntimeError(
-            f"Failed to receive warmup image for C9 from topic {resolved_topic}: {exc}"
-        ) from exc
+        raise RuntimeError(f"Failed to receive warmup image for C9: {exc}") from exc
 
     prev_stamp_s = _mono__msg_stamp_s(ctx, warmup_msg)
-    last_visible: Optional[Tuple[float, np.ndarray, int]] = None
-    first_not_visible: Optional[Tuple[float, np.ndarray, int]] = None
+    logger.info("C9: прогрев ОК, начинаем проверку")
 
-    for y in _mono__iter_float_range(ctx, 0.0, float(ctx.C9_MAX_Y), float(ctx.C9_STEP)):
-        _mono__move_and_settle(
-            ctx,
-            simulator,
-            ctx.C9_SPHERE_NAME,
-            x=x_fixed,
-            y=float(y),
-            z=0.2,
-            settle_s=0.35,
-        )
-        msg = _mono__wait_image_after(
-            ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic
-        )
+    # ------------------------------------------------------------------
+    # 5.  Захват и проверка видимости (сырые пиксели, без контуров)
+    # ------------------------------------------------------------------
+    def _capture_and_check(y: float, z: float, settle_s: float = 0.4) -> tuple:
+        nonlocal prev_stamp_s
+        _mono__move_and_settle(ctx, simulator, ctx.C9_CUBE_H_NAME,
+                               x=X_FIXED, y=y, z=0.0, settle_s=settle_s)
+        _mono__move_and_settle(ctx, simulator, ctx.C9_CUBE_V_NAME,
+                               x=X_FIXED, y=0.0, z=z, settle_s=settle_s)
+        msg = _mono__wait_image_after(ctx, prev_stamp_s, timeout=35.0, topic=resolved_topic)
         prev_stamp_s = _mono__msg_stamp_s(ctx, msg)
         frame = _mono__msg_to_bgr(ctx, msg)
-        white = _mono__white_mask(ctx, frame)
-        contours = _mono__large_contours(
-            ctx, white, min_area=ctx.C9_MIN_CONTOUR_AREA, border_margin=4
-        )
-        contour_count = len(contours)
-        visible = contour_count > 0
 
-        metrics["samples"].append(
-            {"y_m": float(y), "visible": bool(visible), "contours": int(contour_count)}
-        )
+        red_mask = (frame[:, :, 2] > 120) & (frame[:, :, 1] < 80) & (frame[:, :, 0] < 80)
+        h_visible = np.any(red_mask)
 
-        if visible:
-            last_visible = (float(y), frame, contour_count)
-        elif last_visible is not None:
-            first_not_visible = (float(y), frame, contour_count)
-            break
+        blue_mask = (frame[:, :, 0] > 120) & (frame[:, :, 2] < 80) & (frame[:, :, 1] < 80)
+        v_visible = np.any(blue_mask)
 
-    if last_visible is None:
-        metrics["error_reason"] = "object_never_detected"
+        logger.debug("C9: y=%.4f z=%.4f → h_vis=%s v_vis=%s (red_px=%d blue_px=%d)",
+                     y, z, h_visible, v_visible,
+                     int(np.sum(red_mask)), int(np.sum(blue_mask)))
+        return h_visible, v_visible
+
+    # ------------------------------------------------------------------
+    # 6.  Начальная проверка в центре
+    # ------------------------------------------------------------------
+    init_h_vis, init_v_vis = _capture_and_check(0.0, 0.0, settle_s=1.0)
+    if not init_h_vis:
+        metrics["error_reason"] = "horizontal_object_never_detected_at_centre"
         _store_c9_diag()
-        raise AssertionError("C9 failed: object was never detected in frame")
-    if first_not_visible is None:
-        metrics["error_reason"] = "object_never_lost"
+        return {"id": "C9", "passed": False, "metrics": metrics,
+                "description": "Красная панель не обнаружена в центре кадра "
+                               "(возможна проблема с миром или цветом)."}
+    if not init_v_vis:
+        metrics["error_reason"] = "vertical_object_never_detected_at_centre"
         _store_c9_diag()
-        raise AssertionError(
-            "C9 failed: object did not disappear within tested Y range"
+        return {"id": "C9", "passed": False, "metrics": metrics,
+                "description": "Синяя панель не обнаружена в центре кадра "
+                               "(возможна проблема с миром или цветом)."}
+
+    logger.info("C9: обе панели видны в центре")
+
+    # ------------------------------------------------------------------
+    # 7.  Ожидаемые позиции перехода
+    # ------------------------------------------------------------------
+    y_edge_target = X_FIXED * math.tan(target_hfov / 2.0)
+    z_edge_target = X_FIXED * math.tan(target_vfov / 2.0)
+    y_target = y_edge_target + HALF_SIZE_H
+    z_target = z_edge_target + HALF_SIZE_V
+
+    logger.info("C9: ожидаемый край h=%.4f м, v=%.4f м; "
+                "ожидаемый последний видимый центр h=%.4f м, v=%.4f м",
+                y_edge_target, z_edge_target, y_target, z_target)
+
+    # ------------------------------------------------------------------
+    # 8.  3‑точечная проверка
+    # ------------------------------------------------------------------
+    offsets = [-0.1, 0.0, 0.1]
+    points_h = [y_target + off for off in offsets]
+    points_v = [z_target + off for off in offsets]
+    logger.info("C9 3‑point positions: h=%s m, v=%s m", points_h, points_v)
+
+    vis_h = []
+    vis_v = []
+    for i in range(len(offsets)):
+        h_vis, v_vis = _capture_and_check(points_h[i], points_v[i],
+                                          settle_s=0.8 if i == 0 else 0.5)
+        vis_h.append(h_vis)
+        vis_v.append(v_vis)
+        logger.info("C9 3‑point[%d]: y=%.4f v=%s, z=%.4f v=%s",
+                    i, points_h[i], h_vis, points_v[i], v_vis)
+
+    lo_h, hi_h = 0.0, MAX_Y
+    lo_v, hi_v = 0.0, MAX_Z
+    last_y = None
+    last_z = None
+    active_h = True
+    active_v = True
+
+    if vis_h[0] and not vis_h[-1]:
+        for off, v in zip(offsets, vis_h):
+            if v:
+                last_y = y_target + off
+        logger.info("C9 h 3‑point resolved: last_y=%.4f м", last_y)
+        active_h = False
+        lo_h = hi_h = last_y
+    elif not vis_h[0]:
+        logger.info("C9 h 3‑point: invisible at leftmost, will search [0, %.4f]", points_h[0])
+        lo_h, hi_h = 0.0, points_h[0]
+    elif vis_h[-1]:
+        logger.info("C9 h 3‑point: visible at rightmost, will search [%.4f, %.4f]",
+                    points_h[-1], MAX_Y)
+        lo_h, hi_h = points_h[-1], MAX_Y
+    else:
+        logger.info("C9 h 3‑point: ambiguous, fallback to full search")
+        lo_h, hi_h = 0.0, MAX_Y
+
+    if vis_v[0] and not vis_v[-1]:
+        for off, v in zip(offsets, vis_v):
+            if v:
+                last_z = z_target + off
+        logger.info("C9 v 3‑point resolved: last_z=%.4f м", last_z)
+        active_v = False
+        lo_v = hi_v = last_z
+    elif not vis_v[0]:
+        logger.info("C9 v 3‑point: invisible at lowest, will search [0, %.4f]", points_v[0])
+        lo_v, hi_v = 0.0, points_v[0]
+    elif vis_v[-1]:
+        logger.info("C9 v 3‑point: visible at highest, will search [%.4f, %.4f]",
+                    points_v[-1], MAX_Z)
+        lo_v, hi_v = points_v[-1], MAX_Z
+    else:
+        logger.info("C9 v 3‑point: ambiguous, fallback to full search")
+        lo_v, hi_v = 0.0, MAX_Z
+
+    # ------------------------------------------------------------------
+    # 9.  Бинарный поиск
+    # ------------------------------------------------------------------
+    iteration = 0
+    while active_h or active_v:
+        iteration += 1
+        mid_y = (lo_h + hi_h) / 2.0 if active_h else (last_y if last_y is not None else lo_h)
+        mid_z = (lo_v + hi_v) / 2.0 if active_v else (last_z if last_z is not None else lo_v)
+
+        settle = 1.0 if iteration == 1 else 0.4
+        h_vis, v_vis = _capture_and_check(mid_y, mid_z, settle_s=settle)
+
+        if active_h:
+            if h_vis:
+                lo_h = mid_y
+            else:
+                hi_h = mid_y
+            active_h = (hi_h - lo_h) > TOLERANCE
+            if not active_h:
+                last_y = lo_h
+
+        if active_v:
+            if v_vis:
+                lo_v = mid_z
+            else:
+                hi_v = mid_z
+            active_v = (hi_v - lo_v) > TOLERANCE
+            if not active_v:
+                last_z = lo_v
+
+        logger.info("C9 bin iter=%d: mid_y=%.4f (vis=%s) mid_z=%.4f (vis=%s), "
+                    "h_intv=[%.4f,%.4f] v_intv=[%.4f,%.4f]",
+                    iteration, mid_y, h_vis, mid_z, v_vis, lo_h, hi_h, lo_v, hi_v)
+
+    if last_y is None:
+        last_y = lo_h
+    if last_z is None:
+        last_z = lo_v
+
+    logger.info("C9 поиск завершён: last_y=%.4f м, last_z=%.4f м", last_y, last_z)
+
+    # ------------------------------------------------------------------
+    # 10.  Вычисление FOV
+    # ------------------------------------------------------------------
+    y_edge = last_y - HALF_SIZE_H
+    z_edge = last_z - HALF_SIZE_V
+    measured_hfov = 2.0 * math.atan(y_edge / X_FIXED)
+    measured_vfov = 2.0 * math.atan(z_edge / X_FIXED)
+
+    rel_h = abs(measured_hfov - target_hfov) / target_hfov if target_hfov > 0 else float('inf')
+    rel_v = abs(measured_vfov - target_vfov) / target_vfov if target_vfov > 0 else float('inf')
+
+    logger.info("C9 результат: измеренный hFOV=%.5f рад (%.2f°), vFOV=%.5f рад (%.2f°)",
+                measured_hfov, math.degrees(measured_hfov),
+                measured_vfov, math.degrees(measured_vfov))
+    logger.info("C9 отн. ошибки: h=%.4f, v=%.4f", rel_h, rel_v)
+
+    # ------------------------------------------------------------------
+    # 11.  Оценка прохождения и русскоязычное описание
+    # ------------------------------------------------------------------
+    h_ok = rel_h <= REL_ERROR_THRESHOLD
+    v_ok = rel_v <= REL_ERROR_THRESHOLD
+    passed = h_ok and v_ok
+
+    metrics.update({
+        "y_last_visible_m": last_y,
+        "z_last_visible_m": last_z,
+        "y_edge_estimate_m": y_edge,
+        "z_edge_estimate_m": z_edge,
+        "measured_hfov_rad": measured_hfov,
+        "measured_hfov_deg": math.degrees(measured_hfov),
+        "measured_vfov_rad": measured_vfov,
+        "measured_vfov_deg": math.degrees(measured_vfov),
+        "relative_error_h": rel_h,
+        "relative_error_v": rel_v,
+        "checks": {"hfov_ok": h_ok, "vfov_ok": v_ok},
+    })
+
+    if passed:
+        desc = (
+            f"Горизонтальный FOV: измеренный {math.degrees(measured_hfov):.2f}° "
+            f"(целевой {math.degrees(target_hfov):.2f}°, ошибка {rel_h:.2%}). "
+            f"Вертикальный FOV: измеренный {math.degrees(measured_vfov):.2f}° "
+            f"(целевой {math.degrees(target_vfov):.2f}°, ошибка {rel_v:.2%}). "
+            f"Допуск ≤5% выполнен."
         )
+        metrics["status"] = "PASS"
+    else:
+        reasons = []
+        if not h_ok:
+            reasons.append(
+                f"Горизонтальный FOV не соответствует: измерено {math.degrees(measured_hfov):.2f}°, "
+                f"ожидалось {math.degrees(target_hfov):.2f}° (ошибка {rel_h:.2%})"
+            )
+        if not v_ok:
+            reasons.append(
+                f"Вертикальный FOV не соответствует: измерено {math.degrees(measured_vfov):.2f}°, "
+                f"ожидалось {math.degrees(target_vfov):.2f}° (ошибка {rel_v:.2%})"
+            )
+        desc = " ".join(reasons)
+        metrics["error_reason"] = desc
+        metrics["status"] = "FAIL"
 
-    y_visible = float(last_visible[0])
-    y_lost = float(first_not_visible[0])
-    y_transition = float((y_visible + y_lost) / 2.0)
-    y_edge_estimate = float(y_transition + float(ctx.C9_SPHERE_RADIUS_M))
-    measured_fov = float(2.0 * atan(y_edge_estimate / x_fixed))
-    target_fov = float(ctx.horizontal_fov)
-    rel_error = (
-        float(abs(measured_fov - target_fov) / target_fov)
-        if target_fov > 0
-        else float("inf")
-    )
-
-    dbg_visible = _mono__annotate(
-        ctx,
-        last_visible[1],
-        [
-            f"topic={resolved_topic}",
-            f"Yvisible={y_visible:.2f} m",
-            f"Yedge={y_edge_estimate:.2f} m",
-            f"FOVmeasured={measured_fov:.5f} rad",
-            "visible=True",
-        ],
-    )
-
-    dbg_lost = _mono__annotate(
-        ctx,
-        first_not_visible[1],
-        [
-            f"topic={resolved_topic}",
-            f"Ylost={y_lost:.2f} m",
-            f"Yedge={y_edge_estimate:.2f} m",
-            f"FOVtarget={target_fov:.5f} rad",
-            "visible=False",
-        ],
-    )
-
-    metrics["y_max_visible_m"] = y_visible
-    metrics["y_first_not_visible_m"] = y_lost
-    metrics["y_transition_m"] = y_transition
-    metrics["y_edge_estimate_m"] = y_edge_estimate
-    metrics["fov_measured_rad"] = measured_fov
-    metrics["fov_measured_deg"] = float(degrees(measured_fov))
-    metrics["fov_target_deg"] = float(degrees(target_fov))
-    metrics["relative_error"] = rel_error
-    metrics["checks"] = {"rel_error_le_0_05": bool(rel_error <= 0.05)}
-    metrics["status"] = "PASS" if rel_error <= 0.05 else "FAIL"
-    if rel_error > 0.05:
-        metrics["error_reason"] = (
-            f"fov_mismatch: measured={measured_fov:.6f}, target={target_fov:.6f}, rel_error={rel_error:.4f}"
-        )
     _store_c9_diag()
-    if rel_error > 0.05:
-        raise AssertionError(
-            f"C9 failed: measured={measured_fov:.6f} rad, target={target_fov:.6f} rad, rel_error={rel_error:.4f}"
-        )
 
     if progress_cb:
-        try:
-            progress_cb(100)
-        except Exception:
-            pass
-    return {"id": "C9", "passed": True, "metrics": metrics}
+        try: progress_cb(100)
+        except: pass
+
+    return {"id": "C9", "passed": passed, "metrics": metrics, "description": desc}
 
 
 @_mono_safe_wrapper

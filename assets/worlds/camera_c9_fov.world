@@ -1,48 +1,46 @@
 <?xml version="1.0" ?>
-<!--
-  Что это:
-  - Сцена C9 для проверки FOV камеры.
-  - В сцене одна сфера `fov_sphere`.
-
-  Как используется:
-  - Тест сдвигает `fov_sphere` по Y от 0 к краю кадра с шагом 0.05 через /gazebo/set_model_state.
-  - Камера в world не добавляется, подключается существующим механизмом симулятора.
-
-  Model names:
-  - fov_sphere
--->
 <sdf version="1.6">
   <world name="camera_c9_fov">
     <scene>
       <ambient>0.7 0.7 0.7 1</ambient>
       <background>0.5 0.5 0.5 1</background>
     </scene>
+    <include><uri>model://sun</uri></include>
+    <include><uri>model://ground_plane</uri></include>
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
-
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
-
-    <model name="fov_sphere">
-      <pose>2.0 0.0 0.2 0 0 0</pose>
+    <!-- Горизонтальный FOV: красная вертикальная линия -->
+    <model name="fov_cube_h">
+      <pose>2.0 0.0 0.0 0 0 0</pose>
       <static>false</static>
       <link name="link">
         <gravity>false</gravity>
         <collision name="collision">
-          <geometry>
-            <sphere><radius>0.1</radius></sphere>
-          </geometry>
+          <geometry><box><size>0.02 0.02 1.0</size></box></geometry>
         </collision>
         <visual name="visual">
-          <geometry>
-            <sphere><radius>0.1</radius></sphere>
-          </geometry>
+          <geometry><box><size>0.02 0.02 1.0</size></box></geometry>
           <material>
-            <ambient>1 1 1 1</ambient>
-            <diffuse>1 1 1 1</diffuse>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Вертикальный FOV: синяя горизонтальная линия -->
+    <model name="fov_cube_v">
+      <pose>2.0 0.0 0.0 0 0 0</pose>
+      <static>false</static>
+      <link name="link">
+        <gravity>false</gravity>
+        <collision name="collision">
+          <geometry><box><size>0.02 1.0 0.02</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.02 1.0 0.02</size></box></geometry>
+          <material>
+            <ambient>0 0 1 1</ambient>
+            <diffuse>0 0 1 1</diffuse>
           </material>
         </visual>
       </link>

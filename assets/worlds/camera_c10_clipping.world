@@ -40,18 +40,18 @@
     </include>
 
     <model name="clip_cube">
-      <pose>0.05 0.0 0.5 0 0 0</pose>
+      <pose>0 0.0 0 0 0 0</pose>
       <static>false</static>
       <link name="link">
         <gravity>false</gravity>
         <collision name="collision">
           <geometry>
-            <box><size>0.3 30.0 30.0</size></box>
+            <box><size>0.001 100.0 100.0</size></box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
-            <box><size>0.3 30.0 30.0</size></box>
+            <box><size>0.001 100.0 100.0</size></box>
           </geometry>
           <material>
             <ambient>1.0 0.1 0.1 1</ambient>
