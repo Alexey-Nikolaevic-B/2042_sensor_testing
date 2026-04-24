@@ -44,6 +44,27 @@ class _StereoProfileTestContext:
     C7_FRONT_CUBE_NAME = "front_cube"
     C7_BACK_CUBE_NAME = "back_cube"
 
+    # FOV-test constants — red/blue panels in camera_c9_fov.world.
+    # Same world + same model names as the mono test, because the scene
+    # geometry doesn't depend on which camera observes it; we just need
+    # to capture from the stereo pair instead of the mono sensor.
+    FOV_CUBE_H_NAME = "fov_cube_h"
+    FOV_CUBE_V_NAME = "fov_cube_v"
+    FOV_HALF_SIZE_H = 0.01
+    FOV_HALF_SIZE_V = 0.01
+    FOV_MAX_Y = 6.0
+    FOV_MAX_Z = 6.0
+    FOV_TOLERANCE = 0.002
+    FOV_REL_ERROR = 0.05
+
+    # FPS stability constants — mirror _mono ctx defaults; plugin cadence
+    # tends to drift from SDF <update_rate> by a few ms so we compare
+    # jitter against the OBSERVED median, not the declared ideal_dt.
+    FPS_DURATION_S = 60.0
+    FPS_WARMUP_SECONDS = 2.0
+    FPS_JITTER_PERCENTILE = 95
+    FPS_MAX_JITTER_S = 0.015
+
     C4_MIN_PIXELS = 1500
     # Смещения подобраны так, чтобы occ_25 имел меньшую окклюзию (больше blue-пикселей),
     # а occ_50 — большую окклюзию (меньше blue-пикселей).
@@ -112,6 +133,12 @@ class _StereoProfileTestContext:
             "s2_texture_vs_smooth_stability_test": str(
                 worlds_root / "camera_c8_stereo_complex.world"
             ),
+            # New tests that parallel the mono C9 / C2 / C11 checks.
+            # Scene files are reused from mono — geometry is identical,
+            # we simply observe it through a stereo rig.
+            "scam_fov_test":             str(worlds_root / "camera_c9_fov.world"),
+            "scam_resolution_test":      str(worlds_root / "camera_c2_resolution.world"),
+            "scam_fps_stability_test":   str(worlds_root / "camera_c11_fps_static_load.world"),
         }
         for test_name, wpath in self.test_to_world.items():
             print(
@@ -1471,6 +1498,348 @@ class _StereoProfileTestContext:
 
         return {"id": "S2", "passed": True, "metrics": metrics}
 
+    # ══════════════════════════════════════════════════════════════════
+    # FOV test — same logic as mcam c9_fov_test but observed through the
+    # stereo rig.  We run the binary search over the LEFT camera frame.
+    # The right eye is identical hardware in the simulated rig, so its
+    # FOV is guaranteed to match; measuring once keeps this ~12 iters
+    # long instead of 24.  If a future use-case needs per-eye numbers,
+    # mirror the code on `right` with a `_ensure_pair()` call.
+    # ══════════════════════════════════════════════════════════════════
+    def scam_fov_test(self, simulator) -> Dict[str, Any]:
+        self._open_test_scene(simulator, "scam_fov_test")
+
+        target_hfov = float(self.horizontal_fov)
+        img_w = int(self.image_width)
+        img_h = int(self.image_height)
+        target_vfov = 2.0 * atan(tan(target_hfov / 2.0) * (img_h / img_w))
+
+        print(
+            f"[DEBUG scam_fov_test] target_hfov={target_hfov:.5f} rad "
+            f"({math.degrees(target_hfov):.2f}°), "
+            f"target_vfov={target_vfov:.5f} rad ({math.degrees(target_vfov):.2f}°)"
+        )
+
+        for name in (self.FOV_CUBE_H_NAME, self.FOV_CUBE_V_NAME):
+            if not simulator.wait_for_model_spawn(name, timeout=20):
+                raise RuntimeError(f"Model not spawned: {name}")
+
+        # Warm-up pair: confirms both cameras are publishing before we
+        # start moving panels.
+        data = self.capture_data(simulator, timeout=35.0, convert2cv=True)
+        if data is None:
+            raise RuntimeError("No stereo frames for FOV warm-up")
+
+        X_FIXED = 2.0
+
+        def _move_panels(y: float, z: float, settle_s: float = 0.4) -> None:
+            self._move_and_settle(
+                simulator, self.FOV_CUBE_H_NAME,
+                x=X_FIXED, y=y, z=0.0, settle_s=settle_s,
+            )
+            self._move_and_settle(
+                simulator, self.FOV_CUBE_V_NAME,
+                x=X_FIXED, y=0.0, z=z, settle_s=settle_s,
+            )
+
+        def _capture_and_check(y: float, z: float, settle_s: float = 0.4) -> tuple:
+            _move_panels(y, z, settle_s=settle_s)
+            pair = self.capture_data(simulator, timeout=10.0, convert2cv=True)
+            if pair is None or pair.get("left_cv") is None:
+                raise RuntimeError("Lost stereo pair during FOV sweep")
+            frame = pair["left_cv"]
+            red_mask = (frame[:, :, 2] > 120) & (frame[:, :, 1] < 80) & (frame[:, :, 0] < 80)
+            blue_mask = (frame[:, :, 0] > 120) & (frame[:, :, 2] < 80) & (frame[:, :, 1] < 80)
+            return bool(np.any(red_mask)), bool(np.any(blue_mask))
+
+        init_h_vis, init_v_vis = _capture_and_check(0.0, 0.0, settle_s=1.0)
+        if not init_h_vis:
+            raise AssertionError(
+                "scam_fov_test: red panel not detected at centre"
+            )
+        if not init_v_vis:
+            raise AssertionError(
+                "scam_fov_test: blue panel not detected at centre"
+            )
+
+        y_edge_target = X_FIXED * tan(target_hfov / 2.0)
+        z_edge_target = X_FIXED * tan(target_vfov / 2.0)
+        y_target = y_edge_target + self.FOV_HALF_SIZE_H
+        z_target = z_edge_target + self.FOV_HALF_SIZE_V
+
+        # 3-point pre-scan — same idea as mono C9, finds a good starting
+        # bracket for the binary search without running full 0..MAX sweep.
+        offsets = [-0.1, 0.0, 0.1]
+        points_h = [y_target + off for off in offsets]
+        points_v = [z_target + off for off in offsets]
+
+        vis_h, vis_v = [], []
+        for i in range(len(offsets)):
+            hv, vv = _capture_and_check(
+                points_h[i], points_v[i],
+                settle_s=0.8 if i == 0 else 0.4,
+            )
+            vis_h.append(hv)
+            vis_v.append(vv)
+
+        lo_h, hi_h = 0.0, self.FOV_MAX_Y
+        lo_v, hi_v = 0.0, self.FOV_MAX_Z
+        last_y = last_z = None
+        active_h = active_v = True
+
+        if vis_h[0] and not vis_h[-1]:
+            for off, v in zip(offsets, vis_h):
+                if v:
+                    last_y = y_target + off
+            active_h = False
+            lo_h = hi_h = last_y
+        elif not vis_h[0]:
+            lo_h, hi_h = 0.0, points_h[0]
+        elif vis_h[-1]:
+            lo_h, hi_h = points_h[-1], self.FOV_MAX_Y
+
+        if vis_v[0] and not vis_v[-1]:
+            for off, v in zip(offsets, vis_v):
+                if v:
+                    last_z = z_target + off
+            active_v = False
+            lo_v = hi_v = last_z
+        elif not vis_v[0]:
+            lo_v, hi_v = 0.0, points_v[0]
+        elif vis_v[-1]:
+            lo_v, hi_v = points_v[-1], self.FOV_MAX_Z
+
+        iteration = 0
+        while active_h or active_v:
+            iteration += 1
+            mid_y = (lo_h + hi_h) / 2.0 if active_h else (last_y or lo_h)
+            mid_z = (lo_v + hi_v) / 2.0 if active_v else (last_z or lo_v)
+            hv, vv = _capture_and_check(mid_y, mid_z, settle_s=0.4)
+
+            if active_h:
+                if hv:
+                    lo_h = mid_y
+                else:
+                    hi_h = mid_y
+                active_h = (hi_h - lo_h) > self.FOV_TOLERANCE
+                if not active_h:
+                    last_y = lo_h
+            if active_v:
+                if vv:
+                    lo_v = mid_z
+                else:
+                    hi_v = mid_z
+                active_v = (hi_v - lo_v) > self.FOV_TOLERANCE
+                if not active_v:
+                    last_z = lo_v
+
+        last_y = last_y if last_y is not None else lo_h
+        last_z = last_z if last_z is not None else lo_v
+
+        y_edge = last_y - self.FOV_HALF_SIZE_H
+        z_edge = last_z - self.FOV_HALF_SIZE_V
+        measured_hfov = 2.0 * atan(y_edge / X_FIXED)
+        measured_vfov = 2.0 * atan(z_edge / X_FIXED)
+        rel_h = abs(measured_hfov - target_hfov) / target_hfov if target_hfov > 0 else float("inf")
+        rel_v = abs(measured_vfov - target_vfov) / target_vfov if target_vfov > 0 else float("inf")
+        h_ok = rel_h <= self.FOV_REL_ERROR
+        v_ok = rel_v <= self.FOV_REL_ERROR
+
+        metrics = {
+            "target_hfov_deg": math.degrees(target_hfov),
+            "target_vfov_deg": math.degrees(target_vfov),
+            "measured_hfov_deg": math.degrees(measured_hfov),
+            "measured_vfov_deg": math.degrees(measured_vfov),
+            "relative_error_h": rel_h,
+            "relative_error_v": rel_v,
+            "tolerance": self.FOV_REL_ERROR,
+            "checks": {"hfov_ok": h_ok, "vfov_ok": v_ok},
+        }
+
+        if not (h_ok and v_ok):
+            raise AssertionError(
+                f"scam_fov_test failed: measured_hfov="
+                f"{math.degrees(measured_hfov):.2f}° (target "
+                f"{math.degrees(target_hfov):.2f}°, err={rel_h:.2%}); "
+                f"measured_vfov={math.degrees(measured_vfov):.2f}° "
+                f"(target {math.degrees(target_vfov):.2f}°, err={rel_v:.2%})"
+            )
+
+        return {"id": "SCAM_FOV", "passed": True, "metrics": metrics}
+
+    # ══════════════════════════════════════════════════════════════════
+    # Resolution test — verifies that BOTH eyes publish frames of the
+    # size declared in the SDF (<width>/<height>).  Unlike mono, a
+    # stereo rig has two <sensor> blocks which are commonly copy-pasted,
+    # so in practice mis-configured resolutions manifest only on one
+    # eye (usually the second one).  Hence we check both sides.
+    # ══════════════════════════════════════════════════════════════════
+    def scam_resolution_test(self, simulator) -> Dict[str, Any]:
+        self._open_test_scene(simulator, "scam_resolution_test")
+
+        expected_w = int(self.image_width)
+        expected_h = int(self.image_height)
+
+        data = self.capture_data(simulator, timeout=35.0, convert2cv=False)
+        if data is None:
+            raise RuntimeError("No stereo frames for resolution check")
+        left_msg = data.get("raw_left")
+        right_msg = data.get("raw_right")
+        if left_msg is None or right_msg is None:
+            raise RuntimeError("Either left or right image was empty")
+
+        left_w, left_h = int(left_msg.width), int(left_msg.height)
+        right_w, right_h = int(right_msg.width), int(right_msg.height)
+
+        print(
+            f"[DEBUG scam_resolution_test] expected={expected_w}x{expected_h}, "
+            f"left={left_w}x{left_h}, right={right_w}x{right_h}"
+        )
+
+        left_ok = (left_w == expected_w and left_h == expected_h)
+        right_ok = (right_w == expected_w and right_h == expected_h)
+
+        metrics = {
+            "expected_resolution": {"width": expected_w, "height": expected_h},
+            "left_resolution":  {"width": left_w,  "height": left_h},
+            "right_resolution": {"width": right_w, "height": right_h},
+            "checks": {"left_matches": left_ok, "right_matches": right_ok},
+        }
+
+        if not (left_ok and right_ok):
+            raise AssertionError(
+                f"scam_resolution_test: expected {expected_w}x{expected_h}, "
+                f"got left={left_w}x{left_h}, right={right_w}x{right_h}"
+            )
+
+        return {"id": "SCAM_RES", "passed": True, "metrics": metrics}
+
+    # ══════════════════════════════════════════════════════════════════
+    # FPS stability — logs stamps on the LEFT eye for FPS_DURATION_S
+    # (60 s by default).  The stereo plugin typically drives both eyes
+    # from the same update loop, so measuring one suffices; if that
+    # assumption ever breaks we can split this into two subscribers.
+    # Jitter is computed against the OBSERVED median dt (not ideal_dt
+    # from the SDF) — same rationale as the C11 fix in mcam_tests.py:
+    # Gazebo camera plugins rarely honour <update_rate> exactly, so
+    # ideal_dt would bias the jitter toward the plugin/SDF mismatch
+    # instead of real timing variation.
+    # ══════════════════════════════════════════════════════════════════
+    def scam_fps_stability_test(self, simulator) -> Dict[str, Any]:
+        self._open_test_scene(simulator, "scam_fps_stability_test")
+
+        # Warm-up: make sure the left topic is actually publishing.
+        data = self.capture_data(simulator, timeout=35.0, convert2cv=False)
+        if data is None or data.get("raw_left") is None:
+            raise RuntimeError("Left topic silent — cannot measure FPS")
+
+        resolved_topic = str(self._resolved_left_topic or self.LEFT_IMAGE_TOPIC)
+        print(
+            f"[DEBUG scam_fps_stability_test] subscribing to {resolved_topic} "
+            f"for {self.FPS_DURATION_S:.0f} s (update_rate={self.update_rate} Hz)"
+        )
+
+        timestamps: List[float] = []
+        header_missing = [0]
+
+        def _on_image(msg: Image) -> None:
+            stamp = float(msg.header.stamp.to_sec())
+            if stamp <= 0.0:
+                header_missing[0] += 1
+                stamp = float(rospy.Time.now().to_sec())
+            timestamps.append(stamp)
+
+        sub = rospy.Subscriber(resolved_topic, Image, _on_image, queue_size=2000)
+        started = time.perf_counter()
+        pcb = getattr(self, "_progress_cb", None)
+        try:
+            while (time.perf_counter() - started) < float(self.FPS_DURATION_S):
+                time.sleep(0.1)
+                if pcb:
+                    elapsed = time.perf_counter() - started
+                    pct = 25 + int(65 * elapsed / float(self.FPS_DURATION_S))
+                    try: pcb(min(pct, 90))
+                    except Exception: pass
+        finally:
+            sub.unregister()
+
+        duration_actual = time.perf_counter() - started
+        raw_n = len(timestamps)
+        print(f"[DEBUG scam_fps_stability_test] captured {raw_n} stamps in {duration_actual:.1f} s")
+
+        if raw_n < 2:
+            raise AssertionError(
+                f"scam_fps_stability_test: only {raw_n} stamps captured; "
+                f"the left image topic appears dead."
+            )
+
+        # Keep only monotonically increasing stamps — ROS sometimes
+        # delivers duplicates or out-of-order messages under load.
+        mono = []
+        for ts in timestamps:
+            if not mono or ts > mono[-1]:
+                mono.append(float(ts))
+
+        warmup_frames = int(max(1, round(float(self.update_rate) * float(self.FPS_WARMUP_SECONDS))))
+        if len(mono) <= warmup_frames + 1:
+            raise AssertionError(
+                f"scam_fps_stability_test: only {len(mono)} monotonic stamps after warmup "
+                f"({warmup_frames} frames)."
+            )
+        eval_stamps = mono[warmup_frames:]
+        total_dt = eval_stamps[-1] - eval_stamps[0]
+        if total_dt <= 0.0:
+            raise AssertionError(
+                f"scam_fps_stability_test: invalid stamp interval {total_dt:.4f} s"
+            )
+
+        n = len(eval_stamps)
+        fps_actual = (n - 1) / total_dt
+        deltas = np.diff(np.array(eval_stamps, dtype=np.float64))
+        median_dt = float(np.median(deltas))
+        ideal_dt = 1.0 / float(self.update_rate)
+        abs_jitter = np.abs(deltas - median_dt)
+        jitter = float(np.percentile(abs_jitter, self.FPS_JITTER_PERCENTILE)) if abs_jitter.size else 0.0
+        dropout_thr = 2.0 * median_dt
+        dropouts = int(np.sum(deltas > dropout_thr))
+
+        fps_ok = fps_actual >= 0.95 * float(self.update_rate)
+        jitter_limit = max(float(self.FPS_MAX_JITTER_S), median_dt * 0.5)
+        jitter_ok = jitter <= jitter_limit
+        dropouts_ok = dropouts == 0
+
+        metrics = {
+            "duration_target_s": float(self.FPS_DURATION_S),
+            "duration_actual_s": round(duration_actual, 3),
+            "update_rate_target_hz": float(self.update_rate),
+            "fps_actual_hz": fps_actual,
+            "ideal_dt_s": ideal_dt,
+            "median_dt_s": median_dt,
+            "jitter_s": jitter,
+            "jitter_limit_s": jitter_limit,
+            "jitter_percentile": self.FPS_JITTER_PERCENTILE,
+            "dropouts_count": dropouts,
+            "dropout_threshold_s": dropout_thr,
+            "raw_stamps": raw_n,
+            "monotonic_stamps": len(mono),
+            "frames_skipped_warmup": warmup_frames,
+            "header_stamp_missing_count": header_missing[0],
+            "checks": {
+                "fps_ok": fps_ok,
+                "jitter_ok": jitter_ok,
+                "dropouts_ok": dropouts_ok,
+            },
+        }
+
+        if not (fps_ok and jitter_ok and dropouts_ok):
+            reasons = []
+            if not fps_ok:      reasons.append(f"fps={fps_actual:.2f} Hz < 0.95×{self.update_rate}")
+            if not jitter_ok:   reasons.append(f"jitter={jitter*1000:.1f} ms > {jitter_limit*1000:.1f} ms")
+            if not dropouts_ok: reasons.append(f"dropouts={dropouts}")
+            raise AssertionError("scam_fps_stability_test: " + "; ".join(reasons))
+
+        return {"id": "SCAM_FPS", "passed": True, "metrics": metrics}
+
 
 def _stereo_build_description(method_name: str, result: dict, passed: bool) -> str:
     metrics = result.get("metrics", {})
@@ -1515,6 +1884,68 @@ def _stereo_build_description(method_name: str, result: dict, passed: bool) -> s
                 desc = f"Тест пройден: текстурированная стена даёт лучший диспаритет. Преимущество: {gain:.4f} (минимум 0.05)."
             else:
                 desc = f"Текстурированная стена не даёт достаточного преимущества. Gain: {gain:.4f}."
+        elif method_name == "scam_fov_test":
+            if passed:
+                desc = (
+                    f"Тест пройден: горизонтальный FOV "
+                    f"{float(metrics.get('measured_hfov_deg', 0)):.2f}° "
+                    f"(цель {float(metrics.get('target_hfov_deg', 0)):.2f}°, "
+                    f"ошибка {float(metrics.get('relative_error_h', 0)):.2%}), "
+                    f"вертикальный FOV "
+                    f"{float(metrics.get('measured_vfov_deg', 0)):.2f}° "
+                    f"(цель {float(metrics.get('target_vfov_deg', 0)):.2f}°, "
+                    f"ошибка {float(metrics.get('relative_error_v', 0)):.2%}). "
+                    f"Допуск ≤{float(metrics.get('tolerance', 0.05)):.0%}."
+                )
+            else:
+                desc = (
+                    f"FOV не соответствует заявленному. "
+                    f"Измерено: h={float(metrics.get('measured_hfov_deg', 0)):.2f}°, "
+                    f"v={float(metrics.get('measured_vfov_deg', 0)):.2f}° "
+                    f"(цели h={float(metrics.get('target_hfov_deg', 0)):.2f}°, "
+                    f"v={float(metrics.get('target_vfov_deg', 0)):.2f}°)."
+                )
+        elif method_name == "scam_resolution_test":
+            exp = metrics.get("expected_resolution", {})
+            l = metrics.get("left_resolution", {})
+            r = metrics.get("right_resolution", {})
+            if passed:
+                desc = (
+                    f"Тест пройден: оба кадра стерео-пары имеют разрешение "
+                    f"{exp.get('width', '?')}×{exp.get('height', '?')}, как задано в SDF."
+                )
+            else:
+                desc = (
+                    f"Разрешение не совпадает. Ожидалось "
+                    f"{exp.get('width', '?')}×{exp.get('height', '?')}, "
+                    f"левый: {l.get('width', '?')}×{l.get('height', '?')}, "
+                    f"правый: {r.get('width', '?')}×{r.get('height', '?')}."
+                )
+        elif method_name == "scam_fps_stability_test":
+            fps = float(metrics.get("fps_actual_hz", 0))
+            jitter_ms = float(metrics.get("jitter_s", 0)) * 1000.0
+            jitter_limit_ms = float(metrics.get("jitter_limit_s", 0)) * 1000.0
+            dropouts = int(metrics.get("dropouts_count", 0))
+            median_ms = float(metrics.get("median_dt_s", 0)) * 1000.0
+            if passed:
+                desc = (
+                    f"Тест пройден: FPS левой камеры {fps:.1f} Гц "
+                    f"(≥95% от заданного), медианный кадр {median_ms:.1f} мс, "
+                    f"джиттер P95 {jitter_ms:.1f} мс (лимит {jitter_limit_ms:.1f} мс), "
+                    f"пропусков нет."
+                )
+            else:
+                parts = []
+                chk = metrics.get("checks", {})
+                if not chk.get("fps_ok", True):      parts.append("FPS")
+                if not chk.get("jitter_ok", True):   parts.append("джиттер")
+                if not chk.get("dropouts_ok", True): parts.append("пропуски")
+                fail_tag = f" Не прошло: {', '.join(parts)}." if parts else ""
+                desc = (
+                    f"Стабильность FPS нарушена.{fail_tag} "
+                    f"FPS: {fps:.1f} Гц, джиттер P95: {jitter_ms:.1f} мс "
+                    f"(лимит {jitter_limit_ms:.1f} мс), пропуски: {dropouts}."
+                )
         else:
             return None
     except Exception:
@@ -1712,4 +2143,28 @@ def s2_texture_vs_smooth_stability_test(simulator, sensor, progress_cb=None) -> 
         simulator,
         sensor,
         progress_cb,
+    )
+
+
+def scam_fov_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG scam_fov_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_context_test(
+        _StereoProfileTestContext, "scam_fov_test",
+        simulator, sensor, progress_cb,
+    )
+
+
+def scam_resolution_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG scam_resolution_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_context_test(
+        _StereoProfileTestContext, "scam_resolution_test",
+        simulator, sensor, progress_cb,
+    )
+
+
+def scam_fps_stability_test(simulator, sensor, progress_cb=None) -> dict:
+    print(f"\n[DEBUG scam_fps_stability_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_context_test(
+        _StereoProfileTestContext, "scam_fps_stability_test",
+        simulator, sensor, progress_cb,
     )

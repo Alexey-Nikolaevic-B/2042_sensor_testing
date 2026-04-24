@@ -503,6 +503,12 @@ TESTS: dict[str, callable] = {
     "scam_stereo_occlusion_test": stereo_occlusion_test,
     "scam_1_stereo_accuracy_test": s1_stereo_accuracy_test,
     "scam_2_texture_vs_smooth_stability_test": s2_texture_vs_smooth_stability_test,
+    # Parity with mono (mcam_) / depth (dcam_) suites — added 2026-04-24.
+    # Scenes are reused from mono: camera_c9_fov.world, camera_c2_resolution.world,
+    # camera_c11_fps_static_load.world — geometry is camera-agnostic.
+    "scam_fov_test": scam_fov_test,
+    "scam_resolution_test": scam_resolution_test,
+    "scam_fps_stability_test": scam_fps_stability_test,
     # Tactile tests
     "tactile_min_force_threshold": tactile_min_force_threshold,
     "tactile_response_uniformity": tactile_response_uniformity,
