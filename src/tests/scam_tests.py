@@ -6,7 +6,7 @@ import math
 import os
 import threading
 import time
-from math import atan2, cos, pi, sin, tan
+from math import atan, atan2, cos, pi, sin, tan
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
