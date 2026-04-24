@@ -1500,11 +1500,33 @@ class _StereoProfileTestContext:
 
     # ══════════════════════════════════════════════════════════════════
     # FOV test — same logic as mcam c9_fov_test but observed through the
-    # stereo rig.  We run the binary search over the LEFT camera frame.
-    # The right eye is identical hardware in the simulated rig, so its
-    # FOV is guaranteed to match; measuring once keeps this ~12 iters
-    # long instead of 24.  If a future use-case needs per-eye numbers,
-    # mirror the code on `right` with a `_ensure_pair()` call.
+    # stereo LEFT frame, with TWO-SIDED binary search to cancel out the
+    # stereo-rig baseline offset.
+    #
+    # Why two-sided:
+    # The left camera sits at (y=±B/2, z=z_off) relative to the model
+    # origin; the panel coordinates we command through set_model_state
+    # are in world frame.  If we only measure `last_y` on the positive-Y
+    # side (like mono C9 does), the result is biased by the camera's
+    # y-offset — a 6 cm baseline on a 2 m test distance translates to
+    # ~3.4° systematic error, which for a 70° HFOV is a 5% bias and
+    # trips the ≤5% tolerance even when the plugin is perfectly
+    # configured.
+    #
+    # Dual-sided cancellation:
+    #   last_y_pos  = y_cam_left + X·tan(HFOV/2) + HALF_SIZE_H
+    #   last_y_neg  = y_cam_left − X·tan(HFOV/2) − HALF_SIZE_H
+    #   (last_y_pos − last_y_neg)/2 − HALF_SIZE_H = X·tan(HFOV/2)
+    #   ⇒ HFOV = 2·atan(((Y+ − Y−)/2 − HALF_SIZE_H) / X)
+    # The camera's actual y-offset drops out of the calculation.  Same
+    # trick works for vertical (Z+/Z−) and cancels any z-elevation of
+    # the rig mount.
+    #
+    # We also RETURN a passed=False dict with full metrics+description
+    # instead of raising, so the UI shows real numbers — mono C11 uses
+    # the same pattern; raising would leave _stereo_build_description
+    # reading an empty metrics dict and rendering "0.00°" for every
+    # value on failure.
     # ══════════════════════════════════════════════════════════════════
     def scam_fov_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "scam_fov_test")
@@ -1524,15 +1546,19 @@ class _StereoProfileTestContext:
             if not simulator.wait_for_model_spawn(name, timeout=20):
                 raise RuntimeError(f"Model not spawned: {name}")
 
-        # Warm-up pair: confirms both cameras are publishing before we
-        # start moving panels.
+        # Warm-up pair — confirms the stereo stream is alive.
         data = self.capture_data(simulator, timeout=35.0, convert2cv=True)
         if data is None:
             raise RuntimeError("No stereo frames for FOV warm-up")
 
         X_FIXED = 2.0
+        TOL = self.FOV_TOLERANCE
+        HALF_H = self.FOV_HALF_SIZE_H
+        HALF_V = self.FOV_HALF_SIZE_V
 
-        def _move_panels(y: float, z: float, settle_s: float = 0.4) -> None:
+        def _capture_at(y: float, z: float, settle_s: float = 0.4) -> tuple:
+            """Move panels to (y, z), return (red_visible, blue_visible)
+            from the LEFT frame."""
             self._move_and_settle(
                 simulator, self.FOV_CUBE_H_NAME,
                 x=X_FIXED, y=y, z=0.0, settle_s=settle_s,
@@ -1541,9 +1567,6 @@ class _StereoProfileTestContext:
                 simulator, self.FOV_CUBE_V_NAME,
                 x=X_FIXED, y=0.0, z=z, settle_s=settle_s,
             )
-
-        def _capture_and_check(y: float, z: float, settle_s: float = 0.4) -> tuple:
-            _move_panels(y, z, settle_s=settle_s)
             pair = self.capture_data(simulator, timeout=10.0, convert2cv=True)
             if pair is None or pair.get("left_cv") is None:
                 raise RuntimeError("Lost stereo pair during FOV sweep")
@@ -1552,119 +1575,154 @@ class _StereoProfileTestContext:
             blue_mask = (frame[:, :, 0] > 120) & (frame[:, :, 2] < 80) & (frame[:, :, 1] < 80)
             return bool(np.any(red_mask)), bool(np.any(blue_mask))
 
-        init_h_vis, init_v_vis = _capture_and_check(0.0, 0.0, settle_s=1.0)
-        if not init_h_vis:
-            raise AssertionError(
-                "scam_fov_test: red panel not detected at centre"
-            )
-        if not init_v_vis:
-            raise AssertionError(
-                "scam_fov_test: blue panel not detected at centre"
-            )
-
-        y_edge_target = X_FIXED * tan(target_hfov / 2.0)
-        z_edge_target = X_FIXED * tan(target_vfov / 2.0)
-        y_target = y_edge_target + self.FOV_HALF_SIZE_H
-        z_target = z_edge_target + self.FOV_HALF_SIZE_V
-
-        # 3-point pre-scan — same idea as mono C9, finds a good starting
-        # bracket for the binary search without running full 0..MAX sweep.
-        offsets = [-0.1, 0.0, 0.1]
-        points_h = [y_target + off for off in offsets]
-        points_v = [z_target + off for off in offsets]
-
-        vis_h, vis_v = [], []
-        for i in range(len(offsets)):
-            hv, vv = _capture_and_check(
-                points_h[i], points_v[i],
-                settle_s=0.8 if i == 0 else 0.4,
-            )
-            vis_h.append(hv)
-            vis_v.append(vv)
-
-        lo_h, hi_h = 0.0, self.FOV_MAX_Y
-        lo_v, hi_v = 0.0, self.FOV_MAX_Z
-        last_y = last_z = None
-        active_h = active_v = True
-
-        if vis_h[0] and not vis_h[-1]:
-            for off, v in zip(offsets, vis_h):
-                if v:
-                    last_y = y_target + off
-            active_h = False
-            lo_h = hi_h = last_y
-        elif not vis_h[0]:
-            lo_h, hi_h = 0.0, points_h[0]
-        elif vis_h[-1]:
-            lo_h, hi_h = points_h[-1], self.FOV_MAX_Y
-
-        if vis_v[0] and not vis_v[-1]:
-            for off, v in zip(offsets, vis_v):
-                if v:
-                    last_z = z_target + off
-            active_v = False
-            lo_v = hi_v = last_z
-        elif not vis_v[0]:
-            lo_v, hi_v = 0.0, points_v[0]
-        elif vis_v[-1]:
-            lo_v, hi_v = points_v[-1], self.FOV_MAX_Z
-
-        iteration = 0
-        while active_h or active_v:
-            iteration += 1
-            mid_y = (lo_h + hi_h) / 2.0 if active_h else (last_y or lo_h)
-            mid_z = (lo_v + hi_v) / 2.0 if active_v else (last_z or lo_v)
-            hv, vv = _capture_and_check(mid_y, mid_z, settle_s=0.4)
-
-            if active_h:
-                if hv:
-                    lo_h = mid_y
-                else:
-                    hi_h = mid_y
-                active_h = (hi_h - lo_h) > self.FOV_TOLERANCE
-                if not active_h:
-                    last_y = lo_h
-            if active_v:
-                if vv:
-                    lo_v = mid_z
-                else:
-                    hi_v = mid_z
-                active_v = (hi_v - lo_v) > self.FOV_TOLERANCE
-                if not active_v:
-                    last_z = lo_v
-
-        last_y = last_y if last_y is not None else lo_h
-        last_z = last_z if last_z is not None else lo_v
-
-        y_edge = last_y - self.FOV_HALF_SIZE_H
-        z_edge = last_z - self.FOV_HALF_SIZE_V
-        measured_hfov = 2.0 * atan(y_edge / X_FIXED)
-        measured_vfov = 2.0 * atan(z_edge / X_FIXED)
-        rel_h = abs(measured_hfov - target_hfov) / target_hfov if target_hfov > 0 else float("inf")
-        rel_v = abs(measured_vfov - target_vfov) / target_vfov if target_vfov > 0 else float("inf")
-        h_ok = rel_h <= self.FOV_REL_ERROR
-        v_ok = rel_v <= self.FOV_REL_ERROR
-
-        metrics = {
+        # Build partial metrics up-front so that any early failure below
+        # still produces a useful description dict.
+        metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["scam_fov_test"]),
             "target_hfov_deg": math.degrees(target_hfov),
             "target_vfov_deg": math.degrees(target_vfov),
+            "x_fixed_m": X_FIXED,
+            "tolerance": self.FOV_REL_ERROR,
+            "baseline_m": float(self.baseline),
+            "status": "ERROR",
+            "error_reason": "",
+        }
+        self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
+
+        # Sanity — both panels must be visible in the centre, otherwise
+        # later sweeps are searching noise.
+        red_c, blue_c = _capture_at(0.0, 0.0, settle_s=1.0)
+        if not red_c:
+            metrics["error_reason"] = "red_panel_not_at_centre"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
+                "description": "Красная панель не обнаружена в центре левого "
+                               "кадра — возможная проблема с миром или цветом.",
+            }
+        if not blue_c:
+            metrics["error_reason"] = "blue_panel_not_at_centre"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
+                "description": "Синяя панель не обнаружена в центре левого "
+                               "кадра — возможная проблема с миром или цветом.",
+            }
+
+        # ──────────────────────────────────────────────────────────────
+        # Bisection: find the last position along a given axis/direction
+        # where the panel is still visible.  `sign` is +1 or −1 and
+        # `axis` picks which panel / coordinate to probe.
+        #
+        # Invariant: `lo` (closer to 0) always visible, `hi` (farther)
+        # always invisible.  Shrinks until `hi − lo < TOL`.
+        # ──────────────────────────────────────────────────────────────
+        def _bisect_edge(axis: str, sign: int) -> float:
+            lo = 0.0
+            hi = (self.FOV_MAX_Y if axis == "h" else self.FOV_MAX_Z)
+            # Opposite axis must be kept INSIDE its own FOV so we still
+            # see both panels at the same time; use small non-zero value
+            # so the other panel remains centred-ish.
+            def _probe(mag: float) -> bool:
+                y = sign * mag if axis == "h" else 0.0
+                z = sign * mag if axis == "v" else 0.0
+                hv, vv = _capture_at(y, z, settle_s=0.4)
+                return hv if axis == "h" else vv
+
+            # Expand hi until panel actually leaves view.  Start at the
+            # SDF-predicted boundary so the usual case converges in a
+            # few iterations.
+            target_edge = (
+                X_FIXED * tan(target_hfov / 2.0) + HALF_H
+                if axis == "h"
+                else X_FIXED * tan(target_vfov / 2.0) + HALF_V
+            )
+            hi = max(target_edge * 1.3, target_edge + 0.2)
+            hi = min(hi, (self.FOV_MAX_Y if axis == "h" else self.FOV_MAX_Z))
+
+            iters = 0
+            while (hi - lo) > TOL and iters < 20:
+                iters += 1
+                mid = (lo + hi) / 2.0
+                if _probe(mid):
+                    lo = mid
+                else:
+                    hi = mid
+            return sign * lo
+
+        print("[DEBUG scam_fov_test] bisecting horizontal +Y edge")
+        y_pos = _bisect_edge("h", +1)
+        print(f"[DEBUG scam_fov_test]   → y_pos = {y_pos:+.4f} m")
+
+        print("[DEBUG scam_fov_test] bisecting horizontal −Y edge")
+        y_neg = _bisect_edge("h", -1)
+        print(f"[DEBUG scam_fov_test]   → y_neg = {y_neg:+.4f} m")
+
+        print("[DEBUG scam_fov_test] bisecting vertical +Z edge")
+        z_pos = _bisect_edge("v", +1)
+        print(f"[DEBUG scam_fov_test]   → z_pos = {z_pos:+.4f} m")
+
+        print("[DEBUG scam_fov_test] bisecting vertical −Z edge")
+        z_neg = _bisect_edge("v", -1)
+        print(f"[DEBUG scam_fov_test]   → z_neg = {z_neg:+.4f} m")
+
+        # Geometry: (Y+ − Y−) = 2·X·tan(HFOV/2) + 2·HALF_H → solve for HFOV.
+        y_cam_left = (y_pos + y_neg) / 2.0      # recovered for diag only
+        z_cam_left = (z_pos + z_neg) / 2.0
+        y_half_span = (y_pos - y_neg) / 2.0 - HALF_H
+        z_half_span = (z_pos - z_neg) / 2.0 - HALF_V
+        measured_hfov = 2.0 * atan(y_half_span / X_FIXED)
+        measured_vfov = 2.0 * atan(z_half_span / X_FIXED)
+
+        rel_h = (abs(measured_hfov - target_hfov) / target_hfov
+                 if target_hfov > 0 else float("inf"))
+        rel_v = (abs(measured_vfov - target_vfov) / target_vfov
+                 if target_vfov > 0 else float("inf"))
+        h_ok = rel_h <= self.FOV_REL_ERROR
+        v_ok = rel_v <= self.FOV_REL_ERROR
+        passed = h_ok and v_ok
+
+        metrics.update({
+            "y_last_pos_m": y_pos,
+            "y_last_neg_m": y_neg,
+            "z_last_pos_m": z_pos,
+            "z_last_neg_m": z_neg,
+            "y_cam_recovered_m": y_cam_left,
+            "z_cam_recovered_m": z_cam_left,
+            "y_half_span_m": y_half_span,
+            "z_half_span_m": z_half_span,
             "measured_hfov_deg": math.degrees(measured_hfov),
             "measured_vfov_deg": math.degrees(measured_vfov),
             "relative_error_h": rel_h,
             "relative_error_v": rel_v,
-            "tolerance": self.FOV_REL_ERROR,
             "checks": {"hfov_ok": h_ok, "vfov_ok": v_ok},
-        }
+            "status": "PASS" if passed else "FAIL",
+        })
 
-        if not (h_ok and v_ok):
-            raise AssertionError(
-                f"scam_fov_test failed: measured_hfov="
-                f"{math.degrees(measured_hfov):.2f}° (target "
-                f"{math.degrees(target_hfov):.2f}°, err={rel_h:.2%}); "
-                f"measured_vfov={math.degrees(measured_vfov):.2f}° "
-                f"(target {math.degrees(target_vfov):.2f}°, err={rel_v:.2%})"
-            )
+        if not passed:
+            reasons = []
+            if not h_ok:
+                reasons.append(
+                    f"горизонтальный FOV {math.degrees(measured_hfov):.2f}° "
+                    f"отличается от цели {math.degrees(target_hfov):.2f}° на {rel_h:.2%}"
+                )
+            if not v_ok:
+                reasons.append(
+                    f"вертикальный FOV {math.degrees(measured_vfov):.2f}° "
+                    f"отличается от цели {math.degrees(target_vfov):.2f}° на {rel_v:.2%}"
+                )
+            desc = ("FOV не соответствует заявленному (допуск "
+                    f"≤{self.FOV_REL_ERROR:.0%}): " + "; ".join(reasons) + ".")
+            metrics["error_reason"] = desc
+            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
+                "description": desc,
+            }
 
+        self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
         return {"id": "SCAM_FOV", "passed": True, "metrics": metrics}
 
     # ══════════════════════════════════════════════════════════════════
@@ -1700,17 +1758,31 @@ class _StereoProfileTestContext:
         right_ok = (right_w == expected_w and right_h == expected_h)
 
         metrics = {
+            "world_file": str(self.test_to_world["scam_resolution_test"]),
             "expected_resolution": {"width": expected_w, "height": expected_h},
             "left_resolution":  {"width": left_w,  "height": left_h},
             "right_resolution": {"width": right_w, "height": right_h},
             "checks": {"left_matches": left_ok, "right_matches": right_ok},
+            "status": "PASS" if (left_ok and right_ok) else "FAIL",
         }
+        self._set_test_diagnostics(scam_resolution={"metrics": dict(metrics)})
 
+        # Return (don't raise) so the description builder has full metrics.
         if not (left_ok and right_ok):
-            raise AssertionError(
-                f"scam_resolution_test: expected {expected_w}x{expected_h}, "
-                f"got left={left_w}x{left_h}, right={right_w}x{right_h}"
+            parts = []
+            if not left_ok:
+                parts.append(f"левый {left_w}×{left_h}")
+            if not right_ok:
+                parts.append(f"правый {right_w}×{right_h}")
+            desc = (
+                f"Разрешение не совпадает с SDF ({expected_w}×{expected_h}): "
+                + ", ".join(parts) + "."
             )
+            metrics["error_reason"] = desc
+            return {
+                "id": "SCAM_RES", "passed": False, "metrics": metrics,
+                "description": desc,
+            }
 
         return {"id": "SCAM_RES", "passed": True, "metrics": metrics}
 
@@ -1728,10 +1800,28 @@ class _StereoProfileTestContext:
     def scam_fps_stability_test(self, simulator) -> Dict[str, Any]:
         self._open_test_scene(simulator, "scam_fps_stability_test")
 
+        metrics: Dict[str, Any] = {
+            "world_file": str(self.test_to_world["scam_fps_stability_test"]),
+            "update_rate_target_hz": float(self.update_rate),
+            "duration_target_s": float(self.FPS_DURATION_S),
+            "warmup_seconds": float(self.FPS_WARMUP_SECONDS),
+            "jitter_percentile": int(self.FPS_JITTER_PERCENTILE),
+            "jitter_limit_s": float(self.FPS_MAX_JITTER_S),
+            "status": "ERROR",
+            "error_reason": "",
+        }
+        self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+
         # Warm-up: make sure the left topic is actually publishing.
         data = self.capture_data(simulator, timeout=35.0, convert2cv=False)
         if data is None or data.get("raw_left") is None:
-            raise RuntimeError("Left topic silent — cannot measure FPS")
+            metrics["error_reason"] = "left_topic_silent"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FPS", "passed": False, "metrics": metrics,
+                "description": "Левая камера не публикует кадры — измерить FPS невозможно.",
+            }
 
         resolved_topic = str(self._resolved_left_topic or self.LEFT_IMAGE_TOPIC)
         print(
@@ -1768,10 +1858,14 @@ class _StereoProfileTestContext:
         print(f"[DEBUG scam_fps_stability_test] captured {raw_n} stamps in {duration_actual:.1f} s")
 
         if raw_n < 2:
-            raise AssertionError(
-                f"scam_fps_stability_test: only {raw_n} stamps captured; "
-                f"the left image topic appears dead."
-            )
+            metrics["raw_stamps"] = raw_n
+            metrics["error_reason"] = f"not_enough_frames:{raw_n}"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FPS", "passed": False, "metrics": metrics,
+                "description": f"Слишком мало кадров ({raw_n}), невозможно оценить FPS.",
+            }
 
         # Keep only monotonically increasing stamps — ROS sometimes
         # delivers duplicates or out-of-order messages under load.
@@ -1782,16 +1876,26 @@ class _StereoProfileTestContext:
 
         warmup_frames = int(max(1, round(float(self.update_rate) * float(self.FPS_WARMUP_SECONDS))))
         if len(mono) <= warmup_frames + 1:
-            raise AssertionError(
-                f"scam_fps_stability_test: only {len(mono)} monotonic stamps after warmup "
-                f"({warmup_frames} frames)."
-            )
+            metrics["monotonic_stamps"] = len(mono)
+            metrics["frames_skipped_warmup"] = warmup_frames
+            metrics["error_reason"] = f"not_enough_after_warmup:{len(mono)}"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FPS", "passed": False, "metrics": metrics,
+                "description": f"Недостаточно кадров после разогрева (всего {len(mono)}, "
+                               f"требуется > {warmup_frames}).",
+            }
         eval_stamps = mono[warmup_frames:]
         total_dt = eval_stamps[-1] - eval_stamps[0]
         if total_dt <= 0.0:
-            raise AssertionError(
-                f"scam_fps_stability_test: invalid stamp interval {total_dt:.4f} s"
-            )
+            metrics["error_reason"] = f"invalid_interval:{total_dt}"
+            metrics["status"] = "FAIL"
+            self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FPS", "passed": False, "metrics": metrics,
+                "description": f"Некорректный интервал меток ({total_dt:.3f} с).",
+            }
 
         n = len(eval_stamps)
         fps_actual = (n - 1) / total_dt
@@ -1808,16 +1912,14 @@ class _StereoProfileTestContext:
         jitter_ok = jitter <= jitter_limit
         dropouts_ok = dropouts == 0
 
-        metrics = {
-            "duration_target_s": float(self.FPS_DURATION_S),
+        passed = fps_ok and jitter_ok and dropouts_ok
+        metrics.update({
             "duration_actual_s": round(duration_actual, 3),
-            "update_rate_target_hz": float(self.update_rate),
             "fps_actual_hz": fps_actual,
             "ideal_dt_s": ideal_dt,
             "median_dt_s": median_dt,
             "jitter_s": jitter,
             "jitter_limit_s": jitter_limit,
-            "jitter_percentile": self.FPS_JITTER_PERCENTILE,
             "dropouts_count": dropouts,
             "dropout_threshold_s": dropout_thr,
             "raw_stamps": raw_n,
@@ -1829,15 +1931,23 @@ class _StereoProfileTestContext:
                 "jitter_ok": jitter_ok,
                 "dropouts_ok": dropouts_ok,
             },
-        }
+            "status": "PASS" if passed else "FAIL",
+        })
 
-        if not (fps_ok and jitter_ok and dropouts_ok):
+        if not passed:
             reasons = []
-            if not fps_ok:      reasons.append(f"fps={fps_actual:.2f} Hz < 0.95×{self.update_rate}")
-            if not jitter_ok:   reasons.append(f"jitter={jitter*1000:.1f} ms > {jitter_limit*1000:.1f} ms")
-            if not dropouts_ok: reasons.append(f"dropouts={dropouts}")
-            raise AssertionError("scam_fps_stability_test: " + "; ".join(reasons))
+            if not fps_ok:      reasons.append(f"частота {fps_actual:.2f} Hz ниже 95% от {self.update_rate}")
+            if not jitter_ok:   reasons.append(f"джиттер {jitter*1000:.1f} мс > {jitter_limit*1000:.1f} мс")
+            if not dropouts_ok: reasons.append(f"{dropouts} пропусков кадров")
+            desc = "Стабильность FPS нарушена: " + "; ".join(reasons) + "."
+            metrics["error_reason"] = desc
+            self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
+            return {
+                "id": "SCAM_FPS", "passed": False, "metrics": metrics,
+                "description": desc,
+            }
 
+        self._set_test_diagnostics(scam_fps_stability={"metrics": dict(metrics)})
         return {"id": "SCAM_FPS", "passed": True, "metrics": metrics}
 
 
