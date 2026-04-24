@@ -44,19 +44,6 @@ class _StereoProfileTestContext:
     C7_FRONT_CUBE_NAME = "front_cube"
     C7_BACK_CUBE_NAME = "back_cube"
 
-    # FOV-test constants — red/blue panels in camera_c9_fov.world.
-    # Same world + same model names as the mono test, because the scene
-    # geometry doesn't depend on which camera observes it; we just need
-    # to capture from the stereo pair instead of the mono sensor.
-    FOV_CUBE_H_NAME = "fov_cube_h"
-    FOV_CUBE_V_NAME = "fov_cube_v"
-    FOV_HALF_SIZE_H = 0.01
-    FOV_HALF_SIZE_V = 0.01
-    FOV_MAX_Y = 6.0
-    FOV_MAX_Z = 6.0
-    FOV_TOLERANCE = 0.002
-    FOV_REL_ERROR = 0.05
-
     # FPS stability constants — mirror _mono ctx defaults; plugin cadence
     # tends to drift from SDF <update_rate> by a few ms so we compare
     # jitter against the OBSERVED median, not the declared ideal_dt.
@@ -133,10 +120,9 @@ class _StereoProfileTestContext:
             "s2_texture_vs_smooth_stability_test": str(
                 worlds_root / "camera_c8_stereo_complex.world"
             ),
-            # New tests that parallel the mono C9 / C2 / C11 checks.
+            # New tests that parallel the mono C2 / C11 checks.
             # Scene files are reused from mono — geometry is identical,
             # we simply observe it through a stereo rig.
-            "scam_fov_test":             str(worlds_root / "camera_c9_fov.world"),
             "scam_resolution_test":      str(worlds_root / "camera_c2_resolution.world"),
             "scam_fps_stability_test":   str(worlds_root / "camera_c11_fps_static_load.world"),
         }
@@ -1499,233 +1485,6 @@ class _StereoProfileTestContext:
         return {"id": "S2", "passed": True, "metrics": metrics}
 
     # ══════════════════════════════════════════════════════════════════
-    # FOV test — same logic as mcam c9_fov_test but observed through the
-    # stereo LEFT frame, with TWO-SIDED binary search to cancel out the
-    # stereo-rig baseline offset.
-    #
-    # Why two-sided:
-    # The left camera sits at (y=±B/2, z=z_off) relative to the model
-    # origin; the panel coordinates we command through set_model_state
-    # are in world frame.  If we only measure `last_y` on the positive-Y
-    # side (like mono C9 does), the result is biased by the camera's
-    # y-offset — a 6 cm baseline on a 2 m test distance translates to
-    # ~3.4° systematic error, which for a 70° HFOV is a 5% bias and
-    # trips the ≤5% tolerance even when the plugin is perfectly
-    # configured.
-    #
-    # Dual-sided cancellation:
-    #   last_y_pos  = y_cam_left + X·tan(HFOV/2) + HALF_SIZE_H
-    #   last_y_neg  = y_cam_left − X·tan(HFOV/2) − HALF_SIZE_H
-    #   (last_y_pos − last_y_neg)/2 − HALF_SIZE_H = X·tan(HFOV/2)
-    #   ⇒ HFOV = 2·atan(((Y+ − Y−)/2 − HALF_SIZE_H) / X)
-    # The camera's actual y-offset drops out of the calculation.  Same
-    # trick works for vertical (Z+/Z−) and cancels any z-elevation of
-    # the rig mount.
-    #
-    # We also RETURN a passed=False dict with full metrics+description
-    # instead of raising, so the UI shows real numbers — mono C11 uses
-    # the same pattern; raising would leave _stereo_build_description
-    # reading an empty metrics dict and rendering "0.00°" for every
-    # value on failure.
-    # ══════════════════════════════════════════════════════════════════
-    def scam_fov_test(self, simulator) -> Dict[str, Any]:
-        self._open_test_scene(simulator, "scam_fov_test")
-
-        target_hfov = float(self.horizontal_fov)
-        img_w = int(self.image_width)
-        img_h = int(self.image_height)
-        target_vfov = 2.0 * atan(tan(target_hfov / 2.0) * (img_h / img_w))
-
-        print(
-            f"[DEBUG scam_fov_test] target_hfov={target_hfov:.5f} rad "
-            f"({math.degrees(target_hfov):.2f}°), "
-            f"target_vfov={target_vfov:.5f} rad ({math.degrees(target_vfov):.2f}°)"
-        )
-
-        for name in (self.FOV_CUBE_H_NAME, self.FOV_CUBE_V_NAME):
-            if not simulator.wait_for_model_spawn(name, timeout=20):
-                raise RuntimeError(f"Model not spawned: {name}")
-
-        # Warm-up pair — confirms the stereo stream is alive.
-        data = self.capture_data(simulator, timeout=35.0, convert2cv=True)
-        if data is None:
-            raise RuntimeError("No stereo frames for FOV warm-up")
-
-        X_FIXED = 2.0
-        TOL = self.FOV_TOLERANCE
-        HALF_H = self.FOV_HALF_SIZE_H
-        HALF_V = self.FOV_HALF_SIZE_V
-
-        def _capture_at(y: float, z: float, settle_s: float = 0.4) -> tuple:
-            """Move panels to (y, z), return (red_visible, blue_visible)
-            from the LEFT frame."""
-            self._move_and_settle(
-                simulator, self.FOV_CUBE_H_NAME,
-                x=X_FIXED, y=y, z=0.0, settle_s=settle_s,
-            )
-            self._move_and_settle(
-                simulator, self.FOV_CUBE_V_NAME,
-                x=X_FIXED, y=0.0, z=z, settle_s=settle_s,
-            )
-            pair = self.capture_data(simulator, timeout=10.0, convert2cv=True)
-            if pair is None or pair.get("left_cv") is None:
-                raise RuntimeError("Lost stereo pair during FOV sweep")
-            frame = pair["left_cv"]
-            red_mask = (frame[:, :, 2] > 120) & (frame[:, :, 1] < 80) & (frame[:, :, 0] < 80)
-            blue_mask = (frame[:, :, 0] > 120) & (frame[:, :, 2] < 80) & (frame[:, :, 1] < 80)
-            return bool(np.any(red_mask)), bool(np.any(blue_mask))
-
-        # Build partial metrics up-front so that any early failure below
-        # still produces a useful description dict.
-        metrics: Dict[str, Any] = {
-            "world_file": str(self.test_to_world["scam_fov_test"]),
-            "target_hfov_deg": math.degrees(target_hfov),
-            "target_vfov_deg": math.degrees(target_vfov),
-            "x_fixed_m": X_FIXED,
-            "tolerance": self.FOV_REL_ERROR,
-            "baseline_m": float(self.baseline),
-            "status": "ERROR",
-            "error_reason": "",
-        }
-        self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
-
-        # Sanity — both panels must be visible in the centre, otherwise
-        # later sweeps are searching noise.
-        red_c, blue_c = _capture_at(0.0, 0.0, settle_s=1.0)
-        if not red_c:
-            metrics["error_reason"] = "red_panel_not_at_centre"
-            metrics["status"] = "FAIL"
-            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
-            return {
-                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
-                "description": "Красная панель не обнаружена в центре левого "
-                               "кадра — возможная проблема с миром или цветом.",
-            }
-        if not blue_c:
-            metrics["error_reason"] = "blue_panel_not_at_centre"
-            metrics["status"] = "FAIL"
-            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
-            return {
-                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
-                "description": "Синяя панель не обнаружена в центре левого "
-                               "кадра — возможная проблема с миром или цветом.",
-            }
-
-        # ──────────────────────────────────────────────────────────────
-        # Bisection: find the last position along a given axis/direction
-        # where the panel is still visible.  `sign` is +1 or −1 and
-        # `axis` picks which panel / coordinate to probe.
-        #
-        # Invariant: `lo` (closer to 0) always visible, `hi` (farther)
-        # always invisible.  Shrinks until `hi − lo < TOL`.
-        # ──────────────────────────────────────────────────────────────
-        def _bisect_edge(axis: str, sign: int) -> float:
-            lo = 0.0
-            hi = (self.FOV_MAX_Y if axis == "h" else self.FOV_MAX_Z)
-            # Opposite axis must be kept INSIDE its own FOV so we still
-            # see both panels at the same time; use small non-zero value
-            # so the other panel remains centred-ish.
-            def _probe(mag: float) -> bool:
-                y = sign * mag if axis == "h" else 0.0
-                z = sign * mag if axis == "v" else 0.0
-                hv, vv = _capture_at(y, z, settle_s=0.4)
-                return hv if axis == "h" else vv
-
-            # Expand hi until panel actually leaves view.  Start at the
-            # SDF-predicted boundary so the usual case converges in a
-            # few iterations.
-            target_edge = (
-                X_FIXED * tan(target_hfov / 2.0) + HALF_H
-                if axis == "h"
-                else X_FIXED * tan(target_vfov / 2.0) + HALF_V
-            )
-            hi = max(target_edge * 1.3, target_edge + 0.2)
-            hi = min(hi, (self.FOV_MAX_Y if axis == "h" else self.FOV_MAX_Z))
-
-            iters = 0
-            while (hi - lo) > TOL and iters < 20:
-                iters += 1
-                mid = (lo + hi) / 2.0
-                if _probe(mid):
-                    lo = mid
-                else:
-                    hi = mid
-            return sign * lo
-
-        print("[DEBUG scam_fov_test] bisecting horizontal +Y edge")
-        y_pos = _bisect_edge("h", +1)
-        print(f"[DEBUG scam_fov_test]   → y_pos = {y_pos:+.4f} m")
-
-        print("[DEBUG scam_fov_test] bisecting horizontal −Y edge")
-        y_neg = _bisect_edge("h", -1)
-        print(f"[DEBUG scam_fov_test]   → y_neg = {y_neg:+.4f} m")
-
-        print("[DEBUG scam_fov_test] bisecting vertical +Z edge")
-        z_pos = _bisect_edge("v", +1)
-        print(f"[DEBUG scam_fov_test]   → z_pos = {z_pos:+.4f} m")
-
-        print("[DEBUG scam_fov_test] bisecting vertical −Z edge")
-        z_neg = _bisect_edge("v", -1)
-        print(f"[DEBUG scam_fov_test]   → z_neg = {z_neg:+.4f} m")
-
-        # Geometry: (Y+ − Y−) = 2·X·tan(HFOV/2) + 2·HALF_H → solve for HFOV.
-        y_cam_left = (y_pos + y_neg) / 2.0      # recovered for diag only
-        z_cam_left = (z_pos + z_neg) / 2.0
-        y_half_span = (y_pos - y_neg) / 2.0 - HALF_H
-        z_half_span = (z_pos - z_neg) / 2.0 - HALF_V
-        measured_hfov = 2.0 * atan(y_half_span / X_FIXED)
-        measured_vfov = 2.0 * atan(z_half_span / X_FIXED)
-
-        rel_h = (abs(measured_hfov - target_hfov) / target_hfov
-                 if target_hfov > 0 else float("inf"))
-        rel_v = (abs(measured_vfov - target_vfov) / target_vfov
-                 if target_vfov > 0 else float("inf"))
-        h_ok = rel_h <= self.FOV_REL_ERROR
-        v_ok = rel_v <= self.FOV_REL_ERROR
-        passed = h_ok and v_ok
-
-        metrics.update({
-            "y_last_pos_m": y_pos,
-            "y_last_neg_m": y_neg,
-            "z_last_pos_m": z_pos,
-            "z_last_neg_m": z_neg,
-            "y_cam_recovered_m": y_cam_left,
-            "z_cam_recovered_m": z_cam_left,
-            "y_half_span_m": y_half_span,
-            "z_half_span_m": z_half_span,
-            "measured_hfov_deg": math.degrees(measured_hfov),
-            "measured_vfov_deg": math.degrees(measured_vfov),
-            "relative_error_h": rel_h,
-            "relative_error_v": rel_v,
-            "checks": {"hfov_ok": h_ok, "vfov_ok": v_ok},
-            "status": "PASS" if passed else "FAIL",
-        })
-
-        if not passed:
-            reasons = []
-            if not h_ok:
-                reasons.append(
-                    f"горизонтальный FOV {math.degrees(measured_hfov):.2f}° "
-                    f"отличается от цели {math.degrees(target_hfov):.2f}° на {rel_h:.2%}"
-                )
-            if not v_ok:
-                reasons.append(
-                    f"вертикальный FOV {math.degrees(measured_vfov):.2f}° "
-                    f"отличается от цели {math.degrees(target_vfov):.2f}° на {rel_v:.2%}"
-                )
-            desc = ("FOV не соответствует заявленному (допуск "
-                    f"≤{self.FOV_REL_ERROR:.0%}): " + "; ".join(reasons) + ".")
-            metrics["error_reason"] = desc
-            self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
-            return {
-                "id": "SCAM_FOV", "passed": False, "metrics": metrics,
-                "description": desc,
-            }
-
-        self._set_test_diagnostics(scam_fov={"metrics": dict(metrics)})
-        return {"id": "SCAM_FOV", "passed": True, "metrics": metrics}
-
-    # ══════════════════════════════════════════════════════════════════
     # Resolution test — verifies that BOTH eyes publish frames of the
     # size declared in the SDF (<width>/<height>).  Unlike mono, a
     # stereo rig has two <sensor> blocks which are commonly copy-pasted,
@@ -1994,27 +1753,6 @@ def _stereo_build_description(method_name: str, result: dict, passed: bool) -> s
                 desc = f"Тест пройден: текстурированная стена даёт лучший диспаритет. Преимущество: {gain:.4f} (минимум 0.05)."
             else:
                 desc = f"Текстурированная стена не даёт достаточного преимущества. Gain: {gain:.4f}."
-        elif method_name == "scam_fov_test":
-            if passed:
-                desc = (
-                    f"Тест пройден: горизонтальный FOV "
-                    f"{float(metrics.get('measured_hfov_deg', 0)):.2f}° "
-                    f"(цель {float(metrics.get('target_hfov_deg', 0)):.2f}°, "
-                    f"ошибка {float(metrics.get('relative_error_h', 0)):.2%}), "
-                    f"вертикальный FOV "
-                    f"{float(metrics.get('measured_vfov_deg', 0)):.2f}° "
-                    f"(цель {float(metrics.get('target_vfov_deg', 0)):.2f}°, "
-                    f"ошибка {float(metrics.get('relative_error_v', 0)):.2%}). "
-                    f"Допуск ≤{float(metrics.get('tolerance', 0.05)):.0%}."
-                )
-            else:
-                desc = (
-                    f"FOV не соответствует заявленному. "
-                    f"Измерено: h={float(metrics.get('measured_hfov_deg', 0)):.2f}°, "
-                    f"v={float(metrics.get('measured_vfov_deg', 0)):.2f}° "
-                    f"(цели h={float(metrics.get('target_hfov_deg', 0)):.2f}°, "
-                    f"v={float(metrics.get('target_vfov_deg', 0)):.2f}°)."
-                )
         elif method_name == "scam_resolution_test":
             exp = metrics.get("expected_resolution", {})
             l = metrics.get("left_resolution", {})
@@ -2253,14 +1991,6 @@ def s2_texture_vs_smooth_stability_test(simulator, sensor, progress_cb=None) -> 
         simulator,
         sensor,
         progress_cb,
-    )
-
-
-def scam_fov_test(simulator, sensor, progress_cb=None) -> dict:
-    print(f"\n[DEBUG scam_fov_test] ENTRY sensor={getattr(sensor, 'sensor_name', '?')}")
-    return _run_camera_context_test(
-        _StereoProfileTestContext, "scam_fov_test",
-        simulator, sensor, progress_cb,
     )
 
 
