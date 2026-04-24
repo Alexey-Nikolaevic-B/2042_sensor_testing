@@ -490,6 +490,9 @@ TESTS: dict[str, callable] = {
     "mcam_clipping_test": c10_clipping_test,
     "mcam_fps_stability_test": c11_fps_stability_test,
     # Depth camera tests (dcam_ prefix)
+    "dcam_occlusion_test": dcam_occlusion_test,
+    "dcam_resolution_test": dcam_resolution_test,
+    "dcam_fov_test": dcam_fov_test,
     "dcam_depth_perception_test": depth_perception_test,
     "dcam_working_range_test": c5_working_range_test,
     "dcam_small_displacement_sensitivity_test": c6_small_displacement_sensitivity_test,

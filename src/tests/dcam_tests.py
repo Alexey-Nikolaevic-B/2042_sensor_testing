@@ -44,6 +44,9 @@ CLIP_FAR  = 10.0
 TEST_DISTANCES: Tuple[float, ...] = (1.0, 3.0, 5.0)
 MAX_ABS_ERROR_M = 0.5
 
+HALF_SIZE_H = 0.01
+HALF_SIZE_V = 0.01
+
 C3_TARGET_CUBE_NAME = "target_cube"
 C5_RANGE_CUBE_NAME  = "range_cube"
 C6_SHIFT_CUBE_NAME  = "shift_cube"
@@ -72,6 +75,11 @@ C6_MIN_CHANGED_RATIO    = 0.0
 C6_MONOTONIC_TOLERANCE  = 0.5
 C6_DELTA_TOLERANCE_M    = 0.02
 C6_ABS_ERROR_TOLERANCE  = 3.0
+
+DCAM_OCCLUSION_FRONT_CUBE = "front_cube"
+DCAM_OCCLUSION_BACK_CUBE = "back_cube"
+DCAM_OCCLUSION_CASES = {"occ_large": 0.25, "occ_small": 0.05}
+DCAM_OCCLUSION_MIN_PIXELS = 20
 
 DEPTH_ROI_HALF_WINDOW           = 2
 DEPTH_TOPIC_WARMUP_TIMEOUT_S    = 20.0
@@ -115,10 +123,12 @@ def _build_ctx(sensor) -> Dict[str, Any]:
 
     worlds_root = _camera_worlds_root()
     test_to_world = {
+        "dcam_occlusion_test":                 str(worlds_root / "camera_depth_occlusion.world"),
         "depth_perception_test":               str(worlds_root / "camera_depth_perception.world"),
         "c3_view_angle_stability_test":        str(worlds_root / "camera_c3_view_angle.world"),
         "c5_working_range_test":               str(worlds_root / "camera_c5_working_range.world"),
         "c6_small_displacement_sensitivity_test": str(worlds_root / "camera_c6_small_shifts.world"),
+        "dcam_fov_test":                        str(worlds_root / "camera_depth_fov.world"),
     }
     for test_name, wpath in test_to_world.items():
         exists = os.path.exists(wpath)
@@ -925,6 +935,45 @@ def _depth_build_description(method_name: str, result: dict, passed: bool) -> st
                     else "Датчик не различает малые перемещения. "
                          "Минимальный обнаруженный шаг: не определён."
                 )
+        elif method_name == "dcam_fov_test":
+            h = float(metrics.get("measured_hfov_rad", 0))
+            v = float(metrics.get("measured_vfov_rad", 0))
+            th = float(metrics.get("target_hfov_rad", 0))
+            tv = float(metrics.get("target_vfov_rad", 0))
+            if passed:
+                desc = (
+                    f"Тест пройден: горизонтальный FOV {math.degrees(h):.2f}° "
+                    f"(целевой {math.degrees(th):.2f}°), "
+                    f"вертикальный FOV {math.degrees(v):.2f}° "
+                    f"(целевой {math.degrees(tv):.2f}°)."
+                )
+            else:
+                desc = "Измеренный FOV не соответствует целевому."
+        elif method_name == "dcam_resolution_test":
+            exp = metrics.get("expected_resolution", {})
+            act = metrics.get("actual_resolution", {})
+            if passed:
+                desc = (
+                    f"Тест пройден: разрешение {act.get('width')}x{act.get('height')} "
+                    f"совпадает с ожидаемым {exp.get('width')}x{exp.get('height')}."
+                )
+            else:
+                desc = (
+                    f"Несовпадение разрешения: ожидалось {exp.get('width')}x{exp.get('height')}, "
+                    f"получено {act.get('width')}x{act.get('height')}."
+                )
+        elif method_name == "dcam_occlusion_test":
+            large = metrics.get("back_pixels", {}).get("occ_large", 0)
+            small = metrics.get("back_pixels", {}).get("occ_small", 0)
+            if passed:
+                desc = (
+                    f"Окклюзия работает корректно: пикселей заднего куба при большом смещении "
+                    f"({large}) больше, чем при малом ({small})."
+                )
+            else:
+                desc = (
+                    f"Ошибка окклюзии: large={large}, small={small}."
+                )        
         else:
             return None
     except Exception:
@@ -1614,6 +1663,308 @@ def _c6_impl(ctx: Dict[str, Any], simulator) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+#  FOV test
+# ---------------------------------------------------------------------------
+
+def _dcam_fov_impl(ctx: Dict[str, Any], simulator) -> Dict[str, Any]:
+    """Быстрое измерение FOV камеры глубины бинарным поиском (без цвета)."""
+    logger.info("=" * 60)
+    logger.info("  DCAM FOV: измерение горизонтального и вертикального FOV")
+    logger.info("=" * 60)
+
+    _open_test_scene(ctx, simulator, "dcam_fov_test")
+
+    # Проверка появления панелей
+    for name in ("fov_cube_h", "fov_cube_v"):
+        if not simulator.wait_for_model_spawn(name, timeout=20):
+            raise RuntimeError(f"Модель не появилась: {name}")
+
+    clip_far = float(ctx["clip_far"])
+
+    # Параметры теста
+    HALF_SIZE_H = 0.01   # половина размера панели по Y
+    HALF_SIZE_V = 0.01   # половина размера панели по Z
+    X_FIXED = 2.0
+    MAX_Y = 4.0
+    MAX_Z = 4.0
+    TOLERANCE = 0.002    # 2 мм
+    REL_ERROR_THRESHOLD = 0.05
+
+    # Целевые FOV
+    target_hfov = float(ctx["horizontal_fov"])
+    img_w = ctx["image_width"]
+    img_h = ctx["image_height"]
+    target_vfov = 2.0 * math.atan(math.tan(target_hfov / 2.0) * (img_h / img_w))
+
+    logger.info(f"D-FOV: целевой hFOV={math.degrees(target_hfov):.2f}°, vFOV={math.degrees(target_vfov):.2f}°")
+
+    # Прогрев
+    last_stamp = None
+    msg = _wait_depth(ctx, timeout=5.0)
+    last_stamp = _msg_stamp_s(msg)
+    logger.info("D-FOV: прогрев ОК")
+
+    # Функция захвата и проверки видимости обеих панелей одновременно
+    def _capture_and_check(y: float, z: float, settle_s: float = 0.4) -> tuple:
+        nonlocal last_stamp
+        _move_and_settle(simulator, "fov_cube_h", x=X_FIXED, y=y, z=0.0, settle_s=settle_s)
+        _move_and_settle(simulator, "fov_cube_v", x=X_FIXED, y=0.0, z=z, settle_s=settle_s)
+        msg = _wait_depth_after(ctx, prev_stamp_s=last_stamp, timeout=2.0,
+                                stage=f"fov_y{y:.4f}_z{z:.4f}")
+        last_stamp = _msg_stamp_s(msg)
+        depth = _depth_msg_to_meters(msg)
+
+        # Видимость: есть ли хоть один пиксель с глубиной < far_clip - 0.1
+        far_thresh = clip_far - 0.1
+        valid = depth[(depth > 0) & np.isfinite(depth) & (depth < far_thresh)]
+        # Обе панели видны, если есть хоть одна точка с глубиной меньше фона
+        visible = len(valid) > 0
+        return visible, visible
+
+    # Начальная проверка в центре
+    init_vis, _ = _capture_and_check(0.0, 0.0, settle_s=1.0)
+    if not init_vis:
+        raise RuntimeError("Панели не видны в центре кадра")
+    logger.info("D-FOV: панели видны в центре")
+
+    # Ожидаемые координаты перехода
+    y_edge_target = X_FIXED * math.tan(target_hfov / 2.0)
+    z_edge_target = X_FIXED * math.tan(target_vfov / 2.0)
+    y_target = y_edge_target + HALF_SIZE_H
+    z_target = z_edge_target + HALF_SIZE_V
+
+    # 3‑точечная проверка
+    offsets = [-0.1, 0.0, 0.1]
+    points_h = [y_target + off for off in offsets]
+    points_v = [z_target + off for off in offsets]
+    vis = []
+    for i in range(len(offsets)):
+        v, _ = _capture_and_check(points_h[i], points_v[i],
+                                  settle_s=0.8 if i == 0 else 0.5)
+        vis.append(v)
+
+    lo_h, hi_h = 0.0, MAX_Y
+    lo_v, hi_v = 0.0, MAX_Z
+    last_y, last_z = None, None
+    active_h, active_v = True, True
+
+    # Разбор 3‑точечных результатов
+    if vis[0] and not vis[-1]:
+        for off, v in zip(offsets, vis):
+            if v: last_y = y_target + off
+        active_h = False
+        lo_h = hi_h = last_y
+    elif not vis[0]:
+        lo_h, hi_h = 0.0, points_h[0]
+    elif vis[-1]:
+        lo_h, hi_h = points_h[-1], MAX_Y
+
+    if vis[0] and not vis[-1]:
+        for off, v in zip(offsets, vis):
+            if v: last_z = z_target + off
+        active_v = False
+        lo_v = hi_v = last_z
+    elif not vis[0]:
+        lo_v, hi_v = 0.0, points_v[0]
+    elif vis[-1]:
+        lo_v, hi_v = points_v[-1], MAX_Z
+
+    # Бинарный поиск
+    iteration = 0
+    while active_h or active_v:
+        iteration += 1
+        mid_y = (lo_h + hi_h) / 2 if active_h else (last_y or lo_h)
+        mid_z = (lo_v + hi_v) / 2 if active_v else (last_z or lo_v)
+        settle = 1.0 if iteration == 1 else 0.4
+        v, _ = _capture_and_check(mid_y, mid_z, settle_s=settle)
+
+        if active_h:
+            if v: lo_h = mid_y
+            else: hi_h = mid_y
+            if hi_h - lo_h <= TOLERANCE:
+                active_h = False
+                last_y = lo_h
+
+        if active_v:
+            if v: lo_v = mid_z
+            else: hi_v = mid_z
+            if hi_v - lo_v <= TOLERANCE:
+                active_v = False
+                last_z = lo_v
+
+    last_y = last_y or lo_h
+    last_z = last_z or lo_v
+    logger.info(f"D-FOV: последняя видимая позиция: y={last_y:.4f} м, z={last_z:.4f} м")
+
+    # Вычисление FOV
+    y_edge = last_y - HALF_SIZE_H
+    z_edge = last_z - HALF_SIZE_V
+    measured_hfov = 2.0 * math.atan(y_edge / X_FIXED)
+    measured_vfov = 2.0 * math.atan(z_edge / X_FIXED)
+
+    rel_h = abs(measured_hfov - target_hfov) / target_hfov if target_hfov else 0.0
+    rel_v = abs(measured_vfov - target_vfov) / target_vfov if target_vfov else 0.0
+
+    h_ok = rel_h <= REL_ERROR_THRESHOLD
+    v_ok = rel_v <= REL_ERROR_THRESHOLD
+    passed = h_ok and v_ok
+
+    metrics = {
+        "target_hfov_rad": target_hfov,
+        "target_vfov_rad": target_vfov,
+        "measured_hfov_rad": measured_hfov,
+        "measured_vfov_rad": measured_vfov,
+        "rel_error_h": rel_h,
+        "rel_error_v": rel_v,
+        "y_last_visible_m": last_y,
+        "z_last_visible_m": last_z,
+        "checks": {"hfov_ok": h_ok, "vfov_ok": v_ok},
+    }
+
+    if not passed:
+        raise AssertionError(
+            f"D-FOV не пройден: hFOV error={rel_h:.2%}, vFOV error={rel_v:.2%}"
+        )
+
+    return {"id": "DCAM_FOV", "passed": True, "metrics": metrics}
+
+# ---------------------------------------------------------------------------
+#  Dcam test
+# ---------------------------------------------------------------------------
+def _dcam_resolution_impl(ctx: Dict[str, Any], simulator) -> Dict[str, Any]:
+    """Проверка фактического разрешения глубинного кадра."""
+    logger.info("=" * 60)
+    logger.info("  DCAM Resolution: проверка разрешения глубины")
+    logger.info("=" * 60)
+
+    # Используем любую сцену с глубинным сенсором — например, depth_perception
+    _open_test_scene(ctx, simulator, "depth_perception_test")
+
+    expected_w = int(ctx["image_width"])
+    expected_h = int(ctx["image_height"])
+    depth_topic = ctx["resolved_depth_topic"] or ctx["DEPTH_TOPIC"]
+
+    logger.info(f"Ожидаемое разрешение: {expected_w}x{expected_h}")
+    logger.info(f"Топик глубины: {depth_topic}")
+
+    # Получаем один глубинный кадр
+    try:
+        msg = _wait_depth(ctx, timeout=10.0)
+    except Exception as e:
+        raise RuntimeError(f"Не удалось получить глубинный кадр: {e}")
+
+    actual_w = int(msg.width)
+    actual_h = int(msg.height)
+    encoding = str(msg.encoding or "")
+
+    logger.info(f"Фактическое разрешение: {actual_w}x{actual_h}, кодировка: {encoding}")
+
+    # Проверка валидности
+    if actual_w <= 0 or actual_h <= 0:
+        raise RuntimeError(f"Некорректные размеры кадра: {actual_w}x{actual_h}")
+
+    # Сравнение
+    matches = (actual_w == expected_w) and (actual_h == expected_h)
+    metrics = {
+        "expected_resolution": {"width": expected_w, "height": expected_h},
+        "actual_resolution": {"width": actual_w, "height": actual_h},
+        "encoding": encoding,
+        "depth_topic": depth_topic,
+        "checks": {"resolution_matches": matches},
+    }
+
+    if not matches:
+        raise AssertionError(
+            f"Разрешение не совпадает: ожидалось {expected_w}x{expected_h}, "
+            f"получено {actual_w}x{actual_h}"
+        )
+
+    return {"id": "DCAM_RES", "passed": True, "metrics": metrics}
+
+# ---------------------------------------------------------------------------
+#  Occlusion test
+# ---------------------------------------------------------------------------
+def _dcam_occlusion_impl(ctx: Dict[str, Any], simulator) -> Dict[str, Any]:
+    """Проверка окклюзии на глубинной камере без цвета."""
+    logger.info("=" * 60)
+    logger.info("  DCAM Occlusion: проверка перекрытия объектов")
+    logger.info("=" * 60)
+
+    _open_test_scene(ctx, simulator, "dcam_occlusion_test")
+
+    front_name = DCAM_OCCLUSION_FRONT_CUBE
+    back_name = DCAM_OCCLUSION_BACK_CUBE
+    for name in (front_name, back_name):
+        if not simulator.wait_for_model_spawn(name, timeout=20):
+            raise RuntimeError(f"Модель не появилась: {name}")
+
+    # Параметры сцены
+    x_back = 3.6
+    x_front = 3.0
+    cube_z = 0.25
+    half_size = 0.25                # полуразмер куба (0.5 / 2)
+    depth_tolerance = half_size     # допустимое отклонение глубины для идентификации заднего куба
+    min_pixels = DCAM_OCCLUSION_MIN_PIXELS
+
+    clip_far = float(ctx["clip_far"])
+
+    def _count_back_pixels(depth_map: np.ndarray) -> int:
+        """Считает пиксели, глубина которых лежит в интервале заднего куба."""
+        target = x_back
+        lo = target - depth_tolerance
+        hi = target + depth_tolerance
+        # исключаем фон (far_clip) и невалидные значения
+        valid = depth_map[(depth_map > 0) & np.isfinite(depth_map) & (depth_map < clip_far)]
+        in_back = valid[(valid >= lo) & (valid <= hi)]
+        return in_back.size
+
+    # Прогрев
+    last_stamp = None
+    msg = _wait_depth(ctx, timeout=5.0)
+    last_stamp = _msg_stamp_s(msg)
+    logger.info("DCAM Occlusion: прогрев ОК")
+
+    results = {}
+    for case_name, y_offset in DCAM_OCCLUSION_CASES.items():
+        logger.info(f"Случай '{case_name}': y = {y_offset:.2f} м")
+        # Перемещаем передний куб
+        _move_and_settle(simulator, front_name, x=x_front, y=y_offset, z=cube_z, settle_s=0.5)
+        # Захватываем глубину
+        msg = _wait_depth_after(ctx, prev_stamp_s=last_stamp, timeout=2.0,
+                                stage=f"occlusion_{case_name}")
+        last_stamp = _msg_stamp_s(msg)
+        depth_map = _depth_msg_to_meters(msg)
+        count = _count_back_pixels(depth_map)
+        results[case_name] = count
+        logger.info(f"   пикселей заднего куба: {count}")
+
+    count_large = results.get("occ_large", 0)
+    count_small = results.get("occ_small", 0)
+
+    # Проверки
+    relation_ok = count_large > count_small
+    threshold_ok = count_large > min_pixels and count_small > min_pixels
+    passed = relation_ok and threshold_ok
+
+    metrics = {
+        "back_pixels": results,
+        "min_pixels": min_pixels,
+        "checks": {
+            "relation_ok": relation_ok,
+            "threshold_ok": threshold_ok,
+        }
+    }
+
+    if not passed:
+        raise AssertionError(
+            f"Окклюзия не пройдена: large={count_large}, small={count_small}, "
+            f"relation_ok={relation_ok}, threshold_ok={threshold_ok}"
+        )
+
+    return {"id": "DCAM_OCCLUSION", "passed": True, "metrics": metrics}
+
+
+# ---------------------------------------------------------------------------
 #  Публичные функции-точки входа
 # ---------------------------------------------------------------------------
 
@@ -1622,21 +1973,33 @@ def depth_perception_test(simulator, sensor, progress_cb=None) -> dict:
     return _run_camera_test(_depth_perception_impl, "depth_perception_test",
                             simulator, sensor, progress_cb)
 
-
 def c3_view_angle_stability_test(simulator, sensor, progress_cb=None) -> dict:
     logger.info(f"c3_view_angle_stability_test: сенсор={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_test(_c3_impl, "c3_view_angle_stability_test",
                             simulator, sensor, progress_cb)
-
 
 def c5_working_range_test(simulator, sensor, progress_cb=None) -> dict:
     logger.info(f"c5_working_range_test: сенсор={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_test(_c5_impl, "c5_working_range_test",
                             simulator, sensor, progress_cb)
 
-
 def c6_small_displacement_sensitivity_test(simulator, sensor, progress_cb=None) -> dict:
     logger.info(f"c6_small_displacement_sensitivity_test: "
                 f"сенсор={getattr(sensor, 'sensor_name', '?')}")
     return _run_camera_test(_c6_impl, "c6_small_displacement_sensitivity_test",
+                            simulator, sensor, progress_cb)
+
+def dcam_fov_test(simulator, sensor, progress_cb=None) -> dict:
+    logger.info(f"dcam_fov_test: сенсор={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_test(_dcam_fov_impl, "dcam_fov_test",
+                            simulator, sensor, progress_cb)
+
+def dcam_resolution_test(simulator, sensor, progress_cb=None) -> dict:
+    logger.info(f"dcam_resolution_test: сенсор={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_test(_dcam_resolution_impl, "dcam_resolution_test",
+                            simulator, sensor, progress_cb)
+
+def dcam_occlusion_test(simulator, sensor, progress_cb=None) -> dict:
+    logger.info(f"dcam_occlusion_test: сенсор={getattr(sensor, 'sensor_name', '?')}")
+    return _run_camera_test(_dcam_occlusion_impl, "dcam_occlusion_test",
                             simulator, sensor, progress_cb)

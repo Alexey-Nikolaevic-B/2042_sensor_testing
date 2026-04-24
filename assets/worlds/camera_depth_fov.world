@@ -1,0 +1,47 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="camera_depth_fov">
+    <scene>
+      <ambient>0.7 0.7 0.7 1</ambient>
+      <background>0.5 0.5 0.5 1</background>
+    </scene>
+
+    <!-- Горизонтальный FOV: вертикальная панель, двигается по Y -->
+    <model name="fov_cube_h">
+      <pose>2.0 0.0 0.0 0 0 0</pose>
+      <static>false</static>
+      <link name="link">
+        <gravity>false</gravity>
+        <collision name="collision">
+          <geometry><box><size>0.02 0.02 1.0</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.02 0.02 1.0</size></box></geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+            <diffuse>1 0 0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Вертикальный FOV: горизонтальная панель, двигается по Z -->
+    <model name="fov_cube_v">
+      <pose>2.0 0.0 0.0 0 0 0</pose>
+      <static>false</static>
+      <link name="link">
+        <gravity>false</gravity>
+        <collision name="collision">
+          <geometry><box><size>0.02 1.0 0.02</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.02 1.0 0.02</size></box></geometry>
+          <material>
+            <ambient>0 0 1 1</ambient>
+            <diffuse>0 0 1 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
