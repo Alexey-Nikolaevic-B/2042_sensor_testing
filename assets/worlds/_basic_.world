@@ -45,23 +45,5 @@
       </link>
     </model>
 
-    <!-- A simple reference cube 1 m in front of sensor origin -->
-    <model name="reference_cube">
-      <static>true</static>
-      <pose>1 0 0.5 0 0 0</pose>
-      <link name="link">
-        <collision name="collision">
-          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
-        </collision>
-        <visual name="visual">
-          <geometry><box><size>0.2 0.2 0.2</size></box></geometry>
-          <material>
-            <ambient>0.8 0.2 0.2 1</ambient>
-            <diffuse>0.8 0.2 0.2 1</diffuse>
-          </material>
-        </visual>
-      </link>
-    </model>
-
   </world>
 </sdf>

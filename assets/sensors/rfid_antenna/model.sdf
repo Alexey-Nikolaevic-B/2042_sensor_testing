@@ -1,0 +1,96 @@
+<?xml version="1.0"?>
+<sdf version="1.6">
+  <model name="rfid_antenna">
+    <pose>0 0 0 0 0 0</pose>
+    <static>true</static>
+
+    <link name="base_link_sim">
+
+      <sensor name="rfid_tags_dummy" type="ray">
+        <always_on>true</always_on>
+        <update_rate>1</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.01</min>
+            <max>50</max>
+          </range>
+        </ray>
+
+        <plugin name="rfid_tags" filename="libRFID_tag_plugin.so">
+          <tag_name>rfid_tag</tag_name>
+          <parent_frame>base_link_sim</parent_frame>
+          <tags_per_fix>1</tags_per_fix>
+
+          <map_path>package://rfid_tag_plugin/map_layouts/map.txt</map_path>
+          <fix_sdf_path>package://rfid_tag_plugin/../Models/normal_size_fixture/model.sdf</fix_sdf_path>
+          <tag_sdf_path>package://rfid_tag_plugin/../Models/RFID_1/model.sdf</tag_sdf_path>
+
+          <randomize>false</randomize>
+
+          <dynamic_tf>true</dynamic_tf>
+          <tf_rate>20</tf_rate>
+        </plugin>
+      </sensor>
+
+      <sensor name="rfid_antenna_dummy" type="ray">
+        <always_on>true</always_on>
+        <update_rate>20</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.01</min>
+            <max>50</max>
+          </range>
+        </ray>
+
+        <plugin name="rfid_antenna" filename="libRFID_antenna_plugin.so">
+          <parent_frame>base_link_sim</parent_frame>
+          <antenna_xyz>0.0 0.0 0.0</antenna_xyz>
+
+          <antenna_name>antenna_</antenna_name>
+          <antenna_id>1.0</antenna_id>
+
+          <tag_name>rfid_tag</tag_name>
+
+          <detected_topic>/detected_tags</detected_topic>
+
+          <event_only>false</event_only>
+
+          <deterministic>true</deterministic>
+          <deterministic_threshold>0.5</deterministic_threshold>
+
+          <spawn_visual_markers>false</spawn_visual_markers>
+
+          <!-- Параметры зоны видимости -->
+          <azimuth_beamwidth>1.0</azimuth_beamwidth>
+          <elevation_beamwidth>1.0</elevation_beamwidth>
+          <rzero>10.0</rzero>
+
+          <tag_yellow_sdf_path>package://rfid_tag_plugin/../Models/RFID_3/model.sdf</tag_yellow_sdf_path>
+          <tag_red_sdf_path>package://rfid_tag_plugin/../Models/RFID_2/model.sdf</tag_red_sdf_path>
+          <tag_blue_sdf_path>package://rfid_tag_plugin/../Models/RFID_5/model.sdf</tag_blue_sdf_path>
+          <tag_purple_sdf_path>package://rfid_tag_plugin/../Models/RFID_4/model.sdf</tag_purple_sdf_path>
+
+          <max_tags>50.0</max_tags>
+          <stop_after_misses>5.0</stop_after_misses>
+        </plugin>
+      </sensor>
+
+    </link>
+  </model>
+</sdf>
