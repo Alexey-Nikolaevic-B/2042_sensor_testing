@@ -217,7 +217,8 @@ class ColCapture(QWidget):
                     f"Тест выполняется в фоновом режиме без вывода кадров."
                 )
             elif self._last_sensor_data:
-                self._show_static_image(self._last_sensor_data.get("image_path", ""))
+                pass
+                # self._show_static_image(self._last_sensor_data.get("image_path", ""))
             else:
                 self._clear_display()
 
